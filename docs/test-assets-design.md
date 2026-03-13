@@ -82,7 +82,7 @@ AI 生成或 AI 修复产生的候选测试资源。
 testAssets:
   sharedRoot: /absolute/or/relative/path
   sharedRootMode: auto
-  generatedRoot: .ai-regression-workbench/data/generated-tests
+  generatedRoot: ./.ai-regression-workbench/data/generated-tests
   includeSharedInRuns: true
   includeGeneratedInRuns: false
   requireGitForSharedRoot: false
@@ -200,13 +200,18 @@ TestCaseRepository / AssetIndex
 
 补充规则：
 
+- 第一阶段 `RunRequest.selector` 仅支持单一主选择器（`suite | scenario | tag | testcase`）
+- 若同时传入多个主选择器，视为参数错误并阻止启动 run
+- 若未传入主选择器，使用配置默认值（建议默认 `suite=smoke`）
 - 若 `includeSharedInRuns=true` 且 `sharedRootStatus=available`，则加载共享测试集
 - 若 `sharedRootStatus=missing`，则跳过共享测试集，不报致命错误
 - 若 `sharedRootStatus=invalid`，则展示告警，并由用户决定是否继续
+- 若共享测试集加载失败但候选测试仍可执行，记录 degraded 并继续
+- 若可执行 testcase 集为空且无可继续路径，终止 run 并生成执行报告
 
 ## 8. 设计约束
 
 - 正式共享测试和候选测试必须分开
 - 运行产物不得混入共享测试目录
 - 每个测试用例必须能提取 `scenarioId / testcaseId`
-- UI 和 CLI 需要展示共享测试目录的解析结果与当前状态
+- UI 必须展示共享测试目录的解析结果与当前状态（CLI 为后续可选扩展）

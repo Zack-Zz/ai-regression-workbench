@@ -25,7 +25,7 @@ CLI 命令名建议统一为：
 
 第一阶段推荐形态：
 
-- `CLI + 本地 Web UI`
+- `本地 Web UI + Local App Process（CLI 仅启动入口）`
 
 不建议第一阶段直接做桌面壳。
 
@@ -33,19 +33,18 @@ CLI 命令名建议统一为：
 
 ### 2.1 第一阶段
 
-以 Node.js CLI 形式交付：
+以“HTML Web UI + Node.js 本地服务”形式交付，CLI 仅作为启动壳：
 
 ```bash
 zarb
 zarb init
 zarb doctor
-zarb run start --suite smoke
 zarb ui
 ```
 
 组成包括：
 
-- CLI 命令入口
+- CLI 启动入口
 - 本地 orchestrator
 - 本地 API / UI 服务
 - 本地 SQLite
@@ -118,12 +117,15 @@ zarb
 <repo>/
   .ai-regression-workbench/
     config.local.yaml
-    sqlite/
-    artifacts/
-    diagnostics/
-    analysis/
-    code-tasks/
-    commits/
+    data/
+      sqlite/
+      runs/
+      artifacts/
+      diagnostics/
+      analysis/
+      code-tasks/
+      commits/
+      generated-tests/
 ```
 
 适合：
@@ -136,13 +138,16 @@ zarb
 
 ```text
 ~/.ai-regression-workbench/
-  config/
-  sqlite/
-  artifacts/
-  diagnostics/
-  analysis/
-  code-tasks/
-  commits/
+  config.local.yaml
+  data/
+    sqlite/
+    runs/
+    artifacts/
+    diagnostics/
+    analysis/
+    code-tasks/
+    commits/
+    generated-tests/
 ```
 
 适合：
@@ -166,8 +171,8 @@ workspace:
 说明：
 
 - `targetProjectPath` 是 Playwright 执行、code agent 搜索、修改、verify 的基础目录
-- 工具自身的 SQLite、artifacts、analysis 仍保存在工具目录
-- 如果目标项目目录变化，用户应能通过 CLI 或 UI 更新配置
+- 工具自身的 SQLite、artifacts、analysis 仍保存在工具目录的 `data/` 子目录
+- 如果目标项目目录变化，当前通过 Web UI 设置页更新配置（CLI 预留后续扩展）
 
 ## 5.4 共享测试集目录配置
 
@@ -240,12 +245,7 @@ zarb
 - app server 启动
 - UI 打开
 
-同时建议提供：
-
-```bash
-zarb workspace show
-zarb workspace set --project-path /path/to/project
-```
+当前阶段业务操作和查看统一放在 Web UI，不再提供 CLI 业务命令入口。
 
 ## 8. 升级策略
 
@@ -270,7 +270,7 @@ npm install -g ai-regression-workbench@latest
 - code agent CLI
 - trace/log provider 配置
 
-第一阶段先稳定 `CLI + Web UI` 更合理。
+第一阶段先稳定 `Web UI 主操作面 + CLI 最小启动壳` 更合理。
 
 ## 10. 一键启动体验
 

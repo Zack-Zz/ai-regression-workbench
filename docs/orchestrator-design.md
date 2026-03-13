@@ -10,6 +10,8 @@
 - 驱动测试执行、诊断查询、AI 分析
 - 创建 `CodeTask`
 - 协调 pause、resume、cancel、retry
+- 处理接口错误分级（degraded / blocking）
+- 汇总流程/点击/接口统计并生成执行报告
 - 写入 `run_events`
 
 ## 3. 状态推进
@@ -52,8 +54,12 @@ export interface Orchestrator {
   resumeRun(runId: string): Promise<void>;
   pauseRun(runId: string): Promise<void>;
   cancelRun(runId: string): Promise<void>;
+  retryAnalysis(runId: string, testcaseId: string): Promise<void>;
   approveCodeTask(taskId: string): Promise<void>;
+  rejectCodeTask(taskId: string): Promise<void>;
   executeCodeTask(taskId: string): Promise<void>;
+  retryCodeTask(taskId: string): Promise<void>;
+  cancelCodeTask(taskId: string): Promise<void>;
 }
 ```
 
@@ -62,3 +68,6 @@ export interface Orchestrator {
 - 状态推进必须持久化
 - 所有状态切换必须写事件
 - 外部依赖失败应降级，不直接污染原始执行结果
+- 可恢复接口错误需记录 `RUN_STEP_DEGRADED` 并继续后续可执行步骤
+- 仅在 blocking 错误（如 runner 无法启动、存储不可写）时终止 run
+- Run 进入终态时必须生成执行报告并写 `EXECUTION_REPORT_CREATED`

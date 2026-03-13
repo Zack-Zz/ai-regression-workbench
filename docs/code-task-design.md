@@ -26,12 +26,19 @@ VERIFYING
   ->
 SUCCEEDED
   ->
-REVIEW
+Review Action（accept / reject / retry）
   ->
 COMMIT_PENDING
   ->
 COMMITTED
 ```
+
+说明：
+
+- `REVIEW` 是动作阶段，不是 `CodeTaskStatus` 枚举值
+- `CodeTaskStatus` 与总设计保持一致：
+  `DRAFT -> PENDING_APPROVAL -> APPROVED -> RUNNING -> VERIFYING -> SUCCEEDED -> COMMIT_PENDING -> COMMITTED`
+  异常状态：`FAILED / REJECTED / CANCELLED`
 
 ## 3. 关键对象
 
@@ -78,7 +85,7 @@ type AutomationLevel = 'headless' | 'interactive';
 
 - `packages/test-assets/**`
 - `playwright/**`
-- `data/generated-tests/**`
+- `.ai-regression-workbench/data/generated-tests/**`
 
 默认禁止修改业务代码目录。
 

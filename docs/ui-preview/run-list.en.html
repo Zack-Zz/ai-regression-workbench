@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UI Preview · Run List</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body data-page="runs">
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark"></div>
+          <div>
+            <div class="brand-title">AI Regression Workbench</div>
+            <div class="brand-sub">Run List</div>
+          </div>
+        </div>
+        <div data-lang-switch></div>
+      </div>
+      <nav class="nav" data-nav></nav>
+    </header>
+
+    <main class="content">
+      <section class="hero">
+        <h1>Run List</h1>
+        <p>Shows runId, scope, start time, status, metrics, and current blocking point. Use it to quickly locate failed runs.</p>
+      </section>
+
+      <section class="card" style="margin-top:16px;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run ID</th>
+                <th>Scope</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Totals</th>
+                <th>Current Stage</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">run_20260313_001</td>
+                <td>scenario: checkout_happy_path</td>
+                <td><span class="chip warn">AWAITING_REVIEW</span></td>
+                <td>2026-03-13 20:11:03</td>
+                <td>1 / 0 / 1 / 0</td>
+                <td>Review pending</td>
+              </tr>
+              <tr>
+                <td class="mono">run_20260313_000</td>
+                <td>tag: api-critical</td>
+                <td><span class="chip warn">AWAITING_CODE_ACTION</span></td>
+                <td>2026-03-13 18:42:10</td>
+                <td>5 / 4 / 1 / 0</td>
+                <td>CodeTask PENDING_APPROVAL</td>
+              </tr>
+              <tr>
+                <td class="mono">run_20260312_007</td>
+                <td>suite: smoke</td>
+                <td><span class="chip ok">COMPLETED</span></td>
+                <td>2026-03-12 17:33:49</td>
+                <td>26 / 26 / 0 / 0</td>
+                <td>Done</td>
+              </tr>
+              <tr>
+                <td class="mono">run_20260311_019</td>
+                <td>testcase: TC_ORDER_001</td>
+                <td><span class="chip danger">FAILED</span></td>
+                <td>2026-03-11 09:05:11</td>
+                <td>1 / 0 / 1 / 0</td>
+                <td>Runner startup blocked</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:10px;">Totals format: total / passed / failed / skipped</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      ai-regression-workbench · UI Preview · <span data-year></span>
+    </footer>
+  </div>
+  <script src="assets/shared.js"></script>
+</body>
+</html>

@@ -71,14 +71,17 @@ packages/
   event-store/
   logger/
   test-assets/
-data/
-  sqlite/
-  runs/
-  artifacts/
-  diagnostics/
-  analysis/
-  code-tasks/
-  commits/
+.ai-regression-workbench/
+  config.local.yaml
+  data/
+    sqlite/
+    runs/
+    artifacts/
+    diagnostics/
+    analysis/
+    code-tasks/
+    commits/
+    generated-tests/
 docs/
 design.md
 ```
@@ -107,7 +110,9 @@ Typical correlation sources:
   [local-ui](./docs/local-ui-design.md),
   [packaging](./docs/packaging-design.md),
   [test-assets](./docs/test-assets-design.md),
-  [observability](./docs/observability-design.md)
+  [observability](./docs/observability-design.md),
+  [app-services](./docs/app-services-design.md),
+  [storage-mapping](./docs/storage-mapping-design.md)
 - External references:
   [Codex CLI](https://developers.openai.com/codex/cli),
   [Kiro CLI](https://kiro.dev/docs/cli/)

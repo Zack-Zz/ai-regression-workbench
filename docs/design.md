@@ -20,6 +20,7 @@
 - [Test Assets 详细设计](./test-assets-design.md)
 - [外部观测集成设计](./observability-design.md)
 - [应用服务与访问方式设计](./app-services-design.md)
+- [存储映射设计（字段级）](./storage-mapping-design.md)
 
 外部参考文档：
 
@@ -87,7 +88,7 @@
 
 ### 3.4 Observable by Default
 
-所有关键步骤都要落事件、落状态、落产物，CLI 与 UI 基于同一套状态与事件展示。
+所有关键步骤都要落事件、落状态、落产物，当前由 UI 基于同一套状态与事件展示，CLI 保留扩展入口。
 
 ### 3.5 Platform-Ready
 
@@ -139,7 +140,7 @@ Playwright 执行
 
 核心模块包括：
 
-1. CLI：命令入口与控制面
+1. CLI：本地启动/初始化/诊断入口（不承载当前业务操作流）
 2. Orchestrator：状态推进与任务编排
 3. Test Runner：Playwright 执行器
 4. Trace Bridge：链路查询桥接
@@ -147,9 +148,10 @@ Playwright 执行
 6. AI Engine：失败分析与修复任务生成
 7. Code Agent Adapter：受控代码修改执行层
 8. Review Manager：review 与提交控制
-9. Local Report UI：本地可视化界面
+9. Local Web UI：本地可视化界面
 10. Storage：SQLite 与本地文件存储
 11. Event Store：事件记录与时间线能力
+12. Settings Manager：个人配置校验、持久化与即时生效
 
 模块细节跳转：
 
@@ -163,10 +165,95 @@ Playwright 执行
 - 外部观测旁路集成见 [observability-design.md](./observability-design.md)
 - 应用服务边界见 [app-services-design.md](./app-services-design.md)
 
+架构图（Mermaid）：
+
+```mermaid
+flowchart TB
+  U[User]
+
+  subgraph Entry["入口层"]
+    CLI["CLI (bootstrap/init/doctor/ui)"]
+    UI["Web UI (HTML Workbench)"]
+  end
+
+  subgraph App["Local App Process / 应用服务层"]
+    BS["BootstrapService"]
+    WS["WorkspaceService"]
+    SS["SettingsService"]
+    RS["RunService"]
+    DS["DiagnosticsService"]
+    CTS["CodeTaskService"]
+    RVS["ReviewService"]
+    CMS["CommitService"]
+  end
+
+  subgraph Core["编排与领域层"]
+    ORCH["Orchestrator (Run/CodeTask 状态机)"]
+    RM["Review Manager"]
+    EV["Event Store"]
+    REPO["Repository"]
+  end
+
+  subgraph Exec["执行与诊断层"]
+    TR["Test Runner (Playwright)"]
+    TB["Trace Bridge"]
+    LB["Log Bridge"]
+    AI["AI Engine"]
+    CA["Code Agent Adapter (Codex/Kiro)"]
+    OCA["ObservedCodeAgent (可选)"]
+  end
+
+  subgraph ToolData["Tool Workspace 数据层"]
+    DB["SQLite"]
+    FS["Artifacts/Diagnostics/Analysis/CodeTasks 文件存储"]
+  end
+
+  subgraph Target["Target Workspace"]
+    TP["被测/被改项目代码"]
+    TG["Git Repo"]
+  end
+
+  subgraph External["外部系统"]
+    TPV["Trace Provider (Jaeger等)"]
+    LPV["Log Provider (Loki等)"]
+    OBS["可选观测 (zai-xray)"]
+  end
+
+  U --> UI
+  U -.可选启动入口.-> CLI
+
+  CLI -->|启动/诊断| App
+  UI -->|业务操作 HTTP API| App
+
+  App --> ORCH
+  App --> RM
+  App --> EV
+  App --> REPO
+
+  ORCH --> TR
+  ORCH --> TB
+  ORCH --> LB
+  ORCH --> AI
+  ORCH --> OCA
+  OCA --> CA
+
+  TR --> TP
+  CA --> TP
+  CA --> TG
+
+  TB --> TPV
+  LB --> LPV
+  OCA -.可选旁路.-> OBS
+
+  EV --> DB
+  REPO --> DB
+  REPO --> FS
+```
+
 ### 5.2 高层执行链路
 
 ```text
-CLI / UI 发起 Run
+Web UI（HTML 页面）发起 Run
   ->
 Orchestrator 创建 Run
   ->
@@ -193,11 +280,73 @@ Code Agent 执行修改与 verify
 用户决定是否提交
 ```
 
+时序图（Mermaid）：
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant User
+  participant UI as Web UI (HTML)
+  participant App as Local App Process / Services
+  participant Orch as Orchestrator
+  participant Runner as Test Runner
+  participant Trace as Trace Bridge
+  participant Logs as Log Bridge
+  participant AI as AI Engine
+  participant Agent as Code Agent Adapter
+  participant Review as Review Manager
+  participant Repo as Repository/Event Store
+  participant Target as Target Workspace(Git)
+
+  User->>UI: run start
+  UI->>App: RunService.startRun()
+  App->>Orch: startRun()
+  Orch->>Repo: RUN_CREATED / RUN_STARTED
+
+  Orch->>Runner: 执行 Playwright
+  Runner-->>Orch: TestResult + artifacts + correlationContext
+  Orch->>Repo: 保存 results/artifacts/events
+
+  alt 有失败用例
+    Orch->>Trace: 按 correlation keys 查询 trace
+    Trace-->>Orch: TraceSummary(可降级失败)
+    Orch->>Logs: 按 keys + time window 查询日志
+    Logs-->>Orch: LogSummary(可降级失败)
+    Orch->>AI: analyzeFailure + createCodeTask
+    AI-->>Orch: FailureAnalysis + CodeTask(DRAFT/PENDING_APPROVAL)
+    Orch->>Repo: CODE_TASK_CREATED
+    Orch-->>UI: 停在 PENDING_APPROVAL
+    User->>UI: approve + execute
+    UI->>App: CodeTaskService.approve/execute
+    App->>Orch: 执行 CodeTask
+    Orch->>Agent: plan/apply/verify
+    Agent->>Target: 受控范围改代码 + verify
+    Agent-->>Orch: changedFiles/diff/patch/verify
+    Orch->>Repo: PATCH_GENERATED / VERIFY_COMPLETED
+    Orch-->>UI: AWAITING_REVIEW
+    User->>UI: review(accept/reject/retry)
+    UI->>App: ReviewService.submitReview()
+    App->>Review: submitReview()
+    Review->>Repo: REVIEW_ACCEPTED/REJECTED
+    alt review accept
+      User->>UI: commit create
+      UI->>App: CommitService.createCommit()
+      App->>Target: git commit
+      App->>Repo: COMMIT_CREATED
+    end
+  else 无失败用例
+    Orch->>Repo: RUN_COMPLETED
+  end
+
+  Orch->>Repo: RUN_COMPLETED / RUN_CANCELLED / FAILED
+  Orch-->>UI: 最终状态与时间线
+```
+
 ### 5.3 架构分层
 
 ```text
 +---------------------------------------------------------------+
-| CLI / Local UI                                                |
+| Web UI (主操作面) / CLI(可选启动入口)                         |
 +---------------------------------------------------------------+
 | Orchestrator / Review Manager / Event Store                   |
 +---------------------------------------------------------------+
@@ -221,10 +370,10 @@ Code Agent 执行修改与 verify
 
 当前访问方式约束：
 
-- CLI 作为本地工具入口和高级控制面
-- Web UI 作为默认工作台和主可视化入口
+- Web UI 作为当前唯一业务操作与查看入口
+- 所有 run/diagnostics/code-task/review/commit/settings 操作统一走 HTML 页面
+- CLI 仅保留 `bootstrap/init/doctor/ui` 能力，作为可选本地入口
 - Local App Process 作为本地应用服务宿主
-- CLI 直接调用应用服务
 - Web UI 通过 localhost API 调用应用服务
 
 ### 5.5 部署形态
@@ -291,14 +440,17 @@ ai-regression-workbench/
       fixtures/
       data/
       helpers/
-  data/
-    sqlite/
-    runs/
-    artifacts/
-    diagnostics/
-    analysis/
-    code-tasks/
-    commits/
+  .ai-regression-workbench/
+    config.local.yaml
+    data/
+      sqlite/
+      runs/
+      artifacts/
+      diagnostics/
+      analysis/
+      code-tasks/
+      commits/
+      generated-tests/
   docs/
   scripts/
   package.json
@@ -335,14 +487,14 @@ ai-regression-workbench/
   详见 [code-task-design.md](./code-task-design.md)
 
 - `apps/local-ui`
-  Run、diagnostics、code task、review 视图。
+  Run、diagnostics、code task、review、settings 视图。
   详见 [local-ui-design.md](./local-ui-design.md)
 
 - `packages/shared-types`
   DTO、状态枚举、接口定义。
 
 - `packages/config`
-  YAML + env 配置加载、默认值、校验。
+  YAML + env 配置加载、默认值、校验、配置热更新广播。
 
 - `packages/storage`
   SQLite repository、本地 artifact store。
@@ -381,7 +533,7 @@ ai-regression-workbench/
 - 所有 Playwright 执行、代码搜索、代码修改、git 操作都必须基于 `target workspace`
 - 所有运行数据、diagnostics、analysis、code-task 产物默认保存在 `tool workspace` 下
 - UI 必须能展示当前生效的 `target workspace`
-- CLI 必须允许用户显式指定或覆盖 `target workspace`
+- 当前阶段通过 UI 设置显式配置 `target workspace`（CLI 覆盖参数为后续扩展）
 
 ---
 
@@ -464,8 +616,38 @@ ai-regression-workbench/
 
 职责：
 
-- 为 UI/CLI 提供时间线
+- 为 UI 提供时间线（CLI 可后续扩展）
 - 为恢复与排错提供依据
+
+### 7.9 ApiCallRecord
+
+表示一次接口调用记录（接口粒度）。
+
+职责：
+
+- 记录请求/响应核心信息与耗时
+- 记录是否成功、错误类型与降级信息
+- 关联 `traceId / requestId / testcaseId / flowStepId / uiActionId`
+
+### 7.10 UiActionRecord
+
+表示一次 UI 交互动作记录（点击事件粒度）。
+
+职责：
+
+- 记录动作类型（click/input/select 等）、定位器与页面位置
+- 记录动作开始/结束时间与执行结果
+- 统计该动作触发的接口数量与失败数量
+
+### 7.11 FlowStepRecord
+
+表示某条业务流程中的步骤记录（流程链路粒度）。
+
+职责：
+
+- 记录步骤名称、开始/结束时间、耗时
+- 聚合步骤内 `uiActionCount / apiCallCount / failedApiCount`
+- 作为执行报告的流程链路明细输入
 
 ---
 
@@ -517,6 +699,66 @@ DRAFT
 - `REJECTED`
 - `CANCELLED`
 
+状态机图（Mermaid）：
+
+```mermaid
+stateDiagram-v2
+  direction TB
+
+  state "Run 状态机" as RUN {
+    [*] --> CREATED
+    CREATED --> RUNNING_TESTS
+    RUNNING_TESTS --> COLLECTING_ARTIFACTS
+    COLLECTING_ARTIFACTS --> FETCHING_TRACES
+    FETCHING_TRACES --> FETCHING_LOGS
+    FETCHING_LOGS --> ANALYZING_FAILURES
+    ANALYZING_FAILURES --> AWAITING_CODE_ACTION: 有失败且生成 CodeTask
+    ANALYZING_FAILURES --> COMPLETED: 无失败/仅分析
+
+    AWAITING_CODE_ACTION --> RUNNING_CODE_TASK: approve+execute
+    RUNNING_CODE_TASK --> AWAITING_REVIEW
+    AWAITING_REVIEW --> READY_TO_COMMIT: review accept
+    AWAITING_REVIEW --> RUNNING_CODE_TASK: review retry
+    READY_TO_COMMIT --> COMPLETED: commit 或 skip commit
+
+    CREATED --> CANCELLED
+    RUNNING_TESTS --> CANCELLED
+    COLLECTING_ARTIFACTS --> CANCELLED
+    FETCHING_TRACES --> CANCELLED
+    FETCHING_LOGS --> CANCELLED
+    ANALYZING_FAILURES --> CANCELLED
+    AWAITING_CODE_ACTION --> CANCELLED
+    RUNNING_CODE_TASK --> CANCELLED
+    AWAITING_REVIEW --> CANCELLED
+    READY_TO_COMMIT --> CANCELLED
+
+    RUNNING_TESTS --> FAILED
+    COLLECTING_ARTIFACTS --> FAILED
+    ANALYZING_FAILURES --> FAILED
+    RUNNING_CODE_TASK --> FAILED
+  }
+
+  state "CodeTask 状态机" as TASK {
+    [*] --> DRAFT
+    DRAFT --> PENDING_APPROVAL
+    PENDING_APPROVAL --> APPROVED
+    PENDING_APPROVAL --> REJECTED
+    PENDING_APPROVAL --> CANCELLED
+
+    APPROVED --> RUNNING
+    RUNNING --> VERIFYING
+    VERIFYING --> SUCCEEDED
+    VERIFYING --> FAILED
+
+    SUCCEEDED --> COMMIT_PENDING: review accept
+    SUCCEEDED --> RUNNING: review retry
+    SUCCEEDED --> REJECTED: review reject
+
+    COMMIT_PENDING --> COMMITTED: commit create
+    COMMIT_PENDING --> CANCELLED
+  }
+```
+
 ### 8.3 控制动作
 
 系统必须支持以下控制动作：
@@ -547,7 +789,7 @@ DRAFT
 2. 持久化状态
 3. 统一事件流
 
-CLI 与 UI 都应基于状态表与事件表展示实时进度。
+当前由 Web UI 基于状态表与事件表展示实时进度；CLI 仅保留未来扩展能力。
 
 ### 9.2 事件模型
 
@@ -559,6 +801,9 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - `TESTCASE_FAILED`
 - `ARTIFACT_SAVED`
 - `CORRELATION_CONTEXT_CAPTURED`
+- `UI_ACTION_CAPTURED`
+- `API_CALL_CAPTURED`
+- `FLOW_STEP_COMPLETED`
 - `TRACE_FETCH_SUCCEEDED`
 - `TRACE_FETCH_FAILED`
 - `LOG_FETCH_SUCCEEDED`
@@ -574,6 +819,12 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - `REVIEW_ACCEPTED`
 - `REVIEW_REJECTED`
 - `COMMIT_CREATED`
+- `RUN_STEP_DEGRADED`
+- `EXECUTION_PROFILE_UPDATED`
+- `EXECUTION_REPORT_CREATED`
+- `SETTINGS_VALIDATED`
+- `SETTINGS_UPDATED`
+- `SETTINGS_APPLIED`
 - `RUN_COMPLETED`
 - `RUN_CANCELLED`
 
@@ -582,9 +833,16 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 建议新增统一事件表，支持：
 
 - 时间线展示
-- CLI watch
+- Web UI 实时刷新
+- CLI watch（未来扩展）
 - 调试与审计
 - 恢复执行
+
+事件读取接口建议：
+
+- `GET /runs/:runId/events?cursor=<eventId>&limit=<n>`：增量拉取
+- 返回结构建议：`items[] + nextCursor`
+- 可选 `GET /runs/:runId/events/stream`（SSE）用于低延迟推送
 
 ### 9.4 结构化日志要求
 
@@ -593,12 +851,15 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - run 创建
 - runner 开始/结束
 - testcase 失败
+- UI action 统计（总动作数、失败动作数）
+- API 调用统计（总调用数、失败数、P95 耗时）
 - correlation context 提取结果
 - trace 查询结果
 - 日志查询结果
 - AI 分析结果
 - code task 审批/执行/验证
 - review / commit 决策
+- settings 校验/保存/生效结果
 
 ---
 
@@ -608,9 +869,10 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 
 职责：
 
-- 提供用户控制面
-- 发起 run / diagnostics / review / commit 等动作
-- 支持 watch、pause、resume、cancel
+- 提供本地启动入口
+- 承担初始化与诊断（`init` / `doctor`）
+- 启动 HTML 工作台（`zarb` / `zarb ui`）
+- 保留未来脚本化扩展能力（当前不承载业务操作流）
 
 ### 10.2 Orchestrator
 
@@ -633,6 +895,7 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - 执行 Playwright 测试
 - 输出 trace、screenshot、video、network log
 - 提取诊断关联键
+- 采集接口调用记录、点击动作记录、流程步骤记录
 
 支持粒度：
 
@@ -640,6 +903,12 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - scenario
 - tag
 - testcase
+
+第一阶段选择约束：
+
+- 一次 `run start` 仅允许一个主选择器（`suite | scenario | tag | testcase`）
+- 若同时传入多个主选择器，返回参数错误并阻止启动
+- 若未传入选择器，由 Web UI 在入参归一化阶段补全配置默认值（建议默认 `suite=smoke`）
 
 ### 10.4 Trace Bridge
 
@@ -695,18 +964,84 @@ CLI 与 UI 都应基于状态表与事件表展示实时进度。
 - 记录人工 review 决策
 - 控制是否允许进入提交阶段
 
-### 10.9 Local Report UI
+### 10.9 Local Web UI
 
 职责：
 
 - 展示 run 列表与详情
 - 展示 testcase、diagnostics、analysis、code task
 - 展示事件时间线
-- 提供 approve、execute、review、commit 控制入口
+- 提供 approve、execute、review、commit、settings 控制入口
+
+### 10.10 ConfigManager / SettingsService
+
+职责：
+
+- 读取并校验 `config.local.yaml`
+- 对外提供 `getSettings/validateSettings/updateSettings`
+- 保存配置后向 trace/log/diagnostics/ai/codeAgent 广播最新快照
+- 维护配置版本号，避免并发覆盖
 
 ---
 
 ## 11. 核心接口抽象
+
+### 11.0 RunRequest
+
+```ts
+export type RunScopeType = 'suite' | 'scenario' | 'tag' | 'testcase';
+
+export interface RunSelector {
+  suite?: string;
+  scenarioId?: string;
+  tag?: string;
+  testcaseId?: string;
+}
+
+export interface RunRequest {
+  selector: RunSelector;
+  projectPath?: string;
+  includeSharedInRuns?: boolean;
+  includeGeneratedInRuns?: boolean;
+}
+```
+
+实现要求：
+
+- `selector` 四个字段必须且只能有一个有效值
+- 实现层必须在启动前做参数校验，并将校验结果写入事件
+
+### 11.0.1 Settings Contract
+
+```ts
+export interface SettingsSnapshot {
+  version: number;
+  sourcePath: string;
+  updatedAt: string;
+  values: Record<string, unknown>;
+}
+
+export interface UpdateSettingsInput {
+  patch: Record<string, unknown>;
+  expectedVersion?: number;
+}
+
+export interface SettingsApplyResult {
+  success: boolean;
+  message: string;
+  version?: number;
+  reloadedModules?: string[];
+  nextRunOnlyKeys?: string[];
+  redirectUrl?: string;
+  warnings?: string[];
+}
+```
+
+实现要求：
+
+- `updateSettings` 成功时必须完成“保存 + 生效”双步骤
+- 失败时必须回滚到旧快照并返回失败字段
+- 生效结果必须返回 `reloadedModules/nextRunOnlyKeys`
 
 ### 11.1 TestRunner
 
@@ -726,6 +1061,61 @@ export interface CorrelationContext {
   serviceHints?: string[];
   fromTime?: string;
   toTime?: string;
+}
+```
+
+### 11.2.1 ExecutionTelemetry
+
+```ts
+export interface ApiCallRecord {
+  id: string;
+  runId: string;
+  testcaseId: string;
+  flowStepId?: string;
+  uiActionId?: string;
+  method?: string;
+  url: string;
+  statusCode?: number;
+  responseSummary?: string;
+  success: boolean;
+  errorType?: string;
+  errorMessage?: string;
+  traceId?: string;
+  requestId?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+}
+
+export interface UiActionRecord {
+  id: string;
+  runId: string;
+  testcaseId: string;
+  flowStepId?: string;
+  actionType: 'click' | 'input' | 'select' | 'assert' | 'wait' | 'other';
+  locator?: string;
+  pageUrl?: string;
+  success: boolean;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  apiCallCount?: number;
+  failedApiCount?: number;
+}
+
+export interface FlowStepRecord {
+  id: string;
+  runId: string;
+  testcaseId: string;
+  flowId: string;
+  stepName: string;
+  success: boolean;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  uiActionCount?: number;
+  apiCallCount?: number;
+  failedApiCount?: number;
 }
 ```
 
@@ -857,6 +1247,10 @@ export interface RunRepository {
   saveRun(run: Run): Promise<void>;
   saveResult(result: TestResult): Promise<void>;
   saveCorrelationContext(context: PersistedCorrelationContext): Promise<void>;
+  saveApiCall(record: ApiCallRecord): Promise<void>;
+  saveUiAction(record: UiActionRecord): Promise<void>;
+  saveFlowStep(record: FlowStepRecord): Promise<void>;
+  saveExecutionReport(report: ExecutionReportRecord): Promise<void>;
   saveDiagnosticFetch(fetch: DiagnosticFetch): Promise<void>;
   saveAnalysis(analysis: FailureAnalysis): Promise<void>;
   saveCodeTask(task: PersistedCodeTask): Promise<void>;
@@ -876,9 +1270,9 @@ export interface RunRepository {
 - `runId`
 - `triggerType`
 - `environment`
-- `suite`
-- `scenarioId`
-- `tag`
+- `scopeType`
+- `scopeValue`
+- `selectorJson`
 - `status`
 - `pauseRequested`
 - `startedAt`
@@ -1015,6 +1409,74 @@ export interface RunRepository {
 - `payloadJson`
 - `createdAt`
 
+### 12.10 ApiCallRecord
+
+建议字段：
+
+- `id`
+- `runId`
+- `testcaseId`
+- `flowStepId`
+- `uiActionId`
+- `method`
+- `url`
+- `statusCode`
+- `responseSummary`
+- `success`
+- `errorType`
+- `errorMessage`
+- `traceId`
+- `requestId`
+- `startedAt`
+- `endedAt`
+- `durationMs`
+
+### 12.11 UiActionRecord
+
+建议字段：
+
+- `id`
+- `runId`
+- `testcaseId`
+- `flowStepId`
+- `actionType`
+- `locator`
+- `pageUrl`
+- `success`
+- `startedAt`
+- `endedAt`
+- `durationMs`
+- `apiCallCount`
+- `failedApiCount`
+
+### 12.12 FlowStepRecord
+
+建议字段：
+
+- `id`
+- `runId`
+- `testcaseId`
+- `flowId`
+- `stepName`
+- `success`
+- `startedAt`
+- `endedAt`
+- `durationMs`
+- `uiActionCount`
+- `apiCallCount`
+- `failedApiCount`
+
+### 12.13 ExecutionReportRecord
+
+建议字段：
+
+- `id`
+- `runId`
+- `status`
+- `reportPath`
+- `totalsJson`
+- `generatedAt`
+
 ---
 
 ## 13. SQLite 表设计建议
@@ -1026,9 +1488,9 @@ CREATE TABLE test_runs (
   run_id TEXT PRIMARY KEY,
   trigger_type TEXT,
   environment TEXT,
-  suite TEXT,
-  scenario_id TEXT,
-  tag TEXT,
+  scope_type TEXT,
+  scope_value TEXT,
+  selector_json TEXT,
   status TEXT NOT NULL,
   pause_requested INTEGER DEFAULT 0,
   started_at TEXT,
@@ -1183,6 +1645,82 @@ CREATE TABLE run_events (
 );
 ```
 
+### 13.10 api_call_records
+
+```sql
+CREATE TABLE api_call_records (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  testcase_id TEXT NOT NULL,
+  flow_step_id TEXT,
+  ui_action_id TEXT,
+  method TEXT,
+  url TEXT NOT NULL,
+  status_code INTEGER,
+  response_summary TEXT,
+  success INTEGER NOT NULL,
+  error_type TEXT,
+  error_message TEXT,
+  trace_id TEXT,
+  request_id TEXT,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  duration_ms INTEGER
+);
+```
+
+### 13.11 ui_action_records
+
+```sql
+CREATE TABLE ui_action_records (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  testcase_id TEXT NOT NULL,
+  flow_step_id TEXT,
+  action_type TEXT NOT NULL,
+  locator TEXT,
+  page_url TEXT,
+  success INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  duration_ms INTEGER,
+  api_call_count INTEGER,
+  failed_api_count INTEGER
+);
+```
+
+### 13.12 flow_step_records
+
+```sql
+CREATE TABLE flow_step_records (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  testcase_id TEXT NOT NULL,
+  flow_id TEXT NOT NULL,
+  step_name TEXT NOT NULL,
+  success INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  duration_ms INTEGER,
+  ui_action_count INTEGER,
+  api_call_count INTEGER,
+  failed_api_count INTEGER
+);
+```
+
+### 13.13 execution_reports
+
+```sql
+CREATE TABLE execution_reports (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  report_path TEXT NOT NULL,
+  totals_json TEXT,
+  generated_at TEXT NOT NULL
+);
+```
+
 ---
 
 ## 14. 文件系统存储规范
@@ -1190,7 +1728,7 @@ CREATE TABLE run_events (
 建议结构如下：
 
 ```text
-/data
+<tool-workspace>/data
   /artifacts
     /<runId>
       /<testcaseId>
@@ -1205,6 +1743,10 @@ CREATE TABLE run_events (
         correlation-context.json
         trace-summary.json
         log-summary.json
+        api-calls.jsonl
+        ui-actions.jsonl
+        flow-steps.json
+        execution-profile.json
   /analysis
     /<runId>
       /<testcaseId>.json
@@ -1219,15 +1761,25 @@ CREATE TABLE run_events (
     /<taskId>.json
   /runs
     /<runId>.json
+    /<runId>-execution-report.json
+  /generated-tests
+    /<taskId>
+      candidate.spec.ts
 ```
 
 设计要求：
 
+- 所有可写运行数据统一落在 `<tool-workspace>/data` 下
 - artifacts 按 `runId / testcaseId` 分层
 - diagnostics 独立于 artifacts 管理
 - code task 产物按 `taskId` 独立分层
+- 接口/点击/流程明细按 testcase 持久化，支持回放与审计
 - 数据库存路径，不直接存大文件内容
 - 删除历史 run 时可整批清理
+
+字段级对象-表-文件映射见：
+
+- [存储映射设计（字段级）](./storage-mapping-design.md)
 
 ---
 
@@ -1249,10 +1801,10 @@ app:
   baseUrl: http://localhost:8080
 
 storage:
-  sqlitePath: ./data/sqlite/app.db
-  artifactRoot: ./data/artifacts
-  diagnosticRoot: ./data/diagnostics
-  codeTaskRoot: ./data/code-tasks
+  sqlitePath: ./.ai-regression-workbench/data/sqlite/app.db
+  artifactRoot: ./.ai-regression-workbench/data/artifacts
+  diagnosticRoot: ./.ai-regression-workbench/data/diagnostics
+  codeTaskRoot: ./.ai-regression-workbench/data/code-tasks
 
 workspace:
   targetProjectPath: /absolute/path/to/your/project
@@ -1262,7 +1814,7 @@ workspace:
 testAssets:
   sharedRoot: /absolute/or/relative/path
   sharedRootMode: auto
-  generatedRoot: .ai-regression-workbench/data/generated-tests
+  generatedRoot: ./.ai-regression-workbench/data/generated-tests
   includeSharedInRuns: true
   includeGeneratedInRuns: false
   requireGitForSharedRoot: false
@@ -1315,12 +1867,15 @@ codeAgent:
   allowedWriteScopes:
     - packages/test-assets
     - playwright
-    - data/generated-tests
+    - .ai-regression-workbench/data/generated-tests
   defaultVerifyCommands:
     - pnpm test
 
 report:
   port: 3910
+
+ui:
+  locale: zh-CN
 ```
 
 ### 15.3 诊断关联键配置要求
@@ -1348,7 +1903,7 @@ report:
 
 - 默认值可以包含 `X-Trace-Id`
 - 用户必须能在配置文件中覆盖
-- UI/CLI 需要能展示当前生效配置
+- UI 需要能展示当前生效配置
 
 ### 15.4 目标项目目录配置要求
 
@@ -1366,7 +1921,7 @@ report:
 实现要求：
 
 - 默认要求使用绝对路径
-- CLI 可以通过参数临时覆盖该值
+- 当前阶段通过 UI 的 Settings 页面或 `/workspace` 能力更新该值（CLI 覆盖参数为后续扩展）
 - code agent 执行前必须打印当前目标目录
 - UI 中要能看到当前目标目录与 git 根目录
 
@@ -1398,6 +1953,45 @@ report:
 - `sharedRoot` 不存在时应视为“当前无团队共享测试集”
 - 系统需要展示当前生效的共享目录
 - code agent 修改正式测试时必须受 `sharedRoot` 限制
+
+### 15.6 个人配置页与即时生效要求
+
+UI 必须提供独立 `Settings` 页面，用于配置当前项目的全部个人配置。
+
+页面入口与导航要求：
+
+- 每个业务页面右上角都提供独立 `Settings` 按钮，点击即跳转设置页
+- 主导航菜单不包含 `Settings` 项
+- 设置页作为独立页面存在，并通过主导航返回其他业务页面
+
+范围建议至少覆盖：
+
+- `storage.*`
+- `workspace.*`
+- `testAssets.*`
+- `diagnostics.*`
+- `trace.*`
+- `logs.*`
+- `ai.*`
+- `codeAgent.*`
+- `report.*`
+- `ui.locale`
+
+保存流程要求：
+
+1. 前端提交 `UpdateSettingsInput(patch + expectedVersion)`
+2. 后端先 schema 校验和路径可用性校验
+3. 写入 `config.local.yaml`
+4. 同步刷新运行时配置快照并广播给订阅模块
+5. 返回 `SettingsApplyResult`（`reloadedModules/nextRunOnlyKeys/warnings`）
+
+即时生效语义：
+
+- 查询类能力（trace/log/diagnostics 配置）保存后立刻按新值生效
+- `storage.*` 更新后，后续新写入走新路径（历史数据不自动迁移）
+- 新启动的 run/code-task 使用最新配置
+- 正在执行中的 run 不回溯改写既有上下文，按旧快照继续
+- `report.port` 更新时，服务端应重绑端口并返回 `redirectUrl`
 
 ---
 
@@ -1435,11 +2029,15 @@ packages/test-assets/
 - 若 header 不存在，再尝试按配置的 `responseBodyPaths` 从响应体解析
 - 记录失败请求 URL、状态码、响应摘要、请求时间
 - 生成 `CorrelationContext`
+- 记录接口调用明细（method/url/statusCode/duration/traceId/requestId）
+- 建立 `uiActionId -> apiCallId` 与 `flowStepId -> uiActionId/apiCallId` 关联
 
 建议封装：
 
 - `captureCorrelationContext(page, diagnosticsConfig)`
 - `attachNetworkLogs(testInfo)`
+- `recordUiAction(actionContext)`
+- `recordFlowStep(stepContext)`
 
 ---
 
@@ -1528,6 +2126,9 @@ AI 分析输入建议包含：
 - 场景信息
 - 失败信息
 - 网络请求摘要
+- 接口调用统计与慢接口列表
+- 点击动作统计与失败动作列表
+- 流程步骤统计（步骤数、耗时、失败步骤）
 - trace 摘要
 - 日志摘要
 - screenshot 路径或摘要说明
@@ -1610,7 +2211,7 @@ CodeTaskPolicy 审核
 
 - `packages/test-assets/**`
 - `playwright/**`
-- `data/generated-tests/**`
+- `.ai-regression-workbench/data/generated-tests/**`
 
 禁止修改业务代码目录。
 
@@ -1638,7 +2239,20 @@ CodeTaskPolicy 审核
 
 ## 19. Local UI 设计
 
-一期建议只做以下页面：
+一期采用“HTML 页面统一操作面”：
+
+- 所有业务操作与查看统一放在 Web UI
+- CLI 不承载当前业务操作流
+
+### 19.0 全局导航与设置入口
+
+约束：
+
+- 主导航仅包含 `Home / Run List / Run Detail / Failure Report / CodeTask Detail / Review / Commit`
+- 主导航不包含 `Settings`
+- 每个页面右上角都提供独立 `Settings` 按钮
+- 点击右上角按钮后跳转到独立 `Settings` 页面
+- 从设置页返回其他页面通过主导航完成
 
 ### 19.1 Home / Workbench
 
@@ -1670,6 +2284,9 @@ CodeTaskPolicy 审核
 - diagnostics
 - AI 分析摘要
 - 错误报告
+- 执行报告（Execution Report）
+- 执行报告中的流程链路总数、点击总数、接口总数、失败接口数
+- 阶段耗时与降级步骤
 - 关联 code tasks
 - 事件时间线
 
@@ -1682,6 +2299,9 @@ CodeTaskPolicy 审核
 - CorrelationContext
 - TraceSummary
 - LogSummary
+- 接口调用明细（方法、URL、状态码、响应摘要、耗时、错误）
+- 点击事件明细（locator、动作、时间、关联接口数）
+- 流程步骤明细（stepName、点击数、接口数、耗时）
 - FailureAnalysis
 - Create CodeTask / Retry Analysis 等操作
 
@@ -1706,59 +2326,58 @@ CodeTaskPolicy 审核
 - review 决策入口
 - commit 信息输入与提交入口
 
+### 19.7 Settings
+
+展示：
+
+- 当前配置快照（含 `version` / `updatedAt`）
+- 页面必须支持“查看当前配置 + 保存配置”
+- 分组编辑：storage / workspace / testAssets / diagnostics / trace / logs / ai / codeAgent / report / ui
+- 每个配置项按 `key / value / description` 同行展示，`description` 紧邻 key
+- 保存前校验结果（error/warning）
+- 保存后生效结果（`reloadedModules` / `nextRunOnlyKeys`）
+- 端口变更后的重定向提示（`redirectUrl`）
+
+### 19.8 多语言（i18n）
+
+要求：
+
+- 页面级 UI 元素支持 `zh-CN` 与 `en-US`
+- 导航菜单仅显示菜单名称，不显示描述
+- 页面模块标题与模块说明支持多语言
+- 设置页 `key/value/description` 中的 `description` 支持多语言
+- 缺失翻译时回退到 `zh-CN`，并记录 `warnings`
+
 ---
 
-## 20. CLI 设计
+## 20. CLI 设计（当前最小集 + 未来扩展预留）
 
-建议首批 CLI 命令：
+当前建议仅保留以下命令：
 
 ```bash
 zarb
 zarb init
 zarb doctor
 zarb ui
-zarb run start --suite smoke
-zarb run start --suite smoke --project-path /path/to/project
-zarb run show --run-id <runId>
-zarb run watch --run-id <runId>
-zarb run pause --run-id <runId>
-zarb run resume --run-id <runId>
-zarb run cancel --run-id <runId>
-
-zarb diagnostics show --run-id <runId> --testcase <testcaseId>
-zarb trace fetch --trace-id <traceId>
-zarb logs query --run-id <runId> --testcase <testcaseId>
-
-zarb analysis retry --run-id <runId> --testcase <testcaseId>
-
-zarb code-task list --run-id <runId>
-zarb code-task show --task-id <taskId>
-zarb code-task approve --task-id <taskId>
-zarb code-task reject --task-id <taskId>
-zarb code-task execute --task-id <taskId>
-zarb code-task retry --task-id <taskId>
-zarb code-task cancel --task-id <taskId>
-
-zarb review submit --task-id <taskId> --decision accept
-zarb review submit --task-id <taskId> --decision reject
-
-zarb commit create --task-id <taskId>
-zarb workspace show
-zarb workspace set --project-path /path/to/project
 ```
 
-设计要求：
+当前阶段要求：
 
-- `approve` 与 `execute` 分离
-- 所有控制命令都写事件
-- `watch` 读取事件时间线而非仅轮询日志
-- `run start` 和 `code-task execute` 必须显示当前目标项目目录
-- 默认入口 `zarb` 应支持首次运行自动初始化并启动工作台
+- CLI 不提供 run/diagnostics/code-task/review/commit/settings 的业务操作命令
+- 所有业务操作与查看均在 HTML Web UI 完成
+- `zarb` 默认入口应支持首次自动初始化并启动工作台
+- CLI 相关动作仍需写事件（初始化、诊断、启动）
+
+未来扩展预留：
+
+- 若需要脚本化批处理，可在后续恢复 `run/report/watch` 等命令
+- 扩展时必须复用同一套应用服务契约，避免分叉逻辑
 
 分工原则：
 
-- CLI 负责启动、配置、脚本化触发、快速状态查询
-- Web UI 负责主操作流、问题定位、审批、审阅
+- 当前：Web UI 负责主操作流、问题定位、审批、审阅、配置编辑
+- 当前：CLI 负责启动、初始化、诊断
+- 未来：CLI 可扩展脚本化能力，但不改变 Web UI 主入口定位
 
 ---
 
@@ -1775,7 +2394,8 @@ zarb workspace set --project-path /path/to/project
 职责：
 
 - 接收用户输入
-- 发起状态转换动作
+- 由 Local UI 发起业务状态转换动作
+- 由 CLI 发起初始化/诊断/启动动作
 - 展示结果
 
 ### 21.2 状态层
@@ -1826,23 +2446,29 @@ zarb workspace set --project-path /path/to/project
 ### 22.1 必做
 
 1. monorepo 初始化
-2. CLI 基础命令入口
+2. CLI 最小命令入口（`zarb/init/doctor/ui`）
 3. Run 状态机初版
 4. Playwright runner 封装
 5. SQLite 基础表
 6. 本地 artifacts 存储
-7. diagnostics correlation context 抓取
-8. trace 查询桥接，先支持一种 provider
-9. 日志查询桥接，先支持一种 provider
-10. AI 失败分析接口与基础实现
-11. CodeTask 模型与表结构
-12. CodeTaskPolicy 初版
-13. CodexCliAgent / KiroCliAgent 基础接入
-14. code task approve / execute / verify 流程
-15. review 与 commit 控制动作
-16. Local UI 展示 run、diagnostics、code task、事件时间线
-17. 目标项目目录配置与展示
-18. 共享测试集目录配置与展示
+7. run selector 互斥校验（suite/scenario/tag/testcase）
+8. 接口/点击/流程三级采集与持久化
+9. diagnostics correlation context 抓取
+10. trace 查询桥接，先支持一种 provider
+11. 日志查询桥接，先支持一种 provider
+12. testcase execution profile 聚合与查询
+13. run execution report 聚合与落盘（含 failureReports/codeTaskSummaries）
+14. AI 失败分析接口与基础实现
+15. CodeTask 模型与表结构
+16. CodeTaskPolicy 初版
+17. CodexCliAgent / KiroCliAgent 基础接入
+18. code task approve / execute / verify 流程
+19. review 与 commit 控制动作
+20. Local UI 展示 run、diagnostics、code task、事件时间线、执行报告
+21. 目标项目目录配置与展示
+22. 共享测试集目录配置与展示
+23. 独立 Settings 页面（全量个人配置编辑）
+24. 配置保存即生效（ConfigManager + 运行时广播）
 
 ### 22.2 可后置
 
@@ -1864,12 +2490,17 @@ zarb workspace set --project-path /path/to/project
 
 交付物：
 
-- CLI
+- Web UI（业务主操作面）+ CLI 最小启动能力
 - Run / TestResult / CorrelationContext / FailureAnalysis 基础模型
 - Playwright runner
+- run selector 解析与互斥校验
 - correlation key 提取
 - Trace Bridge
 - Log Bridge
+- 接口/点击/流程三级采集与持久化
+- testcase execution profile 查询能力
+- run execution report（含降级步骤、失败索引、关联 code tasks）
+- SettingsService（配置校验/保存/生效）与 Settings 页面
 - 运行结果与诊断报告页
 
 ### 阶段 B：受控修复闭环
@@ -1893,7 +2524,6 @@ zarb workspace set --project-path /path/to/project
 - Review / CommitRecord
 - 事件时间线
 - pause / resume / cancel
-- review / commit CLI
 - UI review 面板
 
 ---
@@ -1915,7 +2545,10 @@ zarb workspace set --project-path /path/to/project
 1. 定义状态枚举和核心 DTO
 2. 建立 SQLite schema 与 repository
 3. 建立 Orchestrator 状态推进骨架
-4. 建立 CLI 控制命令
+4. 建立 Web API 控制命令与 CLI 最小启动命令
+5. 实现 `startRun` 输入互斥校验与 `StartRunResult` 返回契约
+6. 实现 `SettingsService`（validate/update/get）与配置版本并发控制
+7. 实现 ConfigManager 热更新广播（trace/log/diagnostics/ai/codeAgent）
 
 ### 24.3 诊断能力
 
@@ -1925,6 +2558,9 @@ zarb workspace set --project-path /path/to/project
 4. 实现 JaegerTraceProvider 或等价 provider
 5. 实现 LokiLogProvider 或等价 provider
 6. 生成 trace/log summary
+7. 实现 API Call / UI Action / Flow Step 三级明细采集
+8. 实现 testcase execution profile 聚合与查询
+9. 实现 run execution report 聚合（含 failureReports / codeTaskSummaries）
 
 ### 24.4 AI 与代码修复
 
@@ -1942,6 +2578,9 @@ zarb workspace set --project-path /path/to/project
 3. 实现 CodeTask Detail
 4. 实现 Review / Commit 面板
 5. 实现事件时间线
+6. 实现 Execution Report 视图（流程/点击/接口三级统计）
+7. 实现 testcase profile 明细下钻（流程步骤、点击、接口时间线）
+8. 实现独立 Settings 页面（分组编辑、校验、保存即生效反馈）
 
 ---
 
@@ -2021,12 +2660,67 @@ zarb workspace set --project-path /path/to/project
 - 日志查询失败时仍允许进入 AI 分析
 - AI 分析失败时只标记分析失败，不影响主流程完成
 - code task 执行失败时不能污染 run 的原始执行结果
+- 接口调用错误默认先记录 warning 并尝试继续后续可执行步骤
+- 接口/点击/流程明细采集失败时记为 degraded，不阻断测试主流程
+- 仅当关键前置条件失败（如目标目录不可用、runner 无法启动、存储不可写）才终止 run
+- run 进入终态（`COMPLETED` / `FAILED` / `CANCELLED`）时都必须产出执行报告
+- 配置保存失败时必须回滚到旧配置快照，不得留下半生效状态
+- 配置热更新失败时必须返回失败详情和未生效字段，禁止静默忽略
 
 ### 26.3 审计要求
 
 - 所有状态变更必须写事件
 - 所有关键执行产物必须落盘
 - review 和 commit 必须保留历史记录
+
+### 26.4 执行报告要求
+
+执行报告（Execution Report）建议至少包含：
+
+- `runId`、`status`、`startedAt`、`endedAt`、`durationMs`
+- `scopeType`、`scopeValue`、`selector`
+- `summary`（`total/passed/failed/skipped`）
+- `totals`（`flowStepCount/uiActionCount/apiCallCount/failedApiCount`）
+- `stageResults`（每阶段 `success/degraded/failed/skipped`）
+- `degradedSteps`（接口错误但继续执行的阶段及原因）
+- `fatalReason`（若最终失败，记录不可继续的阻断原因）
+- `failureReports`（失败用例索引）
+- `codeTaskSummaries`（关联修复任务状态）
+- `artifactLinks`（report、trace、logs、diff、patch、verify 等路径）
+- `flowSummaries`（每条流程的步骤数、点击数、接口数、失败数、总耗时）
+- `testcaseProfiles`（每个 testcase 的执行明细路径）
+- `warnings` 与 `recommendations`
+
+生成时机：
+
+- Run 进入 `COMPLETED` / `FAILED` / `CANCELLED` 时自动生成
+- 若在中途被用户取消，报告中需明确标记“用户取消”与已完成阶段
+
+### 26.5 接口/点击/流程明细记录要求
+
+接口粒度（API Call）：
+
+- 必须记录请求方法、URL、状态码、响应摘要、开始时间、结束时间、耗时
+- 必须记录 `success/errorType/errorMessage`
+- 若响应体过大，正文只保留摘要并落脱敏规则后的片段
+
+点击粒度（UI Action）：
+
+- 必须记录动作类型、定位器、页面 URL、开始时间、结束时间、耗时
+- 必须记录该动作触发的接口总数与失败接口数
+- 必须保留 `uiActionId -> apiCallIds` 的关联关系
+
+流程粒度（Flow Step）：
+
+- 必须记录步骤名称、开始时间、结束时间、耗时
+- 必须记录步骤内点击总数、接口总数、失败接口总数
+- 必须保留 `flowStepId -> uiActionIds/apiCallIds` 的关联关系
+
+报告输出要求：
+
+- Run 级执行报告展示总量与流程摘要
+- testcase 级执行报告提供接口明细、点击明细、流程步骤明细
+- UI 必须支持按 `runId + testcaseId` 查看执行明细（CLI 为后续可选扩展）
 
 ---
 
