@@ -4,6 +4,12 @@
 
 `local-ui` 是本地可视化控制台，负责展示状态并发起控制动作。
 
+产品定位：
+
+- Web UI 不是单纯的 report viewer，而是工作台
+- CLI 是本地工具入口和高级控制面
+- Web UI 是默认工作台和报告/审批入口
+
 ## 2. 推荐技术栈
 
 - React
@@ -12,12 +18,24 @@
 
 ## 3. 页面结构
 
+- `HomePage`
 - `RunListPage`
 - `RunDetailPage`
+- `FailureReportPage`
 - `CodeTaskDetailPage`
 - `ReviewCommitPanel`
 
-## 3.1 错误报告与修复情况展示
+## 3.1 首页信息架构
+
+首页建议包含：
+
+- `WorkspaceBar`
+- `QuickRunPanel`
+- `ActiveRecentRuns`
+- `ActionInbox`
+- `SystemNotices`
+
+## 3.2 错误报告与修复情况展示
 
 `local-ui` 第一版必须能直接展示错误报告和修复情况，而不只是显示状态。
 
@@ -51,9 +69,14 @@
 - `CommitPanel`
 - `FailureReportCard`
 - `CodeChangeSummary`
+- `WorkspaceBar`
+- `QuickRunPanel`
+- `ActionInbox`
 
 ## 5. 推荐接口
 
+- `GET /workspace`
+- `POST /workspace`
 - `GET /runs`
 - `GET /runs/:runId`
 - `GET /runs/:runId/events`
@@ -62,8 +85,15 @@
 - `GET /code-tasks/:taskId`
 - `GET /code-tasks/:taskId/review`
 - `GET /code-tasks/:taskId/commit`
+- `POST /runs`
+- `POST /runs/:runId/pause`
+- `POST /runs/:runId/resume`
+- `POST /runs/:runId/cancel`
 - `POST /code-tasks/:taskId/approve`
+- `POST /code-tasks/:taskId/reject`
 - `POST /code-tasks/:taskId/execute`
+- `POST /code-tasks/:taskId/retry`
+- `POST /code-tasks/:taskId/cancel`
 - `POST /reviews`
 - `POST /commits`
 

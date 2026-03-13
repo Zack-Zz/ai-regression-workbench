@@ -19,6 +19,7 @@
 - [本地工具打包与分发设计](./packaging-design.md)
 - [Test Assets 详细设计](./test-assets-design.md)
 - [外部观测集成设计](./observability-design.md)
+- [应用服务与访问方式设计](./app-services-design.md)
 
 外部参考文档：
 
@@ -160,6 +161,7 @@ Playwright 执行
 - 本地工具交付形态见 [packaging-design.md](./packaging-design.md)
 - 测试资产与共享目录见 [test-assets-design.md](./test-assets-design.md)
 - 外部观测旁路集成见 [observability-design.md](./observability-design.md)
+- 应用服务边界见 [app-services-design.md](./app-services-design.md)
 
 ### 5.2 高层执行链路
 
@@ -216,6 +218,14 @@ Code Agent 执行修改与 verify
 - Code Agent Adapter 负责落盘 diff、patch、verify 输出。
 - Event Store 贯穿全链路，是可观测性与恢复能力的基础。
 - 外部观测工具只允许旁路接入，不作为主流程依赖。
+
+当前访问方式约束：
+
+- CLI 作为本地工具入口和高级控制面
+- Web UI 作为默认工作台和主可视化入口
+- Local App Process 作为本地应用服务宿主
+- CLI 直接调用应用服务
+- Web UI 通过 localhost API 调用应用服务
 
 ### 5.5 部署形态
 
@@ -1630,7 +1640,17 @@ CodeTaskPolicy 审核
 
 一期建议只做以下页面：
 
-### 19.1 Run List
+### 19.1 Home / Workbench
+
+展示：
+
+- 当前工作区状态
+- 快速运行面板
+- 最近运行
+- 待处理任务
+- 系统告警
+
+### 19.2 Run List
 
 展示：
 
@@ -1640,7 +1660,7 @@ CodeTaskPolicy 审核
 - 总数 / 通过 / 失败
 - 当前卡点
 
-### 19.2 Run Detail
+### 19.3 Run Detail
 
 展示：
 
@@ -1653,7 +1673,19 @@ CodeTaskPolicy 审核
 - 关联 code tasks
 - 事件时间线
 
-### 19.3 CodeTask Detail
+### 19.4 Failure Report
+
+展示：
+
+- 失败 testcase 基本信息
+- artifacts
+- CorrelationContext
+- TraceSummary
+- LogSummary
+- FailureAnalysis
+- Create CodeTask / Retry Analysis 等操作
+
+### 19.5 CodeTask Detail
 
 展示：
 
@@ -1667,7 +1699,7 @@ CodeTaskPolicy 审核
 - review / commit 历史
 - 审批与执行按钮
 
-### 19.4 Review / Commit Panel
+### 19.6 Review / Commit Panel
 
 展示：
 
@@ -1722,6 +1754,11 @@ zarb workspace set --project-path /path/to/project
 - `watch` 读取事件时间线而非仅轮询日志
 - `run start` 和 `code-task execute` 必须显示当前目标项目目录
 - 默认入口 `zarb` 应支持首次运行自动初始化并启动工作台
+
+分工原则：
+
+- CLI 负责启动、配置、脚本化触发、快速状态查询
+- Web UI 负责主操作流、问题定位、审批、审阅
 
 ---
 
