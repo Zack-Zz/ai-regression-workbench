@@ -43,3 +43,17 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### AI Dev Local Config ###
+.agents/
+.ai-code/
+.claude/
+.codex/
+.kiro/
+agents/
+commands/
+hooks/
+rules/
+scripts/
+AGENTS.md
+CLAUDE.md
