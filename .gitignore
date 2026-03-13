@@ -50,10 +50,5 @@ build/
 .claude/
 .codex/
 .kiro/
-agents/
-commands/
-hooks/
-rules/
-scripts/
 AGENTS.md
 CLAUDE.md
