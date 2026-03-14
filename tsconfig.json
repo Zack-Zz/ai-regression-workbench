@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared-types" },
+    { "path": "./packages/config" },
+    { "path": "./packages/config/tsconfig.test.json" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/storage/tsconfig.test.json" },
+    { "path": "./packages/event-store" },
+    { "path": "./packages/event-store/tsconfig.test.json" }
+  ]
+}

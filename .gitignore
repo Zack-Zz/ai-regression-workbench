@@ -1,55 +1,36 @@
-target/
-!.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
 
-### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
-.idea
-*.iws
-*.iml
-*.ipr
-
-.flattened-pom.xml
-**/.flattened-pom.xml
-**/**/.flattened-pom.xml
-**/**/**/.flattened-pom.xml
-**/**/**/**/.flattened-pom.xml
-
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+# Build outputs
+dist/
 build/
-!**/src/main/**/build/
-!**/src/test/**/build/
+out/
+*.tsbuildinfo
 
-### VS Code ###
-.vscode/
+# Test outputs
+coverage/
 
-### Mac OS ###
+# Runtime data
+.ai-regression-workbench/data/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
 .DS_Store
+Thumbs.db
 
-### AI Dev Local Config ###
+# Editor
+.vscode/
+.idea/
+
+# AI tooling (agent runtime caches only, not project constraints)
 .agents/
 .ai-code/
 .claude/
 .codex/
-.kiro/
-AGENTS.md
-CLAUDE.md
 .ai-code.json
