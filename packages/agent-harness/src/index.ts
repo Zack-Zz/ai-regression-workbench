@@ -1,1 +1,14 @@
-// Phase implementation pending
+export { HarnessSessionManager } from './session-manager.js';
+export type { StartSessionInput, StepRecord, CheckpointData, ApprovalRecord, StopConditionResult } from './session-manager.js';
+
+export { ToolRegistry } from './tool-registry.js';
+export type { ToolCallRecord, ToolCallResult, ToolHandler } from './tool-registry.js';
+
+export { ArtifactWriter } from './artifact-writer.js';
+export type { GenerateArtifactsInput, GenerateArtifactsResult } from './artifact-writer.js';
+
+export {
+  DEFAULT_EXPLORATION_POLICY,
+  DEFAULT_CODE_REPAIR_POLICY,
+} from './harness-policy.js';
+export type { HarnessPolicy, StopConditions } from './harness-policy.js';

@@ -8,6 +8,8 @@
     { "path": "./packages/storage/tsconfig.test.json" },
     { "path": "./packages/event-store" },
     { "path": "./packages/event-store/tsconfig.test.json" },
+    { "path": "./packages/agent-harness" },
+    { "path": "./packages/agent-harness/tsconfig.test.json" },
     { "path": "./apps/orchestrator" },
     { "path": "./apps/orchestrator/tsconfig.test.json" }
   ]

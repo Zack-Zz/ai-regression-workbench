@@ -89,7 +89,24 @@ importers:
 
   apps/trace-bridge: {}
 
-  packages/agent-harness: {}
+  packages/agent-harness:
+    dependencies:
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      '@zarb/storage':
+        specifier: workspace:*
+        version: link:../storage
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      better-sqlite3:
+        specifier: ^12.8.0
+        version: 12.8.0
 
   packages/config:
     dependencies:
