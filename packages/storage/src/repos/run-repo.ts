@@ -46,6 +46,7 @@ export interface UpdateRunInput {
   pauseRequested?: boolean;
   currentStage?: string;
   pausedAt?: string | null;
+  timeoutAt?: string;
   endedAt?: string;
   total?: number;
   passed?: number;
@@ -108,6 +109,7 @@ export class RunRepository {
     if (input.pauseRequested !== undefined) { sets.push('pause_requested = @pauseRequested'); params['pauseRequested'] = input.pauseRequested ? 1 : 0; }
     if (input.currentStage !== undefined) { sets.push('current_stage = @currentStage'); params['currentStage'] = input.currentStage; }
     if (input.pausedAt !== undefined) { sets.push('paused_at = @pausedAt'); params['pausedAt'] = input.pausedAt; }
+    if (input.timeoutAt !== undefined) { sets.push('timeout_at = @timeoutAt'); params['timeoutAt'] = input.timeoutAt; }
     if (input.endedAt !== undefined) { sets.push('ended_at = @endedAt'); params['endedAt'] = input.endedAt; }
     if (input.total !== undefined) { sets.push('total = @total'); params['total'] = input.total; }
     if (input.passed !== undefined) { sets.push('passed = @passed'); params['passed'] = input.passed; }

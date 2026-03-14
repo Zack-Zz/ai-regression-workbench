@@ -61,7 +61,27 @@ importers:
 
   apps/log-bridge: {}
 
-  apps/orchestrator: {}
+  apps/orchestrator:
+    dependencies:
+      '@zarb/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@zarb/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      better-sqlite3:
+        specifier: ^12.8.0
+        version: 12.8.0
 
   apps/review-manager: {}
 
