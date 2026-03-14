@@ -38,6 +38,8 @@
 
 - 第一优先级是观测 harness session
 - 对只支持 CLI 的 code agent，可继续保留 `ObservedCodeAgent`
+- `ObservedHarness` 建议实现于 `packages/agent-harness`，作为可选装饰器导出
+- 具体装配可以放在 `apps/orchestrator` 的依赖组装层完成
 
 `ObservedHarness` 负责：
 
@@ -57,6 +59,12 @@
 
 - `zai-xray`
   负责 AI / harness 调用的 tracing、cost、latency、error metrics
+
+集成方式建议：
+
+- 在 `packages/agent-harness` 中定义 `ObservabilityAdapter` 接口
+- `ObservedHarness` 仅依赖该接口，不直接耦合外部 provider SDK
+- 外部观测工具既可以通过 npm SDK 接入，也可以通过 HTTP 回调/ingest API 接入
 
 参考：
 

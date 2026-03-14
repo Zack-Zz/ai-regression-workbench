@@ -50,6 +50,7 @@
 | ApiCallRecord | Test Runner | `api_call_records`（`run_id`,`testcase_id`,`flow_step_id`,`ui_action_id`,`url`,`status_code`,`duration_ms`） | `diagnostics/<runId>/<testcaseId>/api-calls.jsonl` | 网络请求完成时流式写入 | Execution profile / failure report |
 | UiActionRecord | Test Runner | `ui_action_records`（`run_id`,`testcase_id`,`flow_step_id`,`action_type`,`duration_ms`） | `diagnostics/<runId>/<testcaseId>/ui-actions.jsonl` | 每个 UI 动作完成后 | Execution profile |
 | FlowStepRecord | Test Runner / Orchestrator | `flow_step_records`（`run_id`,`testcase_id`,`flow_id`,`step_name`,`api_call_count`） | `diagnostics/<runId>/<testcaseId>/flow-steps.json` | 每个流程步骤完成后 | Execution profile / execution report |
+| TestcaseExecutionProfile | DiagnosticsService / ExecutionReportBuilder | 可由 `api_call_records`、`ui_action_records`、`flow_step_records` 聚合，不强制单独建表 | `diagnostics/<runId>/<testcaseId>/execution-profile.json` | testcase 执行完成后预计算 | `GET /runs/:runId/testcases/:testcaseId/execution-profile` |
 | FailureAnalysis | AI Engine | `failure_analysis`（`run_id`,`testcase_id`,`category`,`summary`,`suggestions_json`） | `analysis/<runId>/<testcaseId>.json`（可选完整版） | AI 分析完成后 | Failure report / code-task draft |
 | CodeTask | Orchestrator / CodeTaskService | `code_tasks`（`task_id`,`run_id`,`testcase_id`,`status`,`workspace_path`,`diff_path`,`patch_path`） | `code-tasks/<taskId>/input.json`、`raw-output.txt`、`changes.diff`、`changes.patch`、`verify.txt` | 任务创建、执行、verify 更新 | `GET /code-tasks/:taskId` |
 | Review | ReviewService | `reviews`（`task_id`,`decision`,`comment`,`diff_hash`,`code_task_version`） | 可选附加到 `code-tasks/<taskId>/` | review 提交时 | `GET /code-tasks/:taskId/review` |
@@ -59,7 +60,7 @@
 | SettingsSnapshot | SettingsService / ConfigManager | `system_events`（`event_type=SETTINGS_UPDATED/SETTINGS_APPLIED`） | `<tool-workspace>/config.local.yaml` | 设置保存与生效时 | `GET /settings`、`PUT /settings` |
 | ExecutionReport | Orchestrator / RunService | `execution_reports`（`run_id`,`status`,`report_path`,`totals_json`,`generated_at`） | `runs/<runId>-execution-report.json` | Run 进入 `COMPLETED/FAILED/CANCELLED` | `GET /runs/:runId/execution-report` |
 | Generated Tests | AI Engine / CodeAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时，初始视为 `draft` candidate | Test assets 管理 / 后续执行选择 |
-| Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl` | harness session 创建、推进、结束时 | 后续 harness detail / replay |
+| Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`context_refs_json`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl` | harness session 创建、推进、结束时 | 后续 harness detail / replay |
 
 ## 5. 写入顺序与一致性规则
 
@@ -69,6 +70,7 @@
 - 推荐顺序：先写文件（临时文件 + rename），成功后写 DB 路径字段。
 - 若文件写成功但 DB 失败：写 `RUN_STEP_DEGRADED`，重试 DB；不可恢复时记录 warning 并在执行报告体现。
 - 若 DB 成功但文件缺失：标记产物损坏，在 `warnings` 标注并允许流程继续。
+- `execution_reports` 表只保存索引字段；完整报告内容以 `report_path` 指向的 JSON 文件为准。
 
 ### 5.2 幂等与去重
 

@@ -417,6 +417,12 @@ interface StartRunInput {
 - `hybrid` 模式要求 `selector + exploration`
 - 若入参不满足约束，返回 `StartRunResult.success=false`，不启动 run
 
+归一化规则：
+
+- `StartRunInput.exploration` 中未显式给出的字段，按 `PersonalSettings.exploration` 覆盖 `config.default.yaml` 的结果补全
+- 合并发生在 `RunService.startRun()` 的入参归一化阶段，再交给 `Orchestrator`
+- 合并后的完整 exploration 配置必须持久化到 run 记录
+
 ### 7.2.2 StartRunResult
 
 ```ts
@@ -551,6 +557,11 @@ interface ExecutionReport {
 }
 ```
 
+说明：
+
+- `ExecutionReport` 的完整内容默认从 `report_path` 指向的 JSON 文件读取
+- `execution_reports` 表只保存索引字段与 `totals_json`，不要求把完整报告展开到 SQLite 列
+
 ### 7.3.2 TestcaseExecutionProfile
 
 ```ts
@@ -617,6 +628,11 @@ interface TestcaseExecutionProfile {
   apiCalls: ApiCallItem[];
 }
 ```
+
+说明：
+
+- `TestcaseExecutionProfile` 默认来自 `diagnostics/<runId>/<testcaseId>/execution-profile.json`
+- 若预计算文件缺失，可回退到 `api_call_records`、`ui_action_records`、`flow_step_records` 做只读聚合
 
 ### 7.4 FailureReportSummary
 

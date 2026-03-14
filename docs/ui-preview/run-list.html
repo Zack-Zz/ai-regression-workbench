@@ -34,6 +34,7 @@
             <thead>
               <tr>
                 <th>Run ID</th>
+                <th>Mode</th>
                 <th>Scope</th>
                 <th>Status</th>
                 <th>Started</th>
@@ -44,6 +45,7 @@
             <tbody>
               <tr>
                 <td class="mono">run_20260313_001</td>
+                <td>hybrid</td>
                 <td>scenario: checkout_happy_path</td>
                 <td><span class="chip warn">AWAITING_REVIEW</span></td>
                 <td>2026-03-13 20:11:03</td>
@@ -52,7 +54,8 @@
               </tr>
               <tr>
                 <td class="mono">run_20260313_000</td>
-                <td>tag: api-critical</td>
+                <td>exploration</td>
+                <td>exploration: /admin/orders</td>
                 <td><span class="chip warn">AWAITING_CODE_ACTION</span></td>
                 <td>2026-03-13 18:42:10</td>
                 <td>5 / 4 / 1 / 0</td>
@@ -60,6 +63,7 @@
               </tr>
               <tr>
                 <td class="mono">run_20260312_007</td>
+                <td>regression</td>
                 <td>suite: smoke</td>
                 <td><span class="chip ok">COMPLETED</span></td>
                 <td>2026-03-12 17:33:49</td>
@@ -68,6 +72,7 @@
               </tr>
               <tr>
                 <td class="mono">run_20260311_019</td>
+                <td>regression</td>
                 <td>testcase: TC_ORDER_001</td>
                 <td><span class="chip danger">FAILED</span></td>
                 <td>2026-03-11 09:05:11</td>
@@ -78,6 +83,7 @@
           </table>
         </div>
         <p class="muted" style="margin-top:10px;">Totals 格式: total / passed / failed / skipped</p>
+        <p class="muted">列表接口支持 `cursor / limit / status / runMode`；当前预览展示第一页。</p>
       </section>
     </main>
 

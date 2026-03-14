@@ -14,6 +14,13 @@
 - `settings.html`：Settings
 - 对应英文页为 `*.en.html`
 
+当前预览已同步到最新设计中的关键约束：
+
+- `QuickRunPanel` 的 `runMode + selectorType + selectorValue`
+- Run List 的 `runMode` 列与分页提示
+- Run Detail 中 findings 内嵌、hybrid/exploration 阶段与 execution report / execution profile 链接
+- Review / Commit 中 `codeTaskVersion`、`expectedTaskVersion`、verify override 约束
+
 ## 本地预览
 
 在仓库根目录执行：

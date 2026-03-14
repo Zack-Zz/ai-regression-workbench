@@ -50,6 +50,7 @@
 - `kind: 'exploration' | 'code-repair'`
 - `status`
 - `policyJson`
+- `contextRefsJson`
 - `checkpointId?`
 - `tracePath`
 - `startedAt`
@@ -178,6 +179,12 @@
 - `agent-traces/<sessionId>/context-summary.json`
 - `agent-traces/<sessionId>/steps.jsonl`
 - `agent-traces/<sessionId>/tool-calls.jsonl`
+
+说明：
+
+- `StartAgentSessionInput.contextRefs` 必须持久化到 `agent_sessions.context_refs_json`
+- 同时应落到 `agent-traces/<sessionId>/context-summary.json`
+- 这样 replay / eval 才能复原 session 启动时使用的上下文引用
 
 对于 CodeTask：
 

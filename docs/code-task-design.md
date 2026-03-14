@@ -40,6 +40,7 @@ COMMITTED
 - `override review` 不是新的 decision 枚举，而是 `decision=accept` 且显式携带 verify override 标记
 - review retry 创建新的子 `CodeTask`
 - verify 失败时默认停在 `FAILED`，仅在策略允许时进入 override review
+- `SUCCEEDED` 表示 apply/verify 阶段完成且验证通过，但仍需人工 review；它不是整个 CodeTask 流程的终态
 - `CodeTaskStatus` 与总设计保持一致：
   `DRAFT -> PENDING_APPROVAL -> APPROVED -> RUNNING -> VERIFYING -> SUCCEEDED -> COMMIT_PENDING -> COMMITTED`
   异常状态：`FAILED / REJECTED / CANCELLED`

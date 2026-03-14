@@ -130,6 +130,12 @@ export interface Orchestrator {
 - `verify` 超时
   - CodeTask 进入 `FAILED`
 
+`timeout_at` 语义：
+
+- Run/CodeTask 进入带超时预算的活跃阶段时，Orchestrator 负责写入下一次超时截止时间
+- `TimeoutPolicy` 在每次状态推进、恢复和关键子步骤完成后检查 `timeout_at`
+- 第一阶段不要求独立后台定时器；超时检测可绑定在状态推进与轮询触发点
+
 ## 7.1 PLANNING_EXPLORATION 职责
 
 - 汇总 `runMode`、`selector`、`startUrls`、`focusAreas`、历史 findings 与 regression 结果
@@ -149,8 +155,15 @@ export interface Orchestrator {
 - `AWAITING_REVIEW` 表示“至少存在一个待 review 的 CodeTask，且当前没有正在执行的 code task”
 - 某个 CodeTask 执行 `review retry` 并创建子任务后：
   - 新 task 进入 `PENDING_APPROVAL`
-  - Run 聚合状态回到 `AWAITING_CODE_ACTION`
+  - 若不存在其他更高优先级的待 review / 待 commit 任务，则 Run 聚合状态回到 `AWAITING_CODE_ACTION`
 - Run 是否进入 `READY_TO_COMMIT` / `COMPLETED`，由是否仍存在待 review、待执行或待 commit 的 CodeTask 聚合决定
+
+## 7.3 ExecutionReportBuilder 聚合职责
+
+- 在 Run 进入终态时读取 `test_results`、`api_call_records`、`ui_action_records`、`flow_step_records`
+- 聚合 `flowSummaries`、`totals`、`failureReports`、`codeTaskSummaries`
+- 产出完整 `ExecutionReport` JSON，并写入 `runs/<runId>-execution-report.json`
+- 同时向 `execution_reports` 表写入索引记录
 
 ## 8. 设计约束
 

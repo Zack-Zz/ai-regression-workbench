@@ -36,21 +36,24 @@
         <article class="card">
           <h3>Review Decision</h3>
           <ul class="list">
-            <li><span class="chip ok">accept</span> by alice · 2026-03-13 20:15:12</li>
-            <li><span class="chip warn">retry</span> by bob · 2026-03-13 20:14:01</li>
+            <li><span class="chip ok">accept</span> by alice · 2026-03-13 20:15:12 · codeTaskVersion=2</li>
+            <li><span class="chip warn">retry</span> by bob · 2026-03-13 20:14:01 · codeTaskVersion=1</li>
           </ul>
           <p class="muted">review comments:</p>
           <ul class="list">
             <li>Assertions were added and changes are inside allowed scope.</li>
             <li>All verify checks passed. Ready for commit.</li>
           </ul>
+          <p class="muted">If review is forced after verify failure, the UI still submits `decision=accept`, plus an explicit override flag.</p>
         </article>
         <article class="card">
           <h3>Commit Candidate</h3>
           <ul class="list">
             <li><strong>branch:</strong> <span class="mono">fix/checkout-order-500</span></li>
+            <li><strong>harness:</strong> <span class="mono">ObservedHarness</span></li>
             <li><strong>changed files:</strong> 2</li>
             <li><strong>verify:</strong> <span class="chip ok">passed</span></li>
+            <li><strong>verify override:</strong> <span class="chip">false</span></li>
             <li><strong>status:</strong> <span class="chip warn">COMMIT_PENDING</span></li>
           </ul>
         </article>
@@ -63,6 +66,7 @@
             <tbody>
               <tr><th style="width:220px;">Commit Message</th><td class="mono">fix(test): stabilize checkout order assertion and network status check</td></tr>
               <tr><th>Author</th><td>alice &lt;alice@example.com&gt;</td></tr>
+              <tr><th>expectedTaskVersion</th><td class="mono">2</td></tr>
               <tr><th>Risk Notes</th><td>Only test assets and helpers changed. No business code modified.</td></tr>
             </tbody>
           </table>

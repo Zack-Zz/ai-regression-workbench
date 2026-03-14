@@ -49,9 +49,20 @@
 `QuickRunPanel` 第一阶段建议支持：
 
 - `runMode` 选择：`regression | exploration | hybrid`
-- `selector` 输入（用于 `regression / hybrid`）
+- `selectorType` 选择：`suite | scenario | tag | testcase`
+- `selectorValue` 输入（用于 `regression / hybrid`）
 - `startUrls`、`allowedHosts`、`maxSteps / maxPages`、`focusAreas`（用于 `exploration / hybrid`）
 - 提交前展示当前 `target workspace`、共享测试目录状态与预计权限级别
+
+交互约束：
+
+- 当 `runMode=regression` 时，必须选择 `selectorType` 并填写对应 `selectorValue`
+- 当 `runMode=hybrid` 时，同时展示 `selectorType/selectorValue` 与 exploration 参数
+- UI 负责把 `selectorType + selectorValue` 映射成 `StartRunInput.selector`
+  - `suite` -> `selector.suite`
+  - `scenario` -> `selector.scenarioId`
+  - `tag` -> `selector.tag`
+  - `testcase` -> `selector.testcaseId`
 
 ## 3.3 错误报告与修复情况展示
 

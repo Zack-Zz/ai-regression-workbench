@@ -46,10 +46,11 @@
         <article class="card">
           <h3>Quick Run</h3>
           <ul class="list">
-            <li class="row"><span>Suite: smoke</span><span class="chip">run start</span></li>
-            <li class="row"><span>Scenario: checkout_happy_path</span><span class="chip">run start</span></li>
-            <li class="row"><span>Tag: api-critical</span><span class="chip">run start</span></li>
+            <li class="row"><span>Mode: regression · selectorType: suite · value: smoke</span><span class="chip">run start</span></li>
+            <li class="row"><span>Mode: hybrid · selectorType: scenario · value: checkout_happy_path</span><span class="chip">run start</span></li>
+            <li class="row"><span>Mode: exploration · startUrls: /checkout · focusAreas: forms, console-errors</span><span class="chip">run start</span></li>
           </ul>
+          <p class="muted">QuickRunPanel 先选择 selectorType，再把 value 映射到 `suite/scenarioId/tag/testcaseId`。</p>
         </article>
       </section>
 
@@ -62,14 +63,14 @@
                 <strong class="mono">run_20260313_001</strong>
                 <span class="chip warn">AWAITING_REVIEW</span>
               </div>
-              <p class="muted">scope: scenario=checkout_happy_path · failed: 1</p>
+              <p class="muted">mode: hybrid · scope: scenario=checkout_happy_path · failed: 1 · findings: 2</p>
             </li>
             <li>
               <div class="row">
                 <strong class="mono">run_20260312_007</strong>
                 <span class="chip ok">COMPLETED</span>
               </div>
-              <p class="muted">scope: suite=smoke · passed: 26 / failed: 0</p>
+              <p class="muted">mode: regression · scope: suite=smoke · passed: 26 / failed: 0</p>
             </li>
           </ul>
         </article>
@@ -79,6 +80,7 @@
             <li>Trace provider query latency rose to <strong>850ms P95</strong>.</li>
             <li>1 run generated degraded step: <span class="mono">LOG_FETCH_FAILED</span>.</li>
             <li>Execution profile capture is enabled for failed testcases.</li>
+            <li>Findings are embedded in Run Detail during phase one.</li>
           </ul>
         </article>
       </section>

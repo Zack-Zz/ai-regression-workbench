@@ -98,6 +98,20 @@
   返回 `ExecutionReport`
 - `GET /runs/:runId/events?cursor=<id>&limit=<n>`
   返回 `RunEventPage`
+- `GET /runs/:runId/failure-reports`
+  返回 `FailureReportSummary[]`
+- `GET /runs/:runId/testcases/:testcaseId/failure-report`
+  返回 `FailureReport`
+- `GET /runs/:runId/testcases/:testcaseId/execution-profile`
+  返回 `TestcaseExecutionProfile`
+- `GET /runs/:runId/testcases/:testcaseId/diagnostics`
+  返回 `DiagnosticsDetail`
+- `GET /runs/:runId/testcases/:testcaseId/trace`
+  返回 `TraceDetail | null`
+- `GET /runs/:runId/testcases/:testcaseId/logs`
+  返回 `LogDetail | null`
+- `GET /runs/:runId/testcases/:testcaseId/analysis`
+  返回 `AnalysisDetail | null`
 
 第一阶段轮询建议：
 

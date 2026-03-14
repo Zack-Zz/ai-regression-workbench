@@ -795,6 +795,7 @@ CREATED
 - `exploration` 模式可直接进入 `PLANNING_EXPLORATION`，由 Harness 生成 probe plan。
 - `hybrid` 模式必须先进入 `RUNNING_TESTS`，再进入 `PLANNING_EXPLORATION` 做补充探测。
 - `resume` 的目标状态由系统根据最近 checkpoint 与 `currentStage` 自动决定，而不是由接口调用方指定。
+- 多 CodeTask 并行时，Run 状态是聚合视图；状态机图中的迁移表示“可能的聚合结果”，不表示单个 CodeTask retry 会强制回退所有其他 CodeTask。
 
 ### 8.2 CodeTaskStatus
 
@@ -814,6 +815,10 @@ DRAFT
 - `FAILED`
 - `REJECTED`
 - `CANCELLED`
+
+说明：
+
+- `SUCCEEDED` 表示 apply/verify 阶段成功结束，但 CodeTask 仍需等待人工 review；它不是整个 CodeTask 流程的终态
 
 状态机图（Mermaid）：
 
@@ -899,6 +904,11 @@ stateDiagram-v2
     COMMIT_PENDING --> CANCELLED
   }
 ```
+
+补充说明：
+
+- `COLLECTING_ARTIFACTS` 在 `regression / hybrid` 的测试阶段主要汇总 screenshot、video、trace、network、html report 等执行产物
+- `COLLECTING_ARTIFACTS` 在 `exploration` 阶段主要汇总 harness session trace、finding 摘要、candidate steps 与相关截图引用
 
 ### 8.3 控制动作
 
@@ -1190,6 +1200,12 @@ stateDiagram-v2
 - 维护配置版本号，避免并发覆盖
 - 敏感配置优先从环境变量解析，避免明文落盘
 
+约束：
+
+- 观察者接口建议统一为 `onConfigUpdated(snapshot: SettingsSnapshot): Promise<void>`
+- 默认由 `BootstrapService.bootstrap()` 在模块装配阶段统一注册观察者
+- 懒加载模块在初始化时必须先同步拉取当前 `SettingsSnapshot`，再注册后续更新订阅
+
 ---
 
 ## 11. 核心接口抽象
@@ -1232,6 +1248,8 @@ export interface RunRequest {
 - `exploration` 模式下必须提供 `exploration`
 - `hybrid` 模式下必须同时提供 `selector + exploration`
 - 实现层必须在启动前做参数校验，并将校验结果写入事件
+- `RunRequest.exploration` 的最终值按 `StartRunInput.exploration > PersonalSettings.exploration > config.default.yaml` 合并
+- 合并后的完整配置必须写入 `test_runs.exploration_config_json`
 
 ### 11.0.1 Settings Contract
 
@@ -1428,6 +1446,7 @@ export interface AgentSession {
   kind: 'exploration' | 'code-repair';
   status: 'created' | 'running' | 'paused' | 'waiting-approval' | 'completed' | 'failed' | 'cancelled';
   policyJson?: string;
+  contextRefsJson?: string;
   checkpointId?: string;
   tracePath?: string;
   startedAt: string;
@@ -1474,6 +1493,7 @@ export interface ExplorationAgent {
 - `PLANNING_EXPLORATION` 负责归一化预算、focus areas、回归失败线索并生成首轮 probe plan
 - `hybrid` 模式下，planning 必须优先参考 regression 失败结果、未覆盖路径与高风险区域
 - `ExplorationAgent` 的停止先受硬预算约束，再结合 `stopConditions`
+- `explore()` 是 session 级入口，不表示 Agent 脱离 Harness 独立运行；实际 step 循环、tool 调用、checkpoint 与预算控制仍由 Harness 驱动
 
 ### 11.8 CodeAgent
 
@@ -1519,6 +1539,11 @@ export interface CodeAgent {
 }
 ```
 
+说明：
+
+- `rawOutputPath` 可以由 agent runtime 直接产出
+- `changedFiles`、`diffPath`、`patchPath` 必须以 Harness 基于工作区/`git diff` 计算后的结果为准，而不是 agent 自报
+
 ### 11.9 CodeTaskPolicy
 
 ```ts
@@ -1546,6 +1571,10 @@ export interface ArtifactStore {
 
 ```ts
 export interface RunRepository {
+  getRun(runId: string): Promise<Run | null>;
+  getCodeTask(taskId: string): Promise<PersistedCodeTask | null>;
+  getCodeTasksByRunId(runId: string): Promise<PersistedCodeTask[]>;
+  getAgentSession(sessionId: string): Promise<AgentSession | null>;
   saveRun(run: Run): Promise<void>;
   saveResult(result: TestResult): Promise<void>;
   saveCorrelationContext(context: PersistedCorrelationContext): Promise<void>;
@@ -1563,6 +1592,11 @@ export interface RunRepository {
   saveSystemEvent(event: SystemEvent): Promise<void>;
 }
 ```
+
+说明：
+
+- `RunRepository` 是共享持久化边界，`Orchestrator`、`AgentHarness`、`DiagnosticsService` 可按职责直接调用对应读写方法
+- `AgentHarness` 不需要经由 `Orchestrator` 中转每一条 step 级持久化，但业务状态迁移仍由 `Orchestrator` 主导
 
 ---
 
@@ -1583,6 +1617,7 @@ export interface RunRepository {
 - `pauseRequested`
 - `currentStage`
 - `pausedAt`
+- `timeoutAt`
 - `startedAt`
 - `endedAt`
 - `total`
@@ -1669,7 +1704,6 @@ export interface RunRepository {
 - `logSummaryJson`
 - `suggestionsJson`
 - `version`
-- `retryCount`
 - `createdAt`
 
 ### 12.5.1 AgentSession
@@ -1683,6 +1717,7 @@ export interface RunRepository {
 - `agentName`
 - `status`
 - `policyJson`
+- `contextRefsJson`
 - `checkpointId`
 - `tracePath`
 - `startedAt`
@@ -1857,6 +1892,11 @@ export interface RunRepository {
 - `totalsJson`
 - `generatedAt`
 
+说明：
+
+- `ExecutionReportRecord` 只保存索引字段
+- 完整 `ExecutionReport` JSON 持久化到 `runs/<runId>-execution-report.json`
+
 ---
 
 ## 13. SQLite 表设计建议
@@ -1974,7 +2014,6 @@ CREATE TABLE failure_analysis (
   log_summary_json TEXT,
   suggestions_json TEXT,
   version INTEGER NOT NULL DEFAULT 1,
-  retry_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT
 );
 ```
@@ -1990,6 +2029,7 @@ CREATE TABLE agent_sessions (
   agent_name TEXT,
   status TEXT NOT NULL,
   policy_json TEXT,
+  context_refs_json TEXT,
   checkpoint_id TEXT,
   trace_path TEXT,
   started_at TEXT,
@@ -3296,6 +3336,12 @@ zarb ui
 - Run 进入 `COMPLETED` / `FAILED` / `CANCELLED` 时自动生成
 - 若在中途被用户取消，报告中需明确标记“用户取消”与已完成阶段
 
+持久化策略：
+
+- SQLite `execution_reports` 表只保存索引字段：`runId/status/reportPath/totalsJson/generatedAt`
+- 完整报告内容序列化到 `runs/<runId>-execution-report.json`
+- `flowSummaries` 由 `ExecutionReportBuilder` 在 Run 终态时从 `flow_step_records` 聚合生成
+
 ### 26.5 接口/点击/流程明细记录要求
 
 接口粒度（API Call）：
@@ -3303,6 +3349,11 @@ zarb ui
 - 必须记录请求方法、URL、状态码、响应摘要、开始时间、结束时间、耗时
 - 必须记录 `success/errorType/errorMessage`
 - 若响应体过大，正文只保留摘要并落脱敏规则后的片段
+
+`TestcaseExecutionProfile` 生成策略：
+
+- testcase 执行完成后预计算并落盘到 `diagnostics/<runId>/<testcaseId>/execution-profile.json`
+- `DiagnosticsService.getExecutionProfile` 默认优先读取该预计算文件，必要时再回退到 DB 聚合
 
 点击粒度（UI Action）：
 

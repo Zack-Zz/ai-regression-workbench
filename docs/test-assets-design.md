@@ -180,6 +180,12 @@ testAssets:
 - `createdAt`
 - `updatedAt`
 
+`Scenario` 第一阶段来源：
+
+- 正式测试中的 `scenarioId` 由测试资产元数据或测试文件注解静态声明
+- AI exploration 可以提出 `candidateScenario`，但第一阶段不自动写入 `scenarios` 表
+- 第一阶段不提供独立的 Scenario 管理 UI；后续再补专门入口
+
 ## 7. 执行选择策略
 
 不要仅靠目录扫描决定要跑哪些测试。

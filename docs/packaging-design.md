@@ -209,7 +209,7 @@ zarb doctor
 - git
 - SQLite 可写性
 - SQLite `WAL` 模式是否启用
-- 是否存在待执行迁移
+- 当前 schema 版本是否与预期一致，迁移是否已成功执行
 - trace provider 配置
 - log provider 配置
 - Codex CLI
