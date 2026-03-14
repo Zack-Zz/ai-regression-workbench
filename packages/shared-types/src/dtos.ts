@@ -466,3 +466,83 @@ export interface SystemEventRecord {
   payloadJson?: string;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// AI Engine — Phase 6
+// ---------------------------------------------------------------------------
+
+export interface FailureContext {
+  runId: string;
+  testcaseId: string;
+  testcaseName: string;
+  errorType?: string;
+  errorMessage?: string;
+  screenshotPath?: string;
+  networkLogPath?: string;
+  traceSummary?: TraceSummary;
+  logSummary?: LogSummary;
+  verifyOutput?: string;
+}
+
+export interface ExplorationFindingContext {
+  runId: string;
+  sessionId: string;
+  findings: Array<{
+    findingId: string;
+    category: string;
+    severity: string;
+    description: string;
+    url?: string;
+    screenshotPath?: string;
+  }>;
+}
+
+export interface FailureAnalysis {
+  id: string;
+  runId: string;
+  testcaseId: string;
+  category: string;
+  suspectedLayer: string;
+  confidence: number;
+  summary: string;
+  probableCause: string;
+  suggestions: string[];
+  promptTemplateVersion: string;
+  createdAt: string;
+}
+
+export interface FindingSummary {
+  findingId: string;
+  category: string;
+  severity: string;
+  summary: string;
+  suggestedAction: string;
+}
+
+export interface GeneratedTestDraft {
+  id: string;
+  runId: string;
+  testcaseId?: string;
+  sessionId?: string;
+  title: string;
+  code: string;
+  filePath: string;
+  promptTemplateVersion: string;
+  status: 'draft' | 'pending-approval';
+  createdAt: string;
+}
+
+export interface CodeTaskDraft {
+  id: string;
+  runId: string;
+  analysisId?: string;
+  goal: string;
+  target: 'app' | 'test';
+  workspacePath: string;
+  scopePaths: string[];
+  constraints: string[];
+  verificationCommands: string[];
+  promptTemplateVersion: string;
+  status: 'draft' | 'pending-approval';
+  createdAt: string;
+}

@@ -12,6 +12,7 @@ export interface AnalysisRow {
   trace_summary_json: string | null;
   log_summary_json: string | null;
   suggestions_json: string | null;
+  prompt_template_version: string | null;
   version: number;
   created_at: string;
 }
@@ -28,6 +29,7 @@ export interface SaveAnalysisInput {
   traceSummaryJson?: string;
   logSummaryJson?: string;
   suggestionsJson?: string;
+  promptTemplateVersion?: string;
   version?: number;
   createdAt: string;
 }
@@ -40,10 +42,12 @@ export class AnalysisRepository {
       .prepare(`
         INSERT OR REPLACE INTO failure_analysis
           (id, run_id, testcase_id, category, suspected_layer, confidence, summary,
-           probable_cause, trace_summary_json, log_summary_json, suggestions_json, version, created_at)
+           probable_cause, trace_summary_json, log_summary_json, suggestions_json,
+           prompt_template_version, version, created_at)
         VALUES
           (@id, @runId, @testcaseId, @category, @suspectedLayer, @confidence, @summary,
-           @probableCause, @traceSummaryJson, @logSummaryJson, @suggestionsJson, @version, @createdAt)
+           @probableCause, @traceSummaryJson, @logSummaryJson, @suggestionsJson,
+           @promptTemplateVersion, @version, @createdAt)
       `)
       .run({
         id: input.id,
@@ -57,6 +61,7 @@ export class AnalysisRepository {
         traceSummaryJson: input.traceSummaryJson ?? null,
         logSummaryJson: input.logSummaryJson ?? null,
         suggestionsJson: input.suggestionsJson ?? null,
+        promptTemplateVersion: input.promptTemplateVersion ?? null,
         version: input.version ?? 1,
         createdAt: input.createdAt,
       });

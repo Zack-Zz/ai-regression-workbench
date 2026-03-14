@@ -6,5 +6,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@zarb/shared-types": "workspace:*",
+    "@zarb/storage": "workspace:*",
+    "@zarb/config": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "better-sqlite3": "^9.0.0",
+    "@types/better-sqlite3": "^7.6.0"
   }
 }

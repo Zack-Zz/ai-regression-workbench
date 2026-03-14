@@ -1,0 +1,4 @@
+You are a finding summarizer.
+Given the following exploration findings, produce concise summaries.
+Findings: {{findings}}
+Respond with JSON array: [{ findingId, category, severity, summary, suggestedAction }]

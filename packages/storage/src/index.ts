@@ -45,6 +45,12 @@ export type { DiagnosticFetchRow, SaveDiagnosticFetchInput } from './repos/diagn
 export { AnalysisRepository } from './repos/analysis-repo.js';
 export type { AnalysisRow, SaveAnalysisInput } from './repos/analysis-repo.js';
 
+export { GeneratedTestRepository } from './repos/generated-test-repo.js';
+export type { GeneratedTestRow, SaveGeneratedTestInput } from './repos/generated-test-repo.js';
+
+export { CodeTaskDraftRepository } from './repos/code-task-draft-repo.js';
+export type { CodeTaskDraftRow, SaveCodeTaskDraftInput } from './repos/code-task-draft-repo.js';
+
 export { SystemEventRepository } from './repos/system-event-repo.js';
 export type { SystemEventRow, SaveSystemEventInput } from './repos/system-event-repo.js';
 

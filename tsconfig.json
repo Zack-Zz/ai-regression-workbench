@@ -11,6 +11,10 @@
     { "path": "./packages/agent-harness" },
     { "path": "./packages/agent-harness/tsconfig.test.json" },
     { "path": "./apps/orchestrator" },
-    { "path": "./apps/orchestrator/tsconfig.test.json" }
+    { "path": "./apps/orchestrator/tsconfig.test.json" },
+    { "path": "./apps/ai-engine" },
+    { "path": "./apps/ai-engine/tsconfig.test.json" },
+    { "path": "./apps/cli" },
+    { "path": "./apps/cli/tsconfig.test.json" }
   ]
 }

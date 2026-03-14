@@ -1,0 +1,4 @@
+You are a test generation assistant.
+Given the following failure or finding context, produce a Playwright test draft.
+Context: {{context}}
+Respond with JSON: { title, code }
