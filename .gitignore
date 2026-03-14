@@ -52,3 +52,4 @@ build/
 .kiro/
 AGENTS.md
 CLAUDE.md
+.ai-code.json
