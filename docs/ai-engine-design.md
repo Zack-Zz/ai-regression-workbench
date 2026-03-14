@@ -32,6 +32,11 @@
 - `GeneratedTestDraft`
 - `CodeTaskDraft`
 
+约束：
+
+- `Finding` / `FindingSummary` 仅针对 exploration session 产物
+- regression 失败分析产出的是 `FailureAnalysis`，而不是持久化 `Finding`
+
 ## 4. 关键接口
 
 ```ts
@@ -102,3 +107,8 @@ AI 参与站点自主探测时，应通过 harness 中的 `ExplorationAgent` 运
 - `agent-harness` 负责工具调用、权限、trace、回放
 
 这样可以避免把“结构化分析”和“交互式 agent runtime”混成一个模块
+
+补充：
+
+- `GeneratedTestDraft` 可以来自 `FailureContext` 或 `ExplorationFindingContext`
+- 第一阶段只要求落盘候选测试草稿与相关元数据，不要求自动晋升为正式共享测试

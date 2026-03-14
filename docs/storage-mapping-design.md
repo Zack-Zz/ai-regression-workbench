@@ -42,7 +42,7 @@
 | 领域对象 | 写入模块 | SQLite 表（关键字段） | 文件系统路径 | 写入时机 | 查询入口 |
 | --- | --- | --- | --- | --- | --- |
 | Run | Orchestrator / RunService | `test_runs`（`run_id`,`scope_type`,`scope_value`,`selector_json`,`status`） | `runs/<runId>.json`（可选快照） | `startRun` 创建、状态迁移、终态汇总 | `GET /runs`、`GET /runs/:runId` |
-| Scenario | Test Assets / AI Engine | `scenarios`（`scenario_id`,`name`,`entry_urls_json`） | 无或附加定义文件 | 场景建模、候选测试晋升时 | 后续场景管理 |
+| Scenario | Test Assets / AI Engine | `scenarios`（`scenario_id`,`name`,`description`,`entry_urls_json`,`risk_tags_json`,`owner`） | 无或附加定义文件 | 场景建模、候选测试晋升时 | 后续场景管理 |
 | TestResult | Test Runner | `test_results`（`run_id`,`testcase_id`,`status`,`duration_ms`） | `artifacts/<runId>/<testcaseId>/` 下 screenshot/video/trace/network | 用例执行完成后 | Run detail / failure report |
 | CorrelationContext | Test Runner / Diagnostics | `correlation_contexts`（`trace_ids_json`,`request_ids_json`,`from_time`,`to_time`） | `diagnostics/<runId>/<testcaseId>/correlation-context.json` | 失败用例诊断前 | Failure report / diagnostics |
 | DiagnosticFetch（Trace/Log） | Trace Bridge / Log Bridge | `diagnostic_fetches`（`type`,`status`,`provider`,`summary_json`,`raw_link`） | `diagnostics/<runId>/<testcaseId>/trace-summary.json`、`log-summary.json` | Trace/Log 查询后 | Diagnostics detail |
@@ -55,10 +55,10 @@
 | Review | ReviewService | `reviews`（`task_id`,`decision`,`comment`,`diff_hash`,`code_task_version`） | 可选附加到 `code-tasks/<taskId>/` | review 提交时 | `GET /code-tasks/:taskId/review` |
 | CommitRecord | CommitService | `commit_records`（`task_id`,`branch_name`,`commit_sha`,`commit_message`,`status`） | `commits/<taskId>.json` | commit 创建或完成后 | `GET /code-tasks/:taskId/commit` |
 | RunEvent | Orchestrator / Services | `run_events`（`run_id`,`entity_type`,`entity_id`,`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 所有关键动作和状态迁移 | `GET /runs/:runId/events` |
-| SystemEvent | SettingsService / BootstrapService / Harness | `system_events`（`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 设置保存、生效、初始化、迁移、harness 全局事件 | `GET /system/events`（后续） |
+| SystemEvent | SettingsService / BootstrapService / Harness | `system_events`（`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 设置保存、生效、初始化、迁移、harness 全局事件 | 第一阶段不提供 API；后续可增补 `GET /system/events` |
 | SettingsSnapshot | SettingsService / ConfigManager | `system_events`（`event_type=SETTINGS_UPDATED/SETTINGS_APPLIED`） | `<tool-workspace>/config.local.yaml` | 设置保存与生效时 | `GET /settings`、`PUT /settings` |
 | ExecutionReport | Orchestrator / RunService | `execution_reports`（`run_id`,`status`,`report_path`,`totals_json`,`generated_at`） | `runs/<runId>-execution-report.json` | Run 进入 `COMPLETED/FAILED/CANCELLED` | `GET /runs/:runId/execution-report` |
-| Generated Tests | AI Engine / CodeAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时 | Test assets 管理 / 后续执行选择 |
+| Generated Tests | AI Engine / CodeAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时，初始视为 `draft` candidate | Test assets 管理 / 后续执行选择 |
 | Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl` | harness session 创建、推进、结束时 | 后续 harness detail / replay |
 
 ## 5. 写入顺序与一致性规则
@@ -75,6 +75,7 @@
 - 主键采用稳定 ID（`runId/testcaseId/taskId` 组合 + 事件 UUID）。
 - 同一阶段重试时允许 UPSERT 或版本更新，不产生重复终态记录。
 - `execution_reports` 每个 `runId` 只保留最后一次有效报告路径。
+- 第一阶段不要求对 Generated Tests 做自动去重；若需要去重，由 review 阶段基于 `scenarioId / pageUrl / actionSequence` 等信号人工判断。
 
 ### 5.3 SQLite 并发与迁移
 

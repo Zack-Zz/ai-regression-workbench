@@ -169,7 +169,7 @@ interface WorkspaceService {
 ```ts
 interface RunService {
   startRun(input: StartRunInput): Promise<StartRunResult>;
-  listRuns(query?: ListRunsQuery): Promise<RunSummary[]>;
+  listRuns(query?: ListRunsQuery): Promise<RunSummaryPage>;
   getRun(runId: string): Promise<RunDetail>;
   getExecutionReport(runId: string): Promise<ExecutionReport | null>;
   getRunEvents(runId: string, query?: RunEventsQuery): Promise<RunEventPage>;
@@ -198,7 +198,7 @@ interface DiagnosticsService {
 
 ```ts
 interface CodeTaskService {
-  listCodeTasks(query?: ListCodeTasksQuery): Promise<CodeTaskSummary[]>;
+  listCodeTasks(query?: ListCodeTasksQuery): Promise<CodeTaskSummaryPage>;
   getCodeTask(taskId: string): Promise<CodeTaskDetail>;
   approveCodeTask(taskId: string): Promise<ActionResult>;
   rejectCodeTask(taskId: string): Promise<ActionResult>;
@@ -356,6 +356,11 @@ interface SettingsApplyResult extends ActionResult {
 }
 ```
 
+说明：
+
+- `exploration` 在本地配置中可省略；系统必须先与 `config.default.yaml` 合并后再对外暴露 `SettingsSnapshot`
+- 当用户未显式配置时，默认值来自默认配置中的 `exploration.maxSteps / maxPages / allowedHosts / defaultFocusAreas`
+
 ### 7.2 RunSummary
 
 ```ts
@@ -440,9 +445,26 @@ interface RunDetail {
 }
 ```
 
+说明：
+
+- 第一阶段 findings 直接内嵌在 `RunDetail`
+- 若后续 findings 规模变大，可再拆出独立 `GET /runs/:runId/findings`
+
 ### 7.3.0 RunEventItem / RunEventsQuery
 
 ```ts
+interface ListRunsQuery {
+  cursor?: string;
+  limit?: number;
+  status?: string;
+  runMode?: RunMode;
+}
+
+interface RunSummaryPage {
+  items: RunSummary[];
+  nextCursor?: string;
+}
+
 interface RunEventItem {
   eventId: string;
   runId: string;
@@ -668,6 +690,20 @@ interface CodeTaskDetail {
   verifyOutputPath?: string;
   reviews: ReviewRecord[];
   commit?: CommitDetail | null;
+}
+```
+
+```ts
+interface ListCodeTasksQuery {
+  cursor?: string;
+  limit?: number;
+  status?: string;
+  runId?: string;
+}
+
+interface CodeTaskSummaryPage {
+  items: CodeTaskSummary[];
+  nextCursor?: string;
 }
 ```
 

@@ -159,11 +159,11 @@
 - `GET /settings`
 - `POST /settings/validate`
 - `PUT /settings`
-- `GET /runs`
+- `GET /runs`（支持 `cursor`、`limit`、`status`、`runMode`）
 - `GET /runs/:runId`
 - `GET /runs/:runId/execution-report`
 - `GET /runs/:runId/events`
-- `GET /runs/:runId/findings`（可选，可先内嵌在 `RunDetail`）
+- `GET /runs/:runId/findings`（后续可选；第一阶段先内嵌在 `RunDetail`）
 - `GET /runs/:runId/failure-reports`
 - `GET /runs/:runId/testcases/:testcaseId/failure-report`
 - `GET /runs/:runId/testcases/:testcaseId/execution-profile`
@@ -172,7 +172,7 @@
 - `GET /runs/:runId/testcases/:testcaseId/logs`
 - `GET /runs/:runId/testcases/:testcaseId/analysis`
 - `GET /code-tasks/:taskId`
-- `GET /code-tasks`
+- `GET /code-tasks`（支持 `cursor`、`limit`、`status`、`runId`）
 - `GET /code-tasks/:taskId/review`
 - `GET /code-tasks/:taskId/commit`
 - `POST /runs`

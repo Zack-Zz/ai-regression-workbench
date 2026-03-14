@@ -203,6 +203,7 @@ TestCaseRepository / AssetIndex
 - `regression` 模式走上面的标准路径
 - `exploration` 模式不要求先命中现有 testcase，而是由 harness 驱动 `ExplorationAgent` 基于 `startUrls` 与预算执行
 - `hybrid` 模式先跑 `regression`，再对未覆盖或高风险路径做 bounded exploration
+- `hybrid` 模式下 exploration planning 应优先消费 regression 的失败结果、未覆盖页面和高风险 `focusAreas`
 
 补充规则：
 
@@ -214,6 +215,30 @@ TestCaseRepository / AssetIndex
 - 若 `sharedRootStatus=invalid`，则展示告警，并由用户决定是否继续
 - 若共享测试集加载失败但候选测试仍可执行，记录 degraded 并继续
 - 若可执行 testcase 集为空且无可继续路径，终止 run 并生成执行报告
+
+## 7.1 GeneratedTestDraft 生命周期
+
+第一阶段按“候选产物优先”设计，不直接自动晋升为正式测试：
+
+```text
+AI 生成 GeneratedTestDraft
+  ->
+落盘到 generated-tests/<taskId>/
+  ->
+reviewStatus = draft
+  ->
+人工 review
+  ->
+approved candidate / rejected
+  ->
+显式 promote 到 sharedRoot（后续动作）
+```
+
+约束：
+
+- `includeGeneratedInRuns=true` 仅允许执行 `approved candidate`，不执行 `draft`
+- 第一阶段不要求实现自动 promote API；人工晋升可以作为后续动作
+- 第一阶段不做自动去重；候选测试是否与现有测试重复，由 review 阶段判断
 
 ## 8. 设计约束
 

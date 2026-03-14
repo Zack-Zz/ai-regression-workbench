@@ -80,6 +80,8 @@
 
 - `retryCodeTask` 语义为“创建子任务并进入新一轮执行”，而不是让旧任务状态回退
 - `pause` 动作在当前稳定步骤结束后落到 `PAUSED`
+- `resumeRun(runId)` 不要求调用方指定目标状态；Orchestrator 必须根据已持久化的 `pausedAtStage / currentStage / checkpoint` 自动恢复
+- Run 状态是聚合视图，不逐个暴露每个 CodeTask 的内部状态
 
 ## 6. 关键接口
 
@@ -113,6 +115,42 @@ export interface Orchestrator {
 - 超时必须落事件
 - 超时后进入明确状态
 - 可恢复超时允许用户显式重试
+
+推荐映射：
+
+- `test runner` 超时
+  - Run 进入 `FAILED`
+- `trace/log` 查询超时
+  - 写 `RUN_STEP_DEGRADED`，继续后续流程
+- `AI analysis` 超时
+  - 写 `RUN_STEP_DEGRADED`，Run 可进入 `COMPLETED`，但不生成新的 CodeTaskDraft
+- `harness session` 超时
+  - 若绑定 run exploration，则当前 run 进入 `FAILED`
+  - 若绑定 code repair，则当前 CodeTask 进入 `FAILED`
+- `verify` 超时
+  - CodeTask 进入 `FAILED`
+
+## 7.1 PLANNING_EXPLORATION 职责
+
+- 汇总 `runMode`、`selector`、`startUrls`、`focusAreas`、历史 findings 与 regression 结果
+- 归一化 exploration budget，并生成首轮 probe plan
+- 创建 Harness session 与初始 policy snapshot
+
+失败处理：
+
+- 参数或 policy 归一化失败：Run 进入 `FAILED`
+- Harness session 初始化失败：Run 进入 `FAILED`
+- 可恢复的 planning 依赖错误：写 `RUN_STEP_DEGRADED` 后进入 `FAILED`，不允许跳过 planning 直接开始 exploration
+
+## 7.2 多 CodeTask 与 Run 聚合规则
+
+- 同一 run 可以关联多个 CodeTask
+- `AWAITING_CODE_ACTION` 表示“至少存在一个待 approve / execute / retry 的 CodeTask”
+- `AWAITING_REVIEW` 表示“至少存在一个待 review 的 CodeTask，且当前没有正在执行的 code task”
+- 某个 CodeTask 执行 `review retry` 并创建子任务后：
+  - 新 task 进入 `PENDING_APPROVAL`
+  - Run 聚合状态回到 `AWAITING_CODE_ACTION`
+- Run 是否进入 `READY_TO_COMMIT` / `COMPLETED`，由是否仍存在待 review、待执行或待 commit 的 CodeTask 聚合决定
 
 ## 8. 设计约束
 

@@ -64,12 +64,23 @@
 
 ## 5. 常用错误码
 
+- 命名规范优先使用 `<OBJECT>_<CONDITION>`，便于实现层按对象扩展
 - `RUN_SELECTOR_INVALID`
 - `RUN_MODE_INVALID`
+- `RUN_NOT_FOUND`
+- `RUN_STATE_INVALID`
+- `RUN_ALREADY_COMPLETED`
+- `RUN_ALREADY_CANCELLED`
 - `WORKSPACE_NOT_FOUND`
 - `SHARED_ROOT_INVALID`
+- `CODE_TASK_NOT_FOUND`
 - `CODE_TASK_STATE_INVALID`
 - `CODE_TASK_SCOPE_FORBIDDEN`
+- `REVIEW_NOT_FOUND`
+- `COMMIT_NOT_FOUND`
+- `HARNESS_SESSION_TIMEOUT`
+- `AGENT_EXECUTION_FAILED`
+- `COMMIT_FAILED`
 - `VERIFY_OVERRIDE_NOT_ALLOWED`
 - `SETTINGS_VERSION_CONFLICT`
 - `SETTINGS_VALIDATION_FAILED`
@@ -79,8 +90,8 @@
 
 - `POST /runs`
   触发 `StartRunInput`
-- `GET /runs`
-  返回 `RunSummary[]`
+- `GET /runs?cursor=<id>&limit=<n>&status=<status>&runMode=<mode>`
+  返回 `RunSummaryPage`
 - `GET /runs/:runId`
   返回 `RunDetail`
 - `GET /runs/:runId/execution-report`
@@ -93,6 +104,7 @@
 - `RunDetail` 活跃 run 每 2 秒拉一次
 - `RunList` 有活跃 run 时每 5 秒拉一次
 - run 终态后停止轮询
+- 第一阶段 `findings` 内嵌在 `GET /runs/:runId` 返回体中，不单独提供 `GET /runs/:runId/findings`
 
 ## 7. Settings 相关接口
 
@@ -107,6 +119,8 @@
 
 ## 8. CodeTask / Review / Commit
 
+- `GET /code-tasks?cursor=<id>&limit=<n>&status=<status>&runId=<runId>`
+  返回 `CodeTaskSummaryPage`
 - `POST /code-tasks/:taskId/approve`
 - `POST /code-tasks/:taskId/execute`
 - `POST /code-tasks/:taskId/retry`

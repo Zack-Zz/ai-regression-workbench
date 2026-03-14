@@ -65,6 +65,7 @@ apps/
   review-manager/
   local-ui/
 packages/
+  agent-harness/
   shared-types/
   shared-utils/
   config/

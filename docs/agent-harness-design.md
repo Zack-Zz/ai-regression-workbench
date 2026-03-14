@@ -62,10 +62,17 @@
 
 - `sessionBudgetMs`
 - `toolCallTimeoutMs`
+- `stopConditions?`
 - `allowedHosts`
 - `allowedWriteScopes`
 - `requireApprovalFor`
 - `reviewOnVerifyFailureAllowed`
+
+其中 `stopConditions` 建议至少支持：
+
+- `maxFindings?: number`
+- `stopWhenFocusAreasCovered?: boolean`
+- `stopWhenNoNewFindingsForSteps?: number`
 
 ### 3.3 ToolCallRecord
 
@@ -127,6 +134,13 @@
 - 调用 `playwright.*`、`diagnostics.*` 等工具
 - 输出 finding 和候选测试线索
 
+停止条件要求：
+
+- 先满足硬预算约束：`sessionBudgetMs / maxSteps / maxPages`
+- 再结合软停止策略：`stopConditions`
+- 若 regression/hybrid 已提供失败线索，应优先覆盖失败相关页面、接口和 `focusAreas`
+- 当当前 step 未产生新的 finding，且连续达到 `stopWhenNoNewFindingsForSteps` 时可提前停止
+
 ### 6.2 CodeAgent
 
 角色：
@@ -177,3 +191,14 @@
 - Harness 必须把 tool call、approval、checkpoint 持久化
 - Harness 失败不能破坏已有业务产物
 - Harness 不应变成新的业务编排器，业务状态机仍由 Orchestrator 主导
+
+## 10. Pause / Resume 协议
+
+- Orchestrator 发起 `pauseRun` 或 `pauseCodeTask` 时，Harness 进入 `pause-requested`
+- Harness 不应粗暴中断当前 tool call；应等待当前 step 在安全点结束
+- 当前 step 结束后，Harness 必须：
+  - 持久化 checkpoint
+  - 写入最后一个 `tool-call` / `step` 结果
+  - 回传 `pausedAtStage`
+- Orchestrator 收到确认后把 Run/CodeTask 置为 `PAUSED`
+- `resumeRun(runId)` / `resumeSession(sessionId)` 的语义都是“从最近 checkpoint 继续”，恢复目标由系统根据 `pausedAtStage` 自动决定

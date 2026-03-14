@@ -467,6 +467,8 @@ ai-regression-workbench/
     local-ui/
       src/
   packages/
+    agent-harness/
+      src/
     shared-types/
       src/
     shared-utils/
@@ -527,6 +529,10 @@ ai-regression-workbench/
   `FailureAnalysis`、`CodeTask` draft、agent 路由策略。
   详见 [ai-engine-design.md](./ai-engine-design.md)
 
+- `packages/agent-harness`
+  Agent runtime、tool registry、policy、checkpoint、replay、`ExplorationAgent` / `CodeAgent` 装配。
+  详见 [agent-harness-design.md](./agent-harness-design.md)
+
 - `apps/review-manager`
   Review、commit、审计记录。
   详见 [code-task-design.md](./code-task-design.md)
@@ -560,6 +566,7 @@ ai-regression-workbench/
 - `packages/*` 不依赖 `apps/*`。
 - `apps/orchestrator` 不直接依赖具体 provider 的实现细节，只依赖接口。
 - `apps/local-ui` 不直连 SQLite，统一通过 API 或读取统一 repository 接口。
+- `ExplorationAgent` 与 `CodeAgent` 的运行时归属 `packages/agent-harness`，`apps/ai-engine` 只负责分析与 draft 生成。
 
 ### 6.4 目标项目目录约束
 
@@ -655,14 +662,19 @@ ai-regression-workbench/
 
 ### 7.4.2 Finding
 
-表示一次探测或失败分析得到的问题发现。
+表示一次 exploration session 产生的问题发现。
 
 职责：
 
-- 记录问题类别、严重级别、证据与页面位置
+- 记录 exploration 问题类别、严重级别、证据与页面位置
 - 支持转为候选测试、CodeTask 或人工调查事项
 - 作为探索结果与后续修复之间的桥梁
-- 同一 testcase 允许多次分析并产生多个版本。
+- 同一 exploration session 可以产生多个 finding
+
+说明：
+
+- `Finding` 是 exploration session 的结构化输出
+- regression 失败分析产出 `FailureAnalysis`，不直接落为 `findings` 表
 
 ### 7.5 CodeTask
 
@@ -782,6 +794,7 @@ CREATED
 - `regression` 模式通常直接进入 `RUNNING_TESTS`。
 - `exploration` 模式可直接进入 `PLANNING_EXPLORATION`，由 Harness 生成 probe plan。
 - `hybrid` 模式必须先进入 `RUNNING_TESTS`，再进入 `PLANNING_EXPLORATION` 做补充探测。
+- `resume` 的目标状态由系统根据最近 checkpoint 与 `currentStage` 自动决定，而不是由接口调用方指定。
 
 ### 8.2 CodeTaskStatus
 
@@ -1397,6 +1410,11 @@ export interface AIEngine {
 export interface HarnessPolicy {
   sessionBudgetMs?: number;
   toolCallTimeoutMs?: number;
+  stopConditions?: {
+    maxFindings?: number;
+    stopWhenFocusAreasCovered?: boolean;
+    stopWhenNoNewFindingsForSteps?: number;
+  };
   allowedWriteScopes?: string[];
   allowedHosts?: string[];
   requireApprovalFor?: Array<'shell' | 'git-write' | 'fs-write' | 'external-http' | 'business-code-write'>;
@@ -1450,6 +1468,12 @@ export interface ExplorationAgent {
   explore(request: RunRequest, session: AgentSession): Promise<Finding[]>;
 }
 ```
+
+补充约束：
+
+- `PLANNING_EXPLORATION` 负责归一化预算、focus areas、回归失败线索并生成首轮 probe plan
+- `hybrid` 模式下，planning 必须优先参考 regression 失败结果、未覆盖路径与高风险区域
+- `ExplorationAgent` 的停止先受硬预算约束，再结合 `stopConditions`
 
 ### 11.8 CodeAgent
 
@@ -2645,6 +2669,12 @@ AI 探测应输出结构化 finding，而不是自由文本日志。
 - `nextSuggestedProbe`
 - `candidateScenario`
 
+停止条件建议：
+
+- 达到 `maxSteps / maxPages / sessionBudgetMs`
+- 达到 `stopConditions.maxFindings`
+- 指定 `focusAreas` 已覆盖且没有新的高价值 finding
+
 ### 18.3 CodeTask 生成原则
 
 AI 分析完成后，可以自动生成 `CodeTask` 草稿，但不能自动直接执行。
@@ -2668,6 +2698,29 @@ CodeTaskPolicy 审核
 - 一次 `FailureAnalysis` 可以生成多个 `CodeTask`，例如 `test` 与 `app` 两个方向
 - review retry 不回退原任务，而是创建带 `parentTaskId` 的新 task attempt
 - 若 AI 只建议补测试而不需要改业务代码，应优先生成候选测试草稿而不是高权限修复任务
+
+### 18.3.1 GeneratedTestDraft 生命周期
+
+第一阶段 GeneratedTestDraft 只作为候选测试产物存在：
+
+```text
+GeneratedTestDraft
+  ->
+generated-tests/<taskId>/candidate.spec.ts
+  ->
+reviewStatus = draft
+  ->
+人工 review
+  ->
+approved candidate / rejected
+  ->
+后续显式 promote 到 sharedRoot
+```
+
+约束：
+
+- `includeGeneratedInRuns=true` 时仅允许运行 `approved candidate`
+- 第一阶段不做自动去重，重复候选由 review 阶段处理
 
 ### 18.4 Harness 与 Agent 接入策略
 
