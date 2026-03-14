@@ -46,6 +46,13 @@
 - `ActionInbox`
 - `SystemNotices`
 
+`QuickRunPanel` 第一阶段建议支持：
+
+- `runMode` 选择：`regression | exploration | hybrid`
+- `selector` 输入（用于 `regression / hybrid`）
+- `startUrls`、`allowedHosts`、`maxSteps / maxPages`、`focusAreas`（用于 `exploration / hybrid`）
+- 提交前展示当前 `target workspace`、共享测试目录状态与预计权限级别
+
 ## 3.3 错误报告与修复情况展示
 
 `local-ui` 第一版必须能直接展示错误报告和修复情况，而不只是显示状态。
@@ -64,6 +71,7 @@
 
 - `CodeTask` 当前状态
 - 目标项目目录
+- Harness session / agent 名称
 - 选中的 agent
 - 修复目标和作用范围
 - changed files
@@ -74,8 +82,10 @@
 
 执行报告建议展示：
 
+- run 模式（`regression / exploration / hybrid`）
 - run 范围（scopeType / scopeValue）
 - 总量统计（流程步骤数、点击数、接口数、失败接口数）
+- exploration findings 摘要与 candidate tests 入口
 - 阶段结果（success / degraded / failed / skipped + duration）
 - degraded 步骤与原因
 - 最终失败原因（若存在）
@@ -110,7 +120,7 @@
 - 支持“先校验再保存”
 - 保存时携带 `expectedVersion` 防并发覆盖
 - 保存成功后展示 `reloadedModules` / `nextRunOnlyKeys`
-- 若 `report.port` 更新，前端按 `redirectUrl` 自动跳转新地址
+- 若 `report.port` 更新，前端提示“重启本地服务后生效”，不自动跳转
 
 ## 3.5 多语言与文案规范（i18n）
 
@@ -153,7 +163,7 @@
 - `GET /runs/:runId`
 - `GET /runs/:runId/execution-report`
 - `GET /runs/:runId/events`
-- `GET /runs/:runId/events/stream`（SSE，可选）
+- `GET /runs/:runId/findings`（可选，可先内嵌在 `RunDetail`）
 - `GET /runs/:runId/failure-reports`
 - `GET /runs/:runId/testcases/:testcaseId/failure-report`
 - `GET /runs/:runId/testcases/:testcaseId/execution-profile`
@@ -182,6 +192,24 @@
 
 - `GET /runs/:runId/events` 支持 `cursor`、`limit` 参数做增量拉取
 - 响应建议返回 `items[] + nextCursor`，前端用于持续刷新时间线
+- 活跃 run 页面默认每 `2-3s` 轮询一次
+- run 进入终态后停止轮询
+- `GET /runs/:runId/events/stream`（SSE）仅作为后续增强，不作为第一阶段主依赖
+
+## 5.1 错误状态与性能约束
+
+第一阶段必须补齐：
+
+- 统一错误展示组件
+- 对 `ActionResult.errorCode` 的文案映射
+- run 失败、code task 失败、配置校验失败时的明确操作入口
+- verify override review 的风险提示与确认动作
+
+大数据量场景必须考虑：
+
+- `ApiCallTable` 分页或虚拟滚动
+- `EventTimeline` 增量加载
+- 页面离开时停止轮询
 
 ## 6. 设计约束
 
@@ -191,3 +219,4 @@
 - UI 需要明确展示当前 `target workspace`
 - 设置页保存必须走后端校验与生效流程，前端不可本地硬改运行配置
 - 当前阶段 run/diagnostics/review/commit/settings 的操作与查看统一在 HTML 页面，不提供 CLI 业务操作界面
+- Run 与 CodeTask 详情必须明确展示 `runMode / scope / agent / harness / verify override` 等关键审计信息

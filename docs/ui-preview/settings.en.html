@@ -41,7 +41,7 @@
           <li><strong>Diagnostics:</strong> correlation-key extraction rules and time window, affecting trace/log hit rate.</li>
           <li><strong>Trace / Logs:</strong> provider and endpoint. Query-related capabilities apply immediately after save.</li>
           <li><strong>AI / CodeAgent:</strong> model and remediation policy. Some keys may be next-run only.</li>
-          <li><strong>Report / UI:</strong> report port and locale; port change triggers page redirect.</li>
+          <li><strong>Report / UI:</strong> report port and locale; port change applies on next app start.</li>
         </ul>
       </section>
 
@@ -102,7 +102,8 @@
           <ul class="list">
             <li><strong>version:</strong> <span class="mono">13</span></li>
             <li><strong>reloadedModules:</strong> diagnostics, trace, logs</li>
-            <li><strong>nextRunOnlyKeys:</strong> codeAgent.allowedWriteScopes</li>
+            <li><strong>nextRunOnlyKeys:</strong> report.port</li>
+            <li><strong>requiresRestart:</strong> <span class="chip warn">true</span></li>
           </ul>
         </article>
       </section>

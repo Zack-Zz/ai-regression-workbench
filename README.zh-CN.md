@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-`ai-regression-workbench` 是一个基于 Playwright 的本地优先回归测试与受控修复系统。它的目标不是只跑测试，也不是做成无人工干预的自动修复平台，而是帮助团队在本地完成测试执行、诊断采集、AI 分析、受控改代码、人工 review 和显式提交这一整条闭环。
+`ai-regression-workbench` 是一个基于 Playwright 的本地优先回归测试、AI 辅助自主探测与受控修复系统。它的目标不是只跑测试，也不是做成无人工干预的自动修复平台，而是帮助团队在本地完成现有测试执行、预算内 AI 探测、诊断采集、AI 分析、候选测试或受控改代码、人工 review 和显式提交这一整条闭环。
 
 CLI 命令名：
 
@@ -20,24 +20,25 @@ zarb
 ## 目标
 
 - 在本地运行已有 Playwright 测试集。
+- 在明确预算和权限边界内做 AI 自主探测。
 - 为失败用例采集 artifacts、trace 摘要和日志摘要。
 - 使用 AI 生成结构化失败分析。
-- 生成受控的代码修复任务，而不是直接无审查改代码。
+- 生成候选测试与受控代码修复任务，而不是直接无审查改代码。
 - 支持人工审批、review 和显式 commit。
 - 保持架构可平滑演进到平台化形态。
 
 ## 核心流程
 
 ```text
-Playwright 执行
+回归执行 / AI 探测
   -> artifacts
   -> correlation context
   -> trace 查询
   -> 日志查询
   -> AI 分析
-  -> CodeTask 草稿
+  -> 候选测试 / CodeTask 草稿
   -> 审批
-  -> 代码修改器执行
+  -> agent harness 执行
   -> verify
   -> review
   -> commit
@@ -106,7 +107,9 @@ design.md
   [orchestrator](./docs/orchestrator-design.md)、
   [diagnostics](./docs/diagnostics-design.md)、
   [ai-engine](./docs/ai-engine-design.md)、
+  [agent-harness](./docs/agent-harness-design.md)、
   [code-task](./docs/code-task-design.md)、
+  [api-contract](./docs/api-contract-design.md)、
   [local-ui](./docs/local-ui-design.md)、
   [packaging](./docs/packaging-design.md)、
   [test-assets](./docs/test-assets-design.md)、

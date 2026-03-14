@@ -41,7 +41,7 @@
           <li><strong>Diagnostics：</strong>关联键提取规则和时间窗口，影响 trace/log 查询命中率。</li>
           <li><strong>Trace / Logs：</strong>观测后端 provider 与 endpoint，保存后查询类能力立即生效。</li>
           <li><strong>AI / CodeAgent：</strong>模型与修复策略，影响新任务默认行为；部分字段可能仅下一次 run 生效。</li>
-          <li><strong>Report / UI：</strong>报告端口和语言；端口变更会触发页面重定向。</li>
+          <li><strong>Report / UI：</strong>报告端口和语言；端口变更仅在下次启动生效。</li>
         </ul>
       </section>
 
@@ -102,7 +102,8 @@
           <ul class="list">
             <li><strong>version:</strong> <span class="mono">13</span></li>
             <li><strong>reloadedModules:</strong> diagnostics, trace, logs</li>
-            <li><strong>nextRunOnlyKeys:</strong> codeAgent.allowedWriteScopes</li>
+            <li><strong>nextRunOnlyKeys:</strong> report.port</li>
+            <li><strong>requiresRestart:</strong> <span class="chip warn">true</span></li>
           </ul>
         </article>
       </section>

@@ -198,6 +198,12 @@ TestCaseRepository / AssetIndex
 交给 Test Runner
 ```
 
+补充：
+
+- `regression` 模式走上面的标准路径
+- `exploration` 模式不要求先命中现有 testcase，而是由 harness 驱动 `ExplorationAgent` 基于 `startUrls` 与预算执行
+- `hybrid` 模式先跑 `regression`，再对未覆盖或高风险路径做 bounded exploration
+
 补充规则：
 
 - 第一阶段 `RunRequest.selector` 仅支持单一主选择器（`suite | scenario | tag | testcase`）

@@ -33,6 +33,9 @@ WHERE run_id = :run_id;
 DELETE FROM failure_analysis
 WHERE run_id = :run_id;
 
+DELETE FROM findings
+WHERE run_id = :run_id;
+
 DELETE FROM execution_reports
 WHERE run_id = :run_id;
 
@@ -54,7 +57,11 @@ WHERE task_id IN (
 DELETE FROM code_tasks
 WHERE run_id = :run_id;
 
--- 3) delete timeline and run root row
+-- 3) delete harness session rows
+DELETE FROM agent_sessions
+WHERE run_id = :run_id;
+
+-- 4) delete timeline and run root row
 DELETE FROM run_events
 WHERE run_id = :run_id;
 

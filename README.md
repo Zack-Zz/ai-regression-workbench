@@ -2,7 +2,7 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-`ai-regression-workbench` is a local-first regression testing and controlled remediation system built around Playwright. It is designed to help teams run tests, collect diagnostics, analyze failures with AI, generate controlled code-fix tasks, review diffs, and explicitly decide whether to commit changes.
+`ai-regression-workbench` is a local-first regression testing, AI-assisted exploration, and controlled remediation system built around Playwright. It is designed to help teams run tests, let AI probe sites under bounded budgets, collect diagnostics, analyze failures with AI, generate candidate tests or controlled code-fix tasks, review diffs, and explicitly decide whether to commit changes.
 
 CLI command:
 
@@ -20,24 +20,25 @@ On first run, `zarb` should guide initialization and then open the local workben
 ## Goals
 
 - Run existing Playwright suites locally.
+- Explore sites with AI under explicit budget and approval boundaries.
 - Collect artifacts, trace data, and log summaries for failed cases.
 - Use AI to generate structured failure analysis.
-- Create controlled code-fix tasks instead of applying unreviewed changes.
+- Create candidate tests and controlled code-fix tasks instead of applying unreviewed changes.
 - Support human approval, review, and explicit commit actions.
 - Keep the architecture ready for future platformization.
 
 ## Core Flow
 
 ```text
-Playwright run
+Regression run / AI exploration
   -> artifacts
   -> correlation context
   -> trace lookup
   -> log lookup
   -> AI analysis
-  -> CodeTask draft
+  -> candidate test / CodeTask draft
   -> approval
-  -> code agent execution
+  -> agent harness execution
   -> verify
   -> review
   -> commit
@@ -106,7 +107,9 @@ Typical correlation sources:
   [orchestrator](./docs/orchestrator-design.md),
   [diagnostics](./docs/diagnostics-design.md),
   [ai-engine](./docs/ai-engine-design.md),
+  [agent-harness](./docs/agent-harness-design.md),
   [code-task](./docs/code-task-design.md),
+  [api-contract](./docs/api-contract-design.md),
   [local-ui](./docs/local-ui-design.md),
   [packaging](./docs/packaging-design.md),
   [test-assets](./docs/test-assets-design.md),

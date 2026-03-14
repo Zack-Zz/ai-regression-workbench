@@ -97,10 +97,11 @@ zarb
 1. 创建本地目录
 2. 初始化 `config.local.yaml`
 3. 初始化 SQLite 文件
-4. 检查 Playwright 浏览器
-5. 检查 git
-6. 检查 code agent CLI 可用性
-7. 记录默认 `target project path`
+4. 执行数据库迁移并校验 schema 版本
+5. 检查 Playwright 浏览器
+6. 检查 git
+7. 检查 code agent CLI 可用性
+8. 记录默认 `target project path`
 
 建议同时支持“隐式初始化”：
 
@@ -207,12 +208,15 @@ zarb doctor
 - Playwright 浏览器
 - git
 - SQLite 可写性
+- SQLite `WAL` 模式是否启用
+- 是否存在待执行迁移
 - trace provider 配置
 - log provider 配置
 - Codex CLI
 - Kiro CLI
 - target project path 是否存在
 - target project path 是否为有效 git 工程
+- AI 敏感配置是否通过环境变量提供
 
 建议进一步区分：
 
@@ -242,6 +246,7 @@ zarb
 由默认入口完成：
 
 - 初始化检查
+- 迁移检查
 - app server 启动
 - UI 打开
 
@@ -260,6 +265,12 @@ npm install -g ai-regression-workbench@latest
 - `zarb version`
 - `zarb upgrade`
 
+升级约束：
+
+- 启动时必须先执行待迁移脚本再启动 app server
+- 迁移失败时禁止进入业务页面
+- 迁移状态应记录到 `system_events`
+
 ## 9. 为什么不先做桌面壳
 
 因为当前系统还依赖：
@@ -271,6 +282,14 @@ npm install -g ai-regression-workbench@latest
 - trace/log provider 配置
 
 第一阶段先稳定 `Web UI 主操作面 + CLI 最小启动壳` 更合理。
+
+## 9.1 敏感配置约束
+
+敏感配置例如 AI provider API Key，建议：
+
+- 优先从环境变量读取
+- `config.local.yaml` 中仅存环境变量名或占位符
+- `doctor` 对明文敏感配置给出 warning
 
 ## 10. 一键启动体验
 
@@ -306,3 +325,13 @@ zarb
 ```
 
 直接启动本地工作台。
+
+## 10.5 `report.port` 变更策略
+
+第一阶段不做运行时热重绑。
+
+行为建议：
+
+- 保存配置时返回 `nextRunOnlyKeys=['report.port']`
+- UI 提示“重启本地服务后生效”
+- 下一次执行 `zarb` 时按新端口启动

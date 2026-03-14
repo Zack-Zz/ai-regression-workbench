@@ -17,7 +17,10 @@
 - 所有可写运行数据统一落在 `<tool-workspace>/data` 下。
 - SQLite 负责结构化状态、索引和路径引用，不存大文件正文。
 - 大文件与明细产物落文件系统，数据库保存路径和关键摘要。
+- 所有路径字段统一存相对于 `<tool-workspace>/data` 的相对路径。
 - 以 `runId`、`testcaseId`、`taskId` 为主分区键，保证可按 run 清理和回放。
+- SQLite 默认启用 WAL 模式；高频写入表通过单写队列或批量写入消化写锁竞争。
+- schema 变更必须通过迁移脚本管理，禁止手工漂移表结构。
 - 接口错误默认降级继续；仅关键阻断错误终止流程；run 终态必须产出执行报告。
 
 ## 3. 存储根目录
@@ -39,20 +42,24 @@
 | 领域对象 | 写入模块 | SQLite 表（关键字段） | 文件系统路径 | 写入时机 | 查询入口 |
 | --- | --- | --- | --- | --- | --- |
 | Run | Orchestrator / RunService | `test_runs`（`run_id`,`scope_type`,`scope_value`,`selector_json`,`status`） | `runs/<runId>.json`（可选快照） | `startRun` 创建、状态迁移、终态汇总 | `GET /runs`、`GET /runs/:runId` |
+| Scenario | Test Assets / AI Engine | `scenarios`（`scenario_id`,`name`,`entry_urls_json`） | 无或附加定义文件 | 场景建模、候选测试晋升时 | 后续场景管理 |
 | TestResult | Test Runner | `test_results`（`run_id`,`testcase_id`,`status`,`duration_ms`） | `artifacts/<runId>/<testcaseId>/` 下 screenshot/video/trace/network | 用例执行完成后 | Run detail / failure report |
 | CorrelationContext | Test Runner / Diagnostics | `correlation_contexts`（`trace_ids_json`,`request_ids_json`,`from_time`,`to_time`） | `diagnostics/<runId>/<testcaseId>/correlation-context.json` | 失败用例诊断前 | Failure report / diagnostics |
 | DiagnosticFetch（Trace/Log） | Trace Bridge / Log Bridge | `diagnostic_fetches`（`type`,`status`,`provider`,`summary_json`,`raw_link`） | `diagnostics/<runId>/<testcaseId>/trace-summary.json`、`log-summary.json` | Trace/Log 查询后 | Diagnostics detail |
+| Finding | AgentHarness / AI Engine | `findings`（`run_id`,`session_id`,`category`,`severity`,`page_url`） | `analysis/<runId>/findings.json`（可选聚合） | exploration step 完成或 finding 归纳后 | Run detail / finding panel |
 | ApiCallRecord | Test Runner | `api_call_records`（`run_id`,`testcase_id`,`flow_step_id`,`ui_action_id`,`url`,`status_code`,`duration_ms`） | `diagnostics/<runId>/<testcaseId>/api-calls.jsonl` | 网络请求完成时流式写入 | Execution profile / failure report |
 | UiActionRecord | Test Runner | `ui_action_records`（`run_id`,`testcase_id`,`flow_step_id`,`action_type`,`duration_ms`） | `diagnostics/<runId>/<testcaseId>/ui-actions.jsonl` | 每个 UI 动作完成后 | Execution profile |
 | FlowStepRecord | Test Runner / Orchestrator | `flow_step_records`（`run_id`,`testcase_id`,`flow_id`,`step_name`,`api_call_count`） | `diagnostics/<runId>/<testcaseId>/flow-steps.json` | 每个流程步骤完成后 | Execution profile / execution report |
 | FailureAnalysis | AI Engine | `failure_analysis`（`run_id`,`testcase_id`,`category`,`summary`,`suggestions_json`） | `analysis/<runId>/<testcaseId>.json`（可选完整版） | AI 分析完成后 | Failure report / code-task draft |
 | CodeTask | Orchestrator / CodeTaskService | `code_tasks`（`task_id`,`run_id`,`testcase_id`,`status`,`workspace_path`,`diff_path`,`patch_path`） | `code-tasks/<taskId>/input.json`、`raw-output.txt`、`changes.diff`、`changes.patch`、`verify.txt` | 任务创建、执行、verify 更新 | `GET /code-tasks/:taskId` |
-| Review | ReviewService | `reviews`（`task_id`,`decision`,`comment`） | 可选附加到 `code-tasks/<taskId>/` | review 提交时 | `GET /code-tasks/:taskId/review` |
-| CommitRecord | CommitService | `commit_records`（`task_id`,`branch_name`,`commit_sha`,`commit_message`） | `commits/<taskId>.json` | commit 成功后 | `GET /code-tasks/:taskId/commit` |
-| RunEvent | Orchestrator / Services | `run_events`（`run_id`,`entity_type`,`entity_id`,`event_type`,`payload_json`） | 无（仅 DB） | 所有关键动作和状态迁移 | `GET /runs/:runId/events` |
-| SettingsSnapshot | SettingsService / ConfigManager | `run_events`（`event_type=SETTINGS_UPDATED/SETTINGS_APPLIED`，不强依赖独立 settings 表） | `<tool-workspace>/config.local.yaml` | 设置保存与生效时 | `GET /settings`、`PUT /settings` |
+| Review | ReviewService | `reviews`（`task_id`,`decision`,`comment`,`diff_hash`,`code_task_version`） | 可选附加到 `code-tasks/<taskId>/` | review 提交时 | `GET /code-tasks/:taskId/review` |
+| CommitRecord | CommitService | `commit_records`（`task_id`,`branch_name`,`commit_sha`,`commit_message`,`status`） | `commits/<taskId>.json` | commit 创建或完成后 | `GET /code-tasks/:taskId/commit` |
+| RunEvent | Orchestrator / Services | `run_events`（`run_id`,`entity_type`,`entity_id`,`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 所有关键动作和状态迁移 | `GET /runs/:runId/events` |
+| SystemEvent | SettingsService / BootstrapService / Harness | `system_events`（`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 设置保存、生效、初始化、迁移、harness 全局事件 | `GET /system/events`（后续） |
+| SettingsSnapshot | SettingsService / ConfigManager | `system_events`（`event_type=SETTINGS_UPDATED/SETTINGS_APPLIED`） | `<tool-workspace>/config.local.yaml` | 设置保存与生效时 | `GET /settings`、`PUT /settings` |
 | ExecutionReport | Orchestrator / RunService | `execution_reports`（`run_id`,`status`,`report_path`,`totals_json`,`generated_at`） | `runs/<runId>-execution-report.json` | Run 进入 `COMPLETED/FAILED/CANCELLED` | `GET /runs/:runId/execution-report` |
 | Generated Tests | AI Engine / CodeAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时 | Test assets 管理 / 后续执行选择 |
+| Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl` | harness session 创建、推进、结束时 | 后续 harness detail / replay |
 
 ## 5. 写入顺序与一致性规则
 
@@ -69,6 +76,13 @@
 - 同一阶段重试时允许 UPSERT 或版本更新，不产生重复终态记录。
 - `execution_reports` 每个 `runId` 只保留最后一次有效报告路径。
 
+### 5.3 SQLite 并发与迁移
+
+- 初始化时必须执行 `PRAGMA journal_mode=WAL`。
+- `api_call_records`、`ui_action_records`、`run_events`、`system_events` 建议统一经单写队列提交。
+- schema 变更通过 `scripts/sql/` 中带版本号的迁移脚本执行。
+- 启动时若存在待执行迁移，应先迁移再对外提供服务。
+
 ## 6. 查询与索引建议
 
 建议索引：
@@ -81,7 +95,9 @@
 - `flow_step_records(run_id, testcase_id, flow_id)`
 - `code_tasks(run_id, testcase_id, status, updated_at)`
 - `run_events(run_id, created_at)`
+- `system_events(created_at)`
 - `execution_reports(run_id, generated_at)`
+- `agent_sessions(run_id, task_id, status, started_at)`
 
 目标查询延迟：
 
@@ -96,10 +112,12 @@
   - `artifacts/<runId>`
   - `diagnostics/<runId>`
   - `analysis/<runId>`
+  - 与该 run 关联的 `agent-traces/<sessionId>`
   - `runs/<runId>.json`
   - `runs/<runId>-execution-report.json`
-  - 相关 DB 行（`test_runs`、`test_results`、`run_events` 等）
+  - 相关 DB 行（`test_runs`、`test_results`、`findings`、`run_events`、`agent_sessions` 等）
 - `code-tasks`、`commits` 可以按任务保留周期单独清理，避免误删审计数据。
+- `system_events` 绝不能因为清理某个 run 被删除。
 
 ## 8. 验收清单
 
@@ -154,8 +172,14 @@ ON commit_records (task_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_created
 ON run_events (run_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_system_events_created
+ON system_events (created_at);
+
 CREATE INDEX IF NOT EXISTS idx_execution_reports_run_generated
 ON execution_reports (run_id, generated_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_run_task_status
+ON agent_sessions (run_id, task_id, status, started_at);
 ```
 
 ### 9.2 按 `runId` 清理 SQL（事务版）
@@ -188,6 +212,9 @@ WHERE run_id = :run_id;
 DELETE FROM failure_analysis
 WHERE run_id = :run_id;
 
+DELETE FROM findings
+WHERE run_id = :run_id;
+
 DELETE FROM execution_reports
 WHERE run_id = :run_id;
 
@@ -209,7 +236,11 @@ WHERE task_id IN (
 DELETE FROM code_tasks
 WHERE run_id = :run_id;
 
--- 3) 删除事件与 run 主记录
+-- 3) 删除 harness session 记录
+DELETE FROM agent_sessions
+WHERE run_id = :run_id;
+
+-- 4) 删除事件与 run 主记录
 DELETE FROM run_events
 WHERE run_id = :run_id;
 
@@ -225,6 +256,7 @@ COMMIT;
 <tool-workspace>/data/artifacts/<runId>
 <tool-workspace>/data/diagnostics/<runId>
 <tool-workspace>/data/analysis/<runId>
+<tool-workspace>/data/agent-traces/<sessionId>
 <tool-workspace>/data/runs/<runId>.json
 <tool-workspace>/data/runs/<runId>-execution-report.json
 ```
@@ -234,6 +266,7 @@ COMMIT;
 - SQL 事务失败时必须 `ROLLBACK`，禁止执行任何文件删除。
 - SQL `COMMIT` 成功后再删文件，文件删除失败需记录 `RUN_STEP_DEGRADED` 并重试。
 - 若发生“DB 已删、文件未删”，将 runId 放入清理补偿队列，后台重试。
+- `system_events` 与迁移元数据不纳入 run 级清理。
 
 ### 9.5 对应脚本
 

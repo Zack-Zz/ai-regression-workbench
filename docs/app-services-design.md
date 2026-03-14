@@ -4,6 +4,10 @@
 
 定义 `zarb` CLI、Web UI 和本地服务之间的职责边界，确保当前“所有业务操作和查看统一在 HTML 页面”实现简单，同时为未来 CLI 增强和平台化演进预留空间。
 
+配套文档：
+
+- [HTTP API 契约设计](./api-contract-design.md)
+
 ## 2. 总体原则
 
 - CLI 和 Web UI 不直接承载核心业务逻辑
@@ -301,11 +305,22 @@ interface PersonalSettings {
     provider: string;
     model: string;
     enabled: boolean;
+    promptTemplatesDir?: string;
+    apiKeyEnvVar?: string;
+  };
+  exploration?: {
+    defaultMode?: 'regression' | 'exploration' | 'hybrid';
+    maxSteps?: number;
+    maxPages?: number;
+    allowedHosts?: string[];
+    defaultFocusAreas?: string[];
+    persistAsCandidateTests?: boolean;
   };
   codeAgent: {
     defaultApprovalRequired: boolean;
     allowedWriteScopes: string[];
     defaultVerifyCommands: string[];
+    allowReviewOnVerifyFailure?: boolean;
   };
   report: {
     port: number;
@@ -337,7 +352,7 @@ interface SettingsApplyResult extends ActionResult {
   version?: number;
   reloadedModules?: string[];
   nextRunOnlyKeys?: string[];
-  redirectUrl?: string;
+  requiresRestart?: boolean;
 }
 ```
 
@@ -346,9 +361,10 @@ interface SettingsApplyResult extends ActionResult {
 ```ts
 interface RunSummary {
   runId: string;
+  runMode: 'regression' | 'exploration' | 'hybrid';
   status: string;
-  scopeType: 'suite' | 'scenario' | 'tag' | 'testcase';
-  scopeValue: string;
+  scopeType?: 'suite' | 'scenario' | 'tag' | 'testcase' | 'exploration';
+  scopeValue?: string;
   startedAt: string;
   endedAt?: string;
   total: number;
@@ -362,7 +378,8 @@ interface RunSummary {
 ### 7.2.1 StartRunInput
 
 ```ts
-type RunScopeType = 'suite' | 'scenario' | 'tag' | 'testcase';
+type RunMode = 'regression' | 'exploration' | 'hybrid';
+type RunScopeType = 'suite' | 'scenario' | 'tag' | 'testcase' | 'exploration';
 
 interface RunSelector {
   suite?: string;
@@ -372,16 +389,27 @@ interface RunSelector {
 }
 
 interface StartRunInput {
-  selector: RunSelector;
+  runMode: RunMode;
+  selector?: RunSelector;
   projectPath?: string;
   includeSharedInRuns?: boolean;
   includeGeneratedInRuns?: boolean;
+  exploration?: {
+    startUrls: string[];
+    allowedHosts?: string[];
+    maxSteps: number;
+    maxPages: number;
+    focusAreas?: string[];
+    persistAsCandidateTests?: boolean;
+  };
 }
 ```
 
 约束：
 
-- `selector` 四个字段必须且只能有一个有效值
+- `regression` 模式要求 `selector` 四个字段必须且只能有一个有效值
+- `exploration` 模式必须提供 `exploration`
+- `hybrid` 模式要求 `selector + exploration`
 - 若入参不满足约束，返回 `StartRunResult.success=false`，不启动 run
 
 ### 7.2.2 StartRunResult
@@ -398,6 +426,13 @@ interface StartRunResult extends ActionResult {
 interface RunDetail {
   summary: RunSummary;
   testResults: TestResultSummary[];
+  findings?: Array<{
+    id: string;
+    severity: string;
+    category: string;
+    pageUrl?: string;
+    summary: string;
+  }>;
   selectedFailure?: FailureSnapshot;
   diagnosticsSummary?: DiagnosticsSummary;
   analysisSummary?: AnalysisSummary;
@@ -415,6 +450,7 @@ interface RunEventItem {
   entityType?: string;
   entityId?: string;
   payload?: Record<string, unknown>;
+  payloadSchemaVersion?: string;
   createdAt: string;
 }
 
@@ -441,12 +477,14 @@ interface ExecutionStageResult {
 interface ExecutionReport {
   runId: string;
   status: string;
+  runMode: RunMode;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
-  scopeType: RunScopeType;
-  scopeValue: string;
-  selector: RunSelector;
+  scopeType?: RunScopeType;
+  scopeValue?: string;
+  selector?: RunSelector;
+  exploration?: StartRunInput['exploration'];
   summary: {
     total: number;
     passed: number;
@@ -596,6 +634,8 @@ interface FailureReport {
 ```ts
 interface CodeTaskSummary {
   taskId: string;
+  parentTaskId?: string;
+  taskVersion: number;
   runId: string;
   testcaseId?: string;
   status: string;
@@ -607,6 +647,11 @@ interface CodeTaskSummary {
   updatedAt: string;
 }
 ```
+
+说明：
+
+- `taskVersion` 是 API/DTO 语义，对应持久层中的 `code_tasks.attempt`
+- `ReviewRecord.codeTaskVersion` 与 `SubmitReviewInput.codeTaskVersion` 必须引用同一轮 attempt
 
 ### 7.7 CodeTaskDetail
 
@@ -626,14 +671,63 @@ interface CodeTaskDetail {
 }
 ```
 
+### 7.7.1 ReviewRecord / CommitDetail
+
+```ts
+interface ReviewRecord {
+  reviewId: string;
+  taskId: string;
+  decision: 'accept' | 'reject' | 'retry';
+  comment?: string;
+  diffHash?: string;
+  patchHash?: string;
+  codeTaskVersion: number;
+  createdAt: string;
+}
+
+interface CommitDetail {
+  commitRecordId: string;
+  taskId: string;
+  branchName?: string;
+  commitSha?: string;
+  commitMessage?: string;
+  status: 'pending' | 'committed' | 'failed';
+  errorMessage?: string;
+  createdAt: string;
+}
+
+interface SubmitReviewInput {
+  taskId: string;
+  decision: 'accept' | 'reject' | 'retry';
+  comment?: string;
+  diffHash?: string;
+  patchHash?: string;
+  codeTaskVersion: number;
+  forceReviewOnVerifyFailure?: boolean;
+}
+
+interface CreateCommitInput {
+  taskId: string;
+  commitMessage: string;
+  expectedTaskVersion?: number;
+}
+```
+
+说明：
+
+- `forceReviewOnVerifyFailure=true` 仅用于 verify 失败后的受控 override review；它不是第四种 `decision`
+- 当使用该字段时，`decision` 必须仍为 `accept`
+
 ### 7.8 ActionResult
 
 ```ts
 interface ActionResult {
   success: boolean;
   message: string;
+  errorCode?: string;
   warnings?: string[];
   nextSuggestedAction?: string;
+  retryable?: boolean;
 }
 ```
 
@@ -691,3 +785,5 @@ interface ActionResult {
 - 业务服务语义保持统一，未来 CLI 扩展时复用同一套应用服务
 - API 按业务对象组织，不按底层模块组织
 - `updateSettings` 成功后必须在同一请求生命周期内完成保存和运行时生效
+- `report.port` 变更通过 `nextRunOnlyKeys` 提示“下次启动生效”，第一阶段不返回 `redirectUrl`
+- 第一阶段事件刷新以轮询为主，SSE 不作为默认前提

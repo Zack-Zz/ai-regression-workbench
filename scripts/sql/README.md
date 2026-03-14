@@ -31,6 +31,8 @@ SQL
   - `.ai-regression-workbench/data/artifacts/<runId>`
   - `.ai-regression-workbench/data/diagnostics/<runId>`
   - `.ai-regression-workbench/data/analysis/<runId>`
+  - `.ai-regression-workbench/data/agent-traces/<sessionId>`（与该 run 关联的 session）
   - `.ai-regression-workbench/data/runs/<runId>.json`
   - `.ai-regression-workbench/data/runs/<runId>-execution-report.json`
+- `system_events` 不属于 run 级清理范围。
 - If DB cleanup fails, do not remove files.

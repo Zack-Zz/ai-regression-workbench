@@ -40,7 +40,13 @@ ON commit_records (task_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_created
 ON run_events (run_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_system_events_created
+ON system_events (created_at);
+
 CREATE INDEX IF NOT EXISTS idx_execution_reports_run_generated
 ON execution_reports (run_id, generated_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_run_task_status
+ON agent_sessions (run_id, task_id, status, started_at);
 
 COMMIT;
