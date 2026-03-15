@@ -72,7 +72,7 @@ export class ConfigManager implements SettingsService {
 
   async updateSettings(input: UpdateSettingsInput): Promise<SettingsApplyResult> {
     if (input.expectedVersion !== undefined && input.expectedVersion !== this.snapshot.version) {
-      return { success: false, message: `Version conflict: expected ${String(input.expectedVersion)}, current ${String(this.snapshot.version)}` };
+      return { success: false, message: `Version conflict: expected ${String(input.expectedVersion)}, current ${String(this.snapshot.version)}`, errorCode: 'SETTINGS_VERSION_CONFLICT' };
     }
 
     const validation = await this.validateSettings(input);

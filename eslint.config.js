@@ -22,6 +22,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.js', 'vitest.config.ts', 'eslint.config.js', '**/vite.config.ts'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/*.js', '**/*.mjs', 'vitest.config.ts', 'eslint.config.js', '**/vite.config.ts', 'playwright.config.ts', '**/e2e/**'],
   }
 );

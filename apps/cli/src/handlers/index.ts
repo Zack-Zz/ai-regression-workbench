@@ -213,7 +213,7 @@ export function buildRouter(
         json(res, 422, { success: false, message: result.message, errorCode: result.errorCode ?? 'SETTINGS_VALIDATION_FAILED' });
         return;
       }
-      actionOk(res, result.message, { version: result.version, ...(result.requiresRestart ? { requiresRestart: true, nextRunOnlyKeys: result.nextRunOnlyKeys } : {}) });
+      json(res, 200, { success: true, message: result.message, data: { success: true, message: result.message, version: result.version, ...(result.requiresRestart ? { requiresRestart: true, nextRunOnlyKeys: result.nextRunOnlyKeys } : {}) } });
     } catch { serverError(res, 'Failed to update settings'); }
   });
 
