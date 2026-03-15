@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RunService } from '../services/run-service.js';
 import type { DiagnosticsService } from '../services/diagnostics-service.js';
 import type { CodeTaskService } from '../services/code-task-service.js';
+import type { DoctorService } from '../services/doctor-service.js';
 import type { ConfigManager } from '@zarb/config';
 import { Router, parseQuery, readBody, ok, actionOk, notFound, badRequest, conflict, serverError, json } from '../router.js';
 import type { StartRunInput, SubmitReviewInput, CreateCommitInput, UpdateSettingsInput, ListRunsQuery, ListCodeTasksQuery, RunEventsQuery } from '@zarb/shared-types';
@@ -21,6 +22,7 @@ export function buildRouter(
   diagSvc: DiagnosticsService,
   taskSvc: CodeTaskService,
   settingsSvc: ConfigManager,
+  doctorSvc?: DoctorService,
 ): Router {
   const router = new Router();
 
@@ -213,6 +215,13 @@ export function buildRouter(
       }
       actionOk(res, result.message, { version: result.version, ...(result.requiresRestart ? { requiresRestart: true, nextRunOnlyKeys: result.nextRunOnlyKeys } : {}) });
     } catch { serverError(res, 'Failed to update settings'); }
+  });
+
+  // --- Doctor ---
+  router.get('/doctor', async (_req, res) => {
+    if (!doctorSvc) { ok(res, { healthy: true, checks: [] }); return; }
+    try { ok(res, await doctorSvc.runChecks()); }
+    catch { serverError(res, 'Failed to run doctor checks'); }
   });
 
   return router;

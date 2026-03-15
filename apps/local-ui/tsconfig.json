@@ -6,9 +6,9 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

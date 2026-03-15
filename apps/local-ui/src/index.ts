@@ -1,2 +1,1 @@
-// Phase 8 will implement the React UI
-export {};
+export { App } from './App.js';

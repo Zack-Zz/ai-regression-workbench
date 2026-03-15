@@ -12,3 +12,6 @@ export {
   DEFAULT_CODE_REPAIR_POLICY,
 } from './harness-policy.js';
 export type { HarnessPolicy, StopConditions } from './harness-policy.js';
+
+export { ObservedHarness } from './observed-harness.js';
+export type { ObservabilityAdapter, ObservabilityEvent, ObservabilitySummary } from './observability.js';

@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "zarb": "./dist/bin.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -10,7 +13,8 @@
   "dependencies": {
     "@zarb/shared-types": "workspace:*",
     "@zarb/storage": "workspace:*",
-    "@zarb/config": "workspace:*"
+    "@zarb/config": "workspace:*",
+    "@zarb/agent-harness": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
