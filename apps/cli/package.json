@@ -18,7 +18,8 @@
     "@zarb/review-manager": "workspace:*",
     "@zarb/test-runner": "workspace:*",
     "@zarb/trace-bridge": "workspace:*",
-    "@zarb/log-bridge": "workspace:*"
+    "@zarb/log-bridge": "workspace:*",
+    "@zarb/ai-engine": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

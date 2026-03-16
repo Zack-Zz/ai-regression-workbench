@@ -18,6 +18,56 @@ export interface AIProvider {
   complete(prompt: string): Promise<string>;
 }
 
+/**
+ * OpenAIProvider — calls OpenAI chat completions API.
+ * Falls back gracefully: if API key is missing or call fails, returns empty string.
+ */
+export class OpenAIProvider implements AIProvider {
+  constructor(
+    private readonly apiKey: string,
+    private readonly model: string = 'gpt-4o',
+  ) {}
+
+  async complete(prompt: string): Promise<string> {
+    if (!this.apiKey) return '';
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) return '';
+      const body = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+      return body.choices?.[0]?.message?.content ?? '';
+    } catch {
+      return '';
+    }
+  }
+}
+
+/**
+ * NullAIProvider — used when no AI provider is configured.
+ * Returns empty string so callers degrade gracefully.
+ */
+export class NullAIProvider implements AIProvider {
+  complete(_prompt: string): Promise<string> { return Promise.resolve(''); }
+}
+
+/**
+ * createAIProvider — factory from settings config.
+ */
+export function createAIProvider(config: { provider: string; model?: string; apiKeyEnvVar?: string }): AIProvider {
+  if (config.provider === 'openai') {
+    const apiKey = config.apiKeyEnvVar ? (process.env[config.apiKeyEnvVar] ?? '') : '';
+    return new OpenAIProvider(apiKey, config.model ?? 'gpt-4o');
+  }
+  return new NullAIProvider();
+}
 export interface AIEngine {
   analyzeFailure(input: FailureContext): Promise<FailureAnalysis>;
   summarizeFindings(input: ExplorationFindingContext): Promise<FindingSummary[]>;

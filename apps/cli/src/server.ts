@@ -6,6 +6,7 @@ import { ConfigManager } from '@zarb/config';
 import { TestRunner } from '@zarb/test-runner';
 import { createTraceProvider } from '@zarb/trace-bridge';
 import { createLogProvider } from '@zarb/log-bridge';
+import { LocalAIEngine, createAIProvider } from '@zarb/ai-engine';
 import { RunService } from './services/run-service.js';
 import { DiagnosticsService } from './services/diagnostics-service.js';
 import { CodeTaskService } from './services/code-task-service.js';
@@ -30,8 +31,10 @@ export function createAppServer(opts: ServerOptions) {
   const cfg = settingsSvc.getSync();
   const traceProvider = createTraceProvider(cfg.trace);
   const logProvider = createLogProvider({ ...cfg.logs, logFields: cfg.diagnostics.correlationKeys.logFields });
+  const aiProvider = createAIProvider(cfg.ai);
+  const aiEngine = new LocalAIEngine(aiProvider, opts.db, dataRoot);
 
-  const runSvc = new RunService(opts.db, { dataRoot, runner });
+  const runSvc = new RunService(opts.db, { dataRoot, runner, aiEngine, aiProvider });
   const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider);
   settingsSvc.registerObserver(diagSvc);
   const taskSvc = new CodeTaskService(opts.db, dataRoot);

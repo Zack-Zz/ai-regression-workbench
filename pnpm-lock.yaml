@@ -60,6 +60,9 @@ importers:
       '@zarb/agent-harness':
         specifier: workspace:*
         version: link:../../packages/agent-harness
+      '@zarb/ai-engine':
+        specifier: workspace:*
+        version: link:../ai-engine
       '@zarb/config':
         specifier: workspace:*
         version: link:../../packages/config

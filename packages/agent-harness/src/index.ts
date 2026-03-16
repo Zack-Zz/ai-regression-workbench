@@ -18,3 +18,6 @@ export type { ObservabilityAdapter, ObservabilityEvent, ObservabilitySummary } f
 
 export { CodexCliAgent } from './codex-cli-agent.js';
 export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
+
+export { ExplorationAgent } from './exploration-agent.js';
+export type { AIProvider as ExplorationAIProvider, PageProbe, ExplorationStep, ExplorationResult } from './exploration-agent.js';
