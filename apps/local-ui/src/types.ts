@@ -31,11 +31,21 @@ export interface RunEventItem {
   entityType: string; entityId: string; createdAt: string;
 }
 
+export interface ExplorationConfig {
+  startUrls: string[];
+  maxSteps?: number;
+  maxPages?: number;
+  focusAreas?: string[];
+  allowedHosts?: string[];
+  persistAsCandidateTests?: boolean;
+}
+
 export interface RunDetail {
   summary: RunSummary;
   testResults: TestResultSummary[];
   findings?: FindingSummaryItem[];
   events: RunEventItem[];
+  explorationConfig?: ExplorationConfig;
 }
 
 export interface RunSummaryPage { items: RunSummary[]; nextCursor?: string; }

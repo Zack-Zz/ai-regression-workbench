@@ -151,6 +151,27 @@ export class RunService {
       })();
     }
 
+    // Exploration / hybrid: no real AI engine yet — advance status so UI shows progress
+    if (input.runMode === 'exploration' || input.runMode === 'hybrid') {
+      void (async () => {
+        const stages: Array<{ status: RunStatus; stage: string; delay: number }> = [
+          { status: 'PLANNING_EXPLORATION', stage: 'PLANNING_EXPLORATION', delay: 500 },
+          { status: 'RUNNING_EXPLORATION', stage: 'RUNNING_EXPLORATION', delay: 1000 },
+          { status: 'COLLECTING_ARTIFACTS', stage: 'COLLECTING_ARTIFACTS', delay: 500 },
+          { status: 'COMPLETED', stage: 'COMPLETED', delay: 0 },
+        ];
+        for (const s of stages) {
+          await new Promise<void>(r => setTimeout(r, s.delay));
+          const cur = this.runs.findById(runId);
+          if (cur?.status === 'CANCELLED' || cur?.status === 'PAUSED') return;
+          const now = new Date().toISOString();
+          this.runs.update(runId, { status: s.status, currentStage: s.stage, updatedAt: now,
+            ...(s.status === 'COMPLETED' ? { endedAt: now } : {}),
+          });
+        }
+      })();
+    }
+
     return result;
   }
 
@@ -193,7 +214,9 @@ export class RunService {
       entityId: e.entity_id,
       createdAt: e.created_at,
     }));
-    return { summary: toSummary(row), testResults, findings, events };
+    return { summary: toSummary(row), testResults, findings, events,
+      ...(row.exploration_config_json ? { explorationConfig: JSON.parse(row.exploration_config_json) as import('@zarb/shared-types').ExplorationConfig } : {}),
+    };
   }
 
   getExecutionReport(runId: string): ExecutionReport | null {

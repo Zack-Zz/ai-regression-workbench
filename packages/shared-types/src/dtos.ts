@@ -61,6 +61,7 @@ export interface RunDetail {
   diagnosticsSummary?: DiagnosticsSummary;
   analysisSummary?: AnalysisSummary;
   events: RunEventItem[];
+  explorationConfig?: ExplorationConfig;
 }
 
 export interface FindingSummaryItem {

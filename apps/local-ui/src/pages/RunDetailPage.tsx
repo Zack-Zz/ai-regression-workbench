@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAsync, usePoll } from '../hooks.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, RunStatusBadge, Card, KV, Button, Table } from '../components/ui.js';
+import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, KV, Button, Table } from '../components/ui.js';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -12,6 +12,7 @@ export function RunDetailPage(): React.ReactElement {
   const navigate = useNavigate();
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getRun(id), [id]);
+  const { data: taskData } = useAsync(() => api.listCodeTasks(`runId=${id}`), [id]);
   const isActive = data ? !TERMINAL.has(data.summary.status) : false;
   usePoll(reload, 2000, isActive);
 
@@ -23,7 +24,7 @@ export function RunDetailPage(): React.ReactElement {
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
-  const { summary, testResults, findings, events } = data;
+  const { summary, testResults, findings, events, explorationConfig } = data;
 
   return (
     <div>
@@ -46,6 +47,16 @@ export function RunDetailPage(): React.ReactElement {
         {summary.currentStage && <KV label={t('run.stage')} value={summary.currentStage} />}
         <KV label="统计" value={`✓${String(summary.passed)} ✗${String(summary.failed)} ↷${String(summary.skipped)} / ${String(summary.total)}`} />
       </Card>
+
+      {explorationConfig && (
+        <Card title={t('run.explorationConfig')}>
+          <KV label={t('run.startUrls')} value={explorationConfig.startUrls.join(', ')} />
+          {explorationConfig.maxSteps !== undefined && <KV label={t('run.maxSteps')} value={String(explorationConfig.maxSteps)} />}
+          {explorationConfig.maxPages !== undefined && <KV label={t('run.maxPages')} value={String(explorationConfig.maxPages)} />}
+          {explorationConfig.focusAreas && explorationConfig.focusAreas.length > 0 && <KV label={t('run.focusAreas')} value={explorationConfig.focusAreas.join(', ')} />}
+          {explorationConfig.allowedHosts && explorationConfig.allowedHosts.length > 0 && <KV label={t('run.allowedHosts')} value={explorationConfig.allowedHosts.join(', ')} />}
+        </Card>
+      )}
 
       {testResults.length > 0 && (
         <Card title={`测试结果 (${String(testResults.length)})`}>
@@ -70,6 +81,22 @@ export function RunDetailPage(): React.ReactElement {
               {f.summary}
             </div>
           ))}
+        </Card>
+      )}
+
+      {taskData && taskData.items.length > 0 && (
+        <Card title={`${t('nav.codeTasks')} (${String(taskData.items.length)})`}>
+          <Table
+            headers={['Task ID', t('common.status'), 'Goal']}
+            rows={taskData.items.map(task => [
+              <button key="id" onClick={() => { navigate(`/code-tasks/${task.taskId}`); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline', fontFamily: 'monospace' }}>
+                {task.taskId}
+              </button>,
+              <TaskStatusBadge key="s" status={task.status} />,
+              task.goal,
+            ])}
+          />
         </Card>
       )}
 
