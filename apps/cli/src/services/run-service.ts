@@ -130,6 +130,9 @@ export class RunService {
           workspacePath: projectPath,
           dataRoot,
           ...(sel ? { selector: sel } : {}),
+          onProgress: (counts) => {
+            this.runs.update(runId, { ...counts, updatedAt: new Date().toISOString() });
+          },
         });
         this.activeRunners.delete(runId);
         // If the run was cancelled or paused while executing, do not overwrite status
@@ -140,7 +143,10 @@ export class RunService {
           this.runs.update(runId, { status: 'FAILED', currentStage: 'FAILED', endedAt, updatedAt: endedAt });
         } else {
           const finalStatus: RunStatus = runResult.failed > 0 ? 'ANALYZING_FAILURES' : 'COMPLETED';
-          this.runs.update(runId, { status: finalStatus, currentStage: finalStatus, endedAt, updatedAt: endedAt });
+          this.runs.update(runId, {
+            status: finalStatus, currentStage: finalStatus, endedAt, updatedAt: endedAt,
+            total: runResult.total, passed: runResult.passed, failed: runResult.failed, skipped: runResult.skipped,
+          });
         }
       })();
     }

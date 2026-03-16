@@ -69,9 +69,9 @@ export function QuickRunPanel(): React.ReactElement {
       {settings.loading && <Loading />}
       {workspace && (
         <div style={{ padding: '0.5rem 0.75rem', background: '#f5f5f5', borderRadius: 4, fontSize: '0.85em', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-          <span><strong>目标目录：</strong><code>{workspace.targetProjectPath || '(未配置)'}</code></span>
-          {testAssets?.sharedRoot && <span><strong>共享测试目录：</strong><code>{testAssets.sharedRoot}</code></span>}
-          <span><strong>权限级别：</strong>{workspace.allowOutsideToolWorkspace ? <span style={{ color: '#f90' }}>允许工作区外写入</span> : <span style={{ color: '#2a7' }}>仅工作区内</span>}</span>
+          <span><strong>{t('run.workspace.targetPath')}：</strong><code>{workspace.targetProjectPath || t('run.workspace.notConfigured')}</code></span>
+          {testAssets?.sharedRoot && <span><strong>{t('run.workspace.sharedRoot')}：</strong><code>{testAssets.sharedRoot}</code></span>}
+          <span><strong>{t('run.workspace.permission')}：</strong>{workspace.allowOutsideToolWorkspace ? <span style={{ color: '#f90' }}>{t('run.workspace.allowOutside')}</span> : <span style={{ color: '#2a7' }}>{t('run.workspace.insideOnly')}</span>}</span>
         </div>
       )}
 
@@ -79,25 +79,33 @@ export function QuickRunPanel(): React.ReactElement {
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em' }}>
           {t('run.mode')}
           <select value={mode} onChange={e => { setMode(e.target.value as import('../types.js').RunMode); }} style={{ padding: '4px 8px' }}>
-            <option value="regression">regression</option>
-            <option value="exploration">exploration</option>
-            <option value="hybrid">hybrid</option>
+            <option value="regression">{t('run.mode.regression')}</option>
+            <option value="exploration">{t('run.mode.exploration')}</option>
+            <option value="hybrid">{t('run.mode.hybrid')}</option>
           </select>
+          <span style={{ color: '#888', fontSize: '0.9em' }}>{t(`run.mode.hint.${mode}`)}</span>
         </label>
         {needsSelector && (
           <>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em' }}>
               {t('run.selectorType')}
               <select value={selectorType} onChange={e => { setSelectorType(e.target.value as SelectorType); }} style={{ padding: '4px 8px' }}>
-                <option value="suite">suite</option>
-                <option value="scenario">scenario</option>
-                <option value="tag">tag</option>
-                <option value="testcase">testcase</option>
+                <option value="suite">suite — {t('run.selectorType.suite')}</option>
+                <option value="scenario">scenario — {t('run.selectorType.scenario')}</option>
+                <option value="tag">tag — {t('run.selectorType.tag')}</option>
+                <option value="testcase">testcase — {t('run.selectorType.testcase')}</option>
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em', flex: 1, minWidth: 160 }}>
               {t('run.selectorValue')}
-              <input value={selectorValue} onChange={e => { setSelectorValue(e.target.value); }} required style={{ padding: '4px 8px' }} />
+              <input
+                value={selectorValue}
+                onChange={e => { setSelectorValue(e.target.value); }}
+                required
+                placeholder={t(`run.selectorValue.placeholder.${selectorType}`)}
+                style={{ padding: '4px 8px' }}
+              />
+              <span style={{ color: '#888', fontSize: '0.9em' }}>{t(`run.selectorType.hint.${selectorType}`)}</span>
             </label>
           </>
         )}
@@ -105,11 +113,11 @@ export function QuickRunPanel(): React.ReactElement {
       {needsExploration && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em' }}>
-            {t('run.startUrls')} (每行一个)
+            {t('run.startUrls')} ({t('run.startUrls.hint')})
             <textarea value={startUrls} onChange={e => { setStartUrls(e.target.value); }} rows={3} required style={{ padding: '4px 8px', resize: 'vertical' }} />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em' }}>
-            {t('run.focusAreas')} (每行一个，可选)
+            {t('run.focusAreas')} ({t('run.focusAreas.hint')})
             <textarea value={focusAreas} onChange={e => { setFocusAreas(e.target.value); }} rows={2} style={{ padding: '4px 8px', resize: 'vertical' }} />
           </label>
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
@@ -122,7 +130,7 @@ export function QuickRunPanel(): React.ReactElement {
               <input type="number" value={maxPages} onChange={e => { setMaxPages(Number(e.target.value)); }} min={1} style={{ padding: '4px 8px', width: 80 }} />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em', flex: 1, minWidth: 160 }}>
-              {t('run.allowedHosts')} (逗号分隔)
+              {t('run.allowedHosts')} ({t('run.allowedHosts.hint')})
               <input value={allowedHosts} onChange={e => { setAllowedHosts(e.target.value); }} style={{ padding: '4px 8px' }} />
             </label>
           </div>

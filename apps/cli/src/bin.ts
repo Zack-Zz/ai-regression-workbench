@@ -12,7 +12,7 @@ import { createAppServer } from './server.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
-const MIGRATIONS_DIR = new URL('../../scripts/sql', import.meta.url).pathname;
+const MIGRATIONS_DIR = new URL('../../../scripts/sql', import.meta.url).pathname;
 
 const DEFAULT_CONFIG_PATH = resolve('.ai-regression-workbench/config.local.yaml');
 

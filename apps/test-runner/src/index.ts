@@ -56,6 +56,8 @@ export interface RunnerInput {
   dataRoot: string;
   /** Correlation header names to extract from HAR network logs */
   correlationHeaders?: string[];
+  /** Called with running totals as each test completes (optional) */
+  onProgress?: (counts: { total: number; passed: number; failed: number; skipped: number }) => void;
 }
 
 export interface RunnerResult {
@@ -175,7 +177,7 @@ export class TestRunner {
     const reportFile = join(dataRoot, 'runs', `${runId}-pw-report.json`);
     mkdirSync(join(dataRoot, 'runs'), { recursive: true });
 
-    const args = ['playwright', 'test', '--reporter=json'];
+    const args = ['playwright', 'test', '--reporter=line,json'];
 
     if (selector?.tag) {
       args.push('--grep', `@${escapeRegex(selector.tag)}`);
@@ -201,11 +203,28 @@ export class TestRunner {
     }
 
     // Run Playwright non-blocking; capture stdout for JSON report
+    // Parse line-reporter stderr for real-time progress: "[N/T] ✓ title" or "✗ title"
+    const progressCounts = { total: 0, passed: 0, failed: 0, skipped: 0 };
+    // Playwright line reporter: "  1 passed", "  2 failed", "[1/10]" etc.
+    // More reliable: match "✓" / "✗" / "-" per-test lines
+    const lineRe = /^\s*(\d+)\s+(?:passed|failed|skipped)/;
     const rawOutput = await spawnAsync('npx', args, {
       cwd: workspacePath,
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile },
       timeout: 10 * 60 * 1000,
       onProc: (proc) => { this.activeProcs.set(runId, proc); },
+      onStderr: (line) => {
+        if (!input.onProgress) return;
+        // Match summary lines like "  3 passed (2s)" or "  1 failed"
+        const m = lineRe.exec(line);
+        if (m) {
+          if (line.includes('passed')) progressCounts.passed = Number(m[1]);
+          else if (line.includes('failed')) progressCounts.failed = Number(m[1]);
+          else if (line.includes('skipped')) progressCounts.skipped = Number(m[1]);
+          progressCounts.total = progressCounts.passed + progressCounts.failed + progressCounts.skipped;
+          input.onProgress({ ...progressCounts });
+        }
+      },
     });
     this.activeProcs.delete(runId);
 
@@ -423,6 +442,7 @@ function spawnAsync(
     env: NodeJS.ProcessEnv;
     timeout: number;
     onProc?: (proc: ReturnType<typeof spawn>) => void;
+    onStderr?: (line: string) => void;
   },
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
@@ -449,7 +469,13 @@ function spawnAsync(
     }, opts.timeout);
 
     proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const s = chunk.toString();
+      stderr += s;
+      if (opts.onStderr) {
+        for (const line of s.split('\n')) { if (line) opts.onStderr(line); }
+      }
+    });
 
     proc.on('error', (err) => {
       clearTimeout(timer);

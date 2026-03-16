@@ -41,13 +41,18 @@ export function createAppServer(opts: ServerOptions) {
   // Resolve local-ui dist relative to this file (apps/cli/dist/server.js → apps/local-ui/dist)
   const uiDist = resolve(dirname(new URL(import.meta.url).pathname), '../../local-ui/dist');
 
+  // Known API path prefixes — these must NOT be intercepted by static serving
+  const API_PREFIXES = ['/runs', '/code-tasks', '/reviews', '/commits', '/settings', '/doctor'];
+
   function serveStatic(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean {
     if (!existsSync(uiDist)) return false;
     const url = req.url ?? '/';
-    // Only serve non-API paths
-    if (url.startsWith('/api/') || url.startsWith('/doctor') || url.startsWith('/runs') ||
-        url.startsWith('/code-tasks') || url.startsWith('/reviews') || url.startsWith('/commits') ||
-        url.startsWith('/settings')) return false;
+    // Browser navigation requests include text/html in Accept; API fetch/XHR requests do not.
+    // POST/PUT/DELETE are always API calls, never browser navigation.
+    const method = req.method ?? 'GET';
+    const accept = req.headers['accept'] ?? '';
+    const isBrowserNav = method === 'GET' && accept.includes('text/html');
+    if (!isBrowserNav && API_PREFIXES.some(p => url === p || url.startsWith(p + '/') || url.startsWith(p + '?'))) return false;
     const ext = url.split('.').pop() ?? '';
     const mimeMap: Record<string, string> = { js: 'application/javascript', css: 'text/css', html: 'text/html', svg: 'image/svg+xml', ico: 'image/x-icon' };
     const filePath = url === '/' || !ext || !mimeMap[ext] ? join(uiDist, 'index.html') : join(uiDist, url);
@@ -66,13 +71,16 @@ export function createAppServer(opts: ServerOptions) {
       res.end(readFileSync(fallback));
       return true;
     }
-    const mime = mimeMap[ext] ?? 'application/octet-stream';
+    const fileExt = filePath.split('.').pop() ?? '';
+    const mime = mimeMap[fileExt] ?? 'text/html';
     res.writeHead(200, { 'Content-Type': mime });
     res.end(readFileSync(filePath));
     return true;
   }
 
   return createServer((req, res) => {
+    // Strip /api prefix so the UI's fetch('/api/runs') hits the same routes as /runs
+    if (req.url?.startsWith('/api/')) req.url = req.url.slice(4);
     if (!serveStatic(req, res)) {
       void handleRequest(router, req, res);
     }
