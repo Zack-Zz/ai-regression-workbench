@@ -135,6 +135,15 @@ export function buildRouter(
     actionOk(res, diagSvc.retryAnalysis(params['runId'] ?? '', params['testcaseId'] ?? '').message, { nextSuggestedAction: 'poll-analysis' });
   });
 
+  router.get('/runs/:runId/testcases/:testcaseId/drafts', (_req, res, params) => {
+    ok(res, taskSvc.listDrafts(params['runId'] ?? '', params['testcaseId']));
+  });
+  router.post('/runs/:runId/testcases/:testcaseId/drafts/:draftId/promote', (_req, res, params) => {
+    const result = taskSvc.promoteToCodeTask(params['draftId'] ?? '');
+    if (!result.success) { notFound(res, result.errorCode ?? 'NOT_FOUND', result.message); return; }
+    ok(res, result);
+  });
+
   // --- Code Tasks ---
   router.get('/code-tasks', (req, res) => {
     const p = parseQuery(req);

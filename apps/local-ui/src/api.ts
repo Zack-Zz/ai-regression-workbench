@@ -44,6 +44,8 @@ export const api = {
   getLogs: (runId: string, tcId: string) => get<import('./types').LogDetail | null>(`/runs/${runId}/testcases/${tcId}/logs`),
   getAnalysis: (runId: string, tcId: string) => get<import('./types').AnalysisDetail | null>(`/runs/${runId}/testcases/${tcId}/analysis`),
   retryAnalysis: (runId: string, tcId: string) => post<import('./types').ActionResult>(`/runs/${runId}/testcases/${tcId}/analysis/retry`),
+  listDrafts: (runId: string, tcId: string) => get<import('./types').CodeTaskDraftRow[]>(`/runs/${runId}/testcases/${tcId}/drafts`),
+  promoteDraft: (runId: string, tcId: string, draftId: string) => post<import('./types').ActionResult & { taskId?: string }>(`/runs/${runId}/testcases/${tcId}/drafts/${draftId}/promote`),
 
   // Code Tasks
   listCodeTasks: (q?: string) => get<import('./types').CodeTaskSummaryPage>(`/code-tasks${q ? `?${q}` : ''}`),

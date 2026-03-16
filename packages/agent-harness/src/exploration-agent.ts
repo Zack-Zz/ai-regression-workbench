@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ExplorationConfig } from '@zarb/shared-types';
 import type { Db } from '@zarb/storage';
 import { FindingRepository } from '@zarb/storage';
+import { HarnessSessionManager } from './session-manager.js';
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
@@ -44,19 +45,30 @@ export interface ExplorationResult {
  */
 export class ExplorationAgent {
   private readonly findings: FindingRepository;
+  private readonly sessionManager: HarnessSessionManager;
 
   constructor(
     private readonly db: Db,
     private readonly provider: AIProvider,
   ) {
     this.findings = new FindingRepository(db);
+    this.sessionManager = new HarnessSessionManager(db);
   }
 
   async explore(
     runId: string,
     config: ExplorationConfig,
     probe: (url: string) => Promise<PageProbe>,
+    dataRoot = '',
   ): Promise<ExplorationResult> {
+    // Create Harness session for audit trail
+    const session = this.sessionManager.startSession({
+      runId,
+      kind: 'exploration',
+      agentName: 'ExplorationAgent',
+      policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 15_000, allowedHosts: config.allowedHosts ?? [], allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
+      dataRoot,
+    });
     const maxSteps = config.maxSteps ?? 20;
     const maxPages = config.maxPages ?? 10;
     const visitedUrls = new Set<string>();
@@ -103,9 +115,18 @@ export class ExplorationAgent {
         }
       }
 
+      // Record step in Harness session trace
+      this.sessionManager.appendStep(session.session_id, {
+        stepIndex,
+        description: `navigate: ${url}`,
+        outcome: `findings: ${String(newFindings.length)}, errors: ${String(pageState.consoleErrors.length + pageState.networkErrors.length)}`,
+        timestamp: new Date().toISOString(),
+      }, dataRoot);
+
       stepIndex++;
     }
 
+    this.sessionManager.completeSession(session.session_id);
     return { findingCount: totalFindings, stepsExecuted: stepIndex, pagesVisited: visitedUrls.size };
   }
 

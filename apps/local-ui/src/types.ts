@@ -139,6 +139,14 @@ export interface CodeTaskDetail {
 
 export interface CodeTaskSummaryPage { items: CodeTaskSummary[]; nextCursor?: string; }
 
+export interface CodeTaskDraftRow {
+  id: string; run_id: string; analysis_id: string | null;
+  goal: string; target: string; workspace_path: string;
+  scope_paths_json: string | null; constraints_json: string | null;
+  verification_commands_json: string | null;
+  prompt_template_version: string; status: string; created_at: string;
+}
+
 export interface ActionResult {
   success: boolean; message: string; errorCode?: string; nextSuggestedAction?: string;
 }

@@ -13,12 +13,21 @@ export function FailureReportPage(): React.ReactElement {
 
   const report = useAsync(() => api.getFailureReport(rid, tid), [rid, tid]);
   const analysis = useAsync(() => api.getAnalysis(rid, tid), [rid, tid]);
+  const drafts = useAsync(() => api.listDrafts(rid, tid), [rid, tid]);
   const profile = useAsync(() => api.getExecutionProfile(rid, tid), [rid, tid]);
   const trace = useAsync(() => api.getTrace(rid, tid), [rid, tid]);
   const logs = useAsync(() => api.getLogs(rid, tid), [rid, tid]);
 
   async function retryAnalysis(): Promise<void> {
     try { await api.retryAnalysis(rid, tid); analysis.reload(); } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); }
+  }
+
+  async function promote(draftId: string): Promise<void> {
+    try {
+      const res = await api.promoteDraft(rid, tid, draftId);
+      if (res.taskId) { navigate(`/code-tasks/${res.taskId}`); }
+      drafts.reload();
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); }
   }
 
   if (report.loading) return <Loading />;
@@ -118,6 +127,20 @@ export function FailureReportPage(): React.ReactElement {
           </>
         )}
       </Card>
+
+      {drafts.data && drafts.data.length > 0 && (
+        <Card title={`AI 修复建议 (${String(drafts.data.length)})`}>
+          {drafts.data.map(d => (
+            <div key={d.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, marginBottom: 2 }}>{d.goal}</div>
+                <div style={{ fontSize: '0.85em', color: '#888' }}>{d.target} · {d.created_at.slice(0, 16).replace('T', ' ')}</div>
+              </div>
+              <Button variant="primary" onClick={() => { void promote(d.id); }}>创建代码任务</Button>
+            </div>
+          ))}
+        </Card>
+      )}
 
       {profile.data && profile.data.apiCalls.length > 0 && (
         <Card title={`接口调用 (${String(profile.data.apiCalls.length)})`}>

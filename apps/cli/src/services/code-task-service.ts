@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Db, CodeTaskRow } from '@zarb/storage';
-import { CodeTaskRepository, ReviewRepository, CommitRepository } from '@zarb/storage';
+import { CodeTaskRepository, ReviewRepository, CommitRepository, CodeTaskDraftRepository } from '@zarb/storage';
 import { HarnessSessionManager, ArtifactWriter, CodexCliAgent, DEFAULT_CODE_REPAIR_POLICY } from '@zarb/agent-harness';
 import { CommitManager } from '@zarb/review-manager';
 import type {
@@ -31,6 +31,7 @@ export class CodeTaskService {
   private readonly tasks: CodeTaskRepository;
   private readonly reviews: ReviewRepository;
   private readonly commits: CommitRepository;
+  private readonly drafts: CodeTaskDraftRepository;
   private readonly sessionManager: HarnessSessionManager;
   private readonly artifactWriter: ArtifactWriter;
   private readonly agent: CodexCliAgent;
@@ -40,6 +41,7 @@ export class CodeTaskService {
     this.tasks = new CodeTaskRepository(db);
     this.reviews = new ReviewRepository(db);
     this.commits = new CommitRepository(db);
+    this.drafts = new CodeTaskDraftRepository(db);
     this.sessionManager = new HarnessSessionManager(db);
     this.artifactWriter = new ArtifactWriter(dataRoot, db);
     this.agent = agent ?? new CodexCliAgent();
@@ -53,6 +55,31 @@ export class CodeTaskService {
     if (query.cursor !== undefined) filter.cursor = query.cursor;
     const page = this.tasks.list(filter);
     return { items: page.items.map(toSummary), ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  }
+
+  listDrafts(runId: string, testcaseId?: string): import('@zarb/storage').CodeTaskDraftRow[] {
+    const all = this.drafts.findByRun(runId);
+    return testcaseId ? all.filter(d => d.analysis_id?.includes(testcaseId) ?? true) : all;
+  }
+
+  promoteToCodeTask(draftId: string): ActionResult & { taskId?: string } {
+    const draft = this.drafts.findById(draftId);
+    if (!draft) return { success: false, message: 'Draft not found', errorCode: 'DRAFT_NOT_FOUND' };
+    const taskId = `task-${randomUUID().slice(0, 8)}`;
+    const now = new Date().toISOString();
+    this.tasks.create({
+      taskId,
+      runId: draft.run_id,
+      workspacePath: draft.workspace_path,
+      goal: draft.goal,
+      ...(draft.scope_paths_json ? { scopePathsJson: draft.scope_paths_json } : {}),
+      ...(draft.constraints_json ? { constraintsJson: draft.constraints_json } : {}),
+      ...(draft.verification_commands_json ? { verificationCommandsJson: draft.verification_commands_json } : {}),
+      createdAt: now,
+    });
+    // Set status to PENDING_APPROVAL after creation
+    this.tasks.update(taskId, { status: 'PENDING_APPROVAL', updatedAt: now });
+    return { success: true, message: 'Promoted to CodeTask', taskId };
   }
 
   getCodeTask(taskId: string): CodeTaskDetail | null {
@@ -146,7 +173,14 @@ export class CodeTaskService {
 
       const agentResult = await this.agent.run({ workspacePath: row.workspace_path, prompt: row.goal });
 
-      // Non-zero exit (including timeout 124) = agent failure → skip to FAILED
+      // Record agent execution step
+      this.sessionManager.appendStep(session.session_id, {
+        stepIndex: 0,
+        description: `codex exec: ${row.goal.slice(0, 100)}`,
+        outcome: agentResult.exitCode === 0 ? 'ok' : `exit ${String(agentResult.exitCode)}`,
+        timestamp: new Date().toISOString(),
+      }, this.dataRoot);
+
       if (agentResult.exitCode !== 0) {
         this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
         this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath: `code-tasks/${taskId}/raw-output.txt`, updatedAt: new Date().toISOString() });

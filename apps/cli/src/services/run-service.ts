@@ -121,7 +121,7 @@ export class RunService {
     if (row) result.run = toSummary(row);
 
     // Trigger real Playwright execution asynchronously if runner is available
-    if (this.opts.runner && input.runMode === 'regression' && input.projectPath) {
+    if (this.opts.runner && (input.runMode === 'regression' || input.runMode === 'hybrid') && input.projectPath) {
       const runner = this.opts.runner;
       const dataRoot = this.opts.dataRoot;
       const projectPath = input.projectPath;
@@ -173,66 +173,68 @@ export class RunService {
               this.runs.update(runId, { status: 'COMPLETED', currentStage: 'COMPLETED', updatedAt: now2 });
             })();
           }
+          // hybrid: chain exploration after regression
+          if (input.runMode === 'hybrid' && input.exploration) {
+            void this.runExploration(runId, input.exploration);
+          }
         }
       })();
     }
 
-    // Exploration / hybrid: run ExplorationAgent if aiEngine available, else stub status progression
-    if (input.runMode === 'exploration' || input.runMode === 'hybrid') {
-      const explorationConfig = input.exploration;
-      const aiEngine = this.opts.aiEngine;
-      void (async () => {
-        const now0 = new Date().toISOString();
-        this.runs.update(runId, { status: 'PLANNING_EXPLORATION', currentStage: 'PLANNING_EXPLORATION', updatedAt: now0 });
-
-        if (aiEngine && explorationConfig) {
-          const { ExplorationAgent } = await import('@zarb/agent-harness');
-          const providerAdapter = this.opts.aiProvider ?? { complete: async (_p: string) => '' };
-          const agent = new ExplorationAgent(this.db, providerAdapter);
-
-          const now1 = new Date().toISOString();
-          this.runs.update(runId, { status: 'RUNNING_EXPLORATION', currentStage: 'RUNNING_EXPLORATION', updatedAt: now1 });
-
-          // HTTP-based probe (no browser needed for basic exploration)
-          const probe = async (url: string) => {
-            try {
-              const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-              const text = await res.text();
-              const consoleErrors: string[] = [];
-              const networkErrors = res.ok ? [] : [{ url, status: res.status }];
-              const formCount = (text.match(/<form/gi) ?? []).length;
-              const linkCount = (text.match(/<a\s/gi) ?? []).length;
-              const titleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(text);
-              return { url, title: titleMatch?.[1] ?? '', consoleErrors, networkErrors, formCount, linkCount };
-            } catch (e) {
-              return { url, title: '', consoleErrors: [String(e)], networkErrors: [], formCount: 0, linkCount: 0 };
-            }
-          };
-
-          try {
-            await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe);
-          } catch { /* degrade gracefully */ }
-        } else {
-          // No AI engine — wait briefly to simulate planning
-          await new Promise<void>(r => setTimeout(r, 800));
-          const cur0 = this.runs.findById(runId);
-          if (cur0?.status === 'CANCELLED' || cur0?.status === 'PAUSED') return;
-          const now1 = new Date().toISOString();
-          this.runs.update(runId, { status: 'RUNNING_EXPLORATION', currentStage: 'RUNNING_EXPLORATION', updatedAt: now1 });
-          await new Promise<void>(r => setTimeout(r, 800));
-        }
-
-        const cur = this.runs.findById(runId);
-        if (cur?.status === 'CANCELLED' || cur?.status === 'PAUSED') return;
-        const now2 = new Date().toISOString();
-        this.runs.update(runId, { status: 'COLLECTING_ARTIFACTS', currentStage: 'COLLECTING_ARTIFACTS', updatedAt: now2 });
-        await new Promise<void>(r => setTimeout(r, 300));
-        const now3 = new Date().toISOString();
-        this.runs.update(runId, { status: 'COMPLETED', currentStage: 'COMPLETED', endedAt: now3, updatedAt: now3 });
-      })();
+    // Pure exploration mode: run ExplorationAgent directly
+    // hybrid exploration is chained after regression completes (see regression block above)
+    if (input.runMode === 'exploration') {
+      void this.runExploration(runId, input.exploration);
     }
 
     return result;
+  }
+
+  private async runExploration(
+    runId: string,
+    explorationConfig: StartRunInput['exploration'],
+  ): Promise<void> {
+    const now0 = new Date().toISOString();
+    this.runs.update(runId, { status: 'PLANNING_EXPLORATION', currentStage: 'PLANNING_EXPLORATION', updatedAt: now0 });
+
+    if (this.opts.aiEngine && explorationConfig) {
+      const { ExplorationAgent } = await import('@zarb/agent-harness');
+      const providerAdapter = this.opts.aiProvider ?? { complete: async (_p: string) => '' };
+      const agent = new ExplorationAgent(this.db, providerAdapter);
+      const now1 = new Date().toISOString();
+      this.runs.update(runId, { status: 'RUNNING_EXPLORATION', currentStage: 'RUNNING_EXPLORATION', updatedAt: now1 });
+      const probe = async (url: string) => {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+          const text = await res.text();
+          const networkErrors = res.ok ? [] : [{ url, status: res.status }];
+          const formCount = (text.match(/<form/gi) ?? []).length;
+          const linkCount = (text.match(/<a\s/gi) ?? []).length;
+          const titleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(text);
+          return { url, title: titleMatch?.[1] ?? '', consoleErrors: [], networkErrors, formCount, linkCount };
+        } catch (e) {
+          return { url, title: '', consoleErrors: [String(e)], networkErrors: [], formCount: 0, linkCount: 0 };
+        }
+      };
+      try {
+        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe);
+      } catch { /* degrade gracefully */ }
+    } else {
+      await new Promise<void>(r => setTimeout(r, 800));
+      const cur0 = this.runs.findById(runId);
+      if (cur0?.status === 'CANCELLED' || cur0?.status === 'PAUSED') return;
+      const now1 = new Date().toISOString();
+      this.runs.update(runId, { status: 'RUNNING_EXPLORATION', currentStage: 'RUNNING_EXPLORATION', updatedAt: now1 });
+      await new Promise<void>(r => setTimeout(r, 800));
+    }
+
+    const cur = this.runs.findById(runId);
+    if (cur?.status === 'CANCELLED' || cur?.status === 'PAUSED') return;
+    const now2 = new Date().toISOString();
+    this.runs.update(runId, { status: 'COLLECTING_ARTIFACTS', currentStage: 'COLLECTING_ARTIFACTS', updatedAt: now2 });
+    await new Promise<void>(r => setTimeout(r, 300));
+    const now3 = new Date().toISOString();
+    this.runs.update(runId, { status: 'COMPLETED', currentStage: 'COMPLETED', endedAt: now3, updatedAt: now3 });
   }
 
   listRuns(query: ListRunsQuery = {}): RunSummaryPage {
