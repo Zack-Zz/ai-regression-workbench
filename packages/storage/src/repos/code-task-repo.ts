@@ -25,6 +25,7 @@ export interface CodeTaskRow {
   diff_path: string | null;
   patch_path: string | null;
   raw_output_path: string | null;
+  verify_output_path: string | null;
   verify_passed: number | null;
   verify_override_used: number;
   timeout_at: string | null;
@@ -61,6 +62,7 @@ export interface UpdateCodeTaskInput {
   verifyPassed?: boolean;
   verifyOverrideUsed?: boolean;
   rawOutputPath?: string;
+  verifyOutputPath?: string;
   timeoutAt?: string;
   updatedAt: string;
 }
@@ -127,6 +129,7 @@ export class CodeTaskRepository {
     if (input.verifyPassed !== undefined) { sets.push('verify_passed = @verifyPassed'); params['verifyPassed'] = input.verifyPassed ? 1 : 0; }
     if (input.verifyOverrideUsed !== undefined) { sets.push('verify_override_used = @verifyOverrideUsed'); params['verifyOverrideUsed'] = input.verifyOverrideUsed ? 1 : 0; }
     if (input.rawOutputPath !== undefined) { sets.push('raw_output_path = @rawOutputPath'); params['rawOutputPath'] = input.rawOutputPath; }
+    if (input.verifyOutputPath !== undefined) { sets.push('verify_output_path = @verifyOutputPath'); params['verifyOutputPath'] = input.verifyOutputPath; }
     if (input.timeoutAt !== undefined) { sets.push('timeout_at = @timeoutAt'); params['timeoutAt'] = input.timeoutAt; }
 
     this.db.prepare(`UPDATE code_tasks SET ${sets.join(', ')} WHERE task_id = @taskId`).run(params);

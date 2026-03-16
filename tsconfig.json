@@ -21,6 +21,8 @@
     { "path": "./apps/trace-bridge" },
     { "path": "./apps/trace-bridge/tsconfig.test.json" },
     { "path": "./apps/log-bridge" },
-    { "path": "./apps/log-bridge/tsconfig.test.json" }
+    { "path": "./apps/log-bridge/tsconfig.test.json" },
+    { "path": "./apps/review-manager" },
+    { "path": "./apps/review-manager/tsconfig.test.json" }
   ]
 }

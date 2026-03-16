@@ -89,6 +89,7 @@ export interface CreateCommitInput {
   taskId: string;
   commitMessage: string;
   expectedTaskVersion?: number;
+  branchName?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ function qn(val: string | undefined): number | undefined { return val ? Number(v
 /** Map service errorCode to HTTP status + send response. */
 function taskError(res: ServerResponse, errorCode: string | undefined, message: string): void {
   if (errorCode === 'CODE_TASK_NOT_FOUND') { notFound(res, errorCode, message); return; }
-  if (errorCode === 'CODE_TASK_STATE_INVALID') { conflict(res, errorCode, message); return; }
+  if (errorCode === 'CODE_TASK_STATE_INVALID' || errorCode === 'CODE_TASK_VERSION_MISMATCH') { conflict(res, errorCode, message); return; }
   badRequest(res, errorCode ?? 'CODE_TASK_STATE_INVALID', message);
 }
 
@@ -164,8 +164,8 @@ export function buildRouter(
     actionOk(res, result.message);
   });
 
-  router.post('/code-tasks/:taskId/execute', (_req, res, params) => {
-    const result = taskSvc.executeCodeTask(params['taskId'] ?? '');
+  router.post('/code-tasks/:taskId/execute', async (_req, res, params) => {
+    const result = await taskSvc.executeCodeTask(params['taskId'] ?? '');
     if (!result.success) { taskError(res, result.errorCode, result.message); return; }
     actionOk(res, result.message);
   });

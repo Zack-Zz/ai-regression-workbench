@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { codeTaskDiffPath, codeTaskPatchPath, codeTaskVerifyPath, codeTaskRawOutputPath } from '@zarb/storage';
@@ -10,6 +10,8 @@ export interface GenerateArtifactsInput {
   sessionId: string;
   workspacePath: string;
   verificationCommands: string[];
+  /** Raw agent output to persist as raw-output.txt (separate from verify output). */
+  rawOutput?: string;
 }
 
 export interface GenerateArtifactsResult {
@@ -18,6 +20,7 @@ export interface GenerateArtifactsResult {
   verifyPath: string;
   rawOutputPath: string;
   verifyPassed: boolean;
+  changedFiles: string[];
 }
 
 /**
@@ -43,9 +46,28 @@ export class ArtifactWriter {
   generateArtifacts(input: GenerateArtifactsInput): GenerateArtifactsResult {
     const { taskId, sessionId, workspacePath, verificationCommands } = input;
 
-    // 1. Generate diff and patch from current workspace state (both from `git diff HEAD`)
-    const diff = this.runCommand('git diff HEAD', workspacePath);
-    const patch = this.runCommand('git diff HEAD', workspacePath);
+    // 1. Generate diff and patch from current workspace state.
+    //    For tracked changes: git diff HEAD.
+    //    For untracked new files: git ls-files --others --exclude-standard (non-destructive, no index mutation).
+    const trackedDiff = this.tryCommand('git diff HEAD', workspacePath);
+    const untrackedFiles = this.tryCommand('git ls-files --others --exclude-standard', workspacePath)
+      .split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Build unified diff for untracked files by reading their content directly
+    const untrackedDiffParts: string[] = [];
+    for (const file of untrackedFiles) {
+      try {
+        const content = readFileSync(join(workspacePath, file), 'utf8');
+        const lines = content.split('\n').map(l => `+${l}`).join('\n');
+        untrackedDiffParts.push(`diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n${lines}`);
+      } catch { /* skip unreadable files */ }
+    }
+
+    const diff = trackedDiff + (untrackedDiffParts.length ? '\n' + untrackedDiffParts.join('\n') : '');
+    const patch = diff;
+    const trackedChanged = this.tryCommand('git diff HEAD --name-only', workspacePath)
+      .split('\n').map(l => l.trim()).filter(Boolean);
+    const changedFiles = [...new Set([...trackedChanged, ...untrackedFiles])];
 
     // 2. Run verification commands and collect output
     let verifyOutput = '';
@@ -60,11 +82,11 @@ export class ArtifactWriter {
       }
     }
 
-    // 3. Write artifacts to disk
+    // 3. Write artifacts to disk — raw agent output and verify output are separate files
     const diffPath = this.write(codeTaskDiffPath(taskId), diff);
     const patchPath = this.write(codeTaskPatchPath(taskId), patch);
     const verifyPath = this.write(codeTaskVerifyPath(taskId), verifyOutput);
-    const rawOutputPath = this.write(codeTaskRawOutputPath(taskId), verifyOutput);
+    const rawOutputPath = this.write(codeTaskRawOutputPath(taskId), input.rawOutput ?? '');
 
     // 4. Update code_tasks with artifact paths and harness session link
     if (this.codeTaskRepo) {
@@ -74,11 +96,13 @@ export class ArtifactWriter {
         patchPath,
         verifyPassed,
         rawOutputPath,
+        verifyOutputPath: verifyPath,
+        changedFilesJson: JSON.stringify(changedFiles),
         updatedAt: new Date().toISOString(),
       });
     }
 
-    return { diffPath, patchPath, verifyPath, rawOutputPath, verifyPassed };
+    return { diffPath, patchPath, verifyPath, rawOutputPath, verifyPassed, changedFiles };
   }
 
   /** Write raw content directly (for cases where content is already available). */
@@ -107,5 +131,13 @@ export class ArtifactWriter {
 
   private runCommand(cmd: string, cwd: string): string {
     return execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
+  private tryCommand(cmd: string, cwd: string): string {
+    try {
+      return this.runCommand(cmd, cwd);
+    } catch {
+      return '';
+    }
   }
 }

@@ -15,6 +15,7 @@
     "@zarb/storage": "workspace:*",
     "@zarb/config": "workspace:*",
     "@zarb/agent-harness": "workspace:*",
+    "@zarb/review-manager": "workspace:*",
     "@zarb/test-runner": "workspace:*",
     "@zarb/trace-bridge": "workspace:*",
     "@zarb/log-bridge": "workspace:*"

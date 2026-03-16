@@ -26,7 +26,7 @@ beforeEach(() => {
   router = buildRouter(
     new RunService(db),
     new DiagnosticsService(db),
-    new CodeTaskService(db),
+    new CodeTaskService(db, dir),
     new SettingsService(join(dir, 'config.json')),
   );
 });
@@ -128,7 +128,7 @@ describe('CodeTaskService', () => {
   }
 
   it('approveCodeTask returns not found for unknown task', () => {
-    const result = new CodeTaskService(db).approveCodeTask('nope');
+    const result = new CodeTaskService(db, dir).approveCodeTask('nope');
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe('CODE_TASK_NOT_FOUND');
   });
@@ -136,7 +136,8 @@ describe('CodeTaskService', () => {
   it('submitReview creates review and transitions task', () => {
     seedRun();
     new CodeTaskRepository(db).create({ taskId: 't1', runId: 'r1', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
-    const svc = new CodeTaskService(db);
+    db.prepare("UPDATE code_tasks SET status='SUCCEEDED' WHERE task_id='t1'").run();
+    const svc = new CodeTaskService(db, dir);
     const result = svc.submitReview({ taskId: 't1', decision: 'accept', codeTaskVersion: 1 });
     expect(result.success).toBe(true);
     const detail = svc.getCodeTask('t1');

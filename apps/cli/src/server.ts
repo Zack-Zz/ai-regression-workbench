@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import type { Db } from '@zarb/storage';
 import { ConfigManager } from '@zarb/config';
 import { TestRunner } from '@zarb/test-runner';
@@ -33,11 +34,47 @@ export function createAppServer(opts: ServerOptions) {
   const runSvc = new RunService(opts.db, { dataRoot, runner });
   const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider);
   settingsSvc.registerObserver(diagSvc);
-  const taskSvc = new CodeTaskService(opts.db);
+  const taskSvc = new CodeTaskService(opts.db, dataRoot);
   const doctorSvc = new DoctorService(opts.db, settingsSvc);
   const router = buildRouter(runSvc, diagSvc, taskSvc, settingsSvc, doctorSvc);
 
+  // Resolve local-ui dist relative to this file (apps/cli/dist/server.js → apps/local-ui/dist)
+  const uiDist = resolve(dirname(new URL(import.meta.url).pathname), '../../local-ui/dist');
+
+  function serveStatic(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean {
+    if (!existsSync(uiDist)) return false;
+    const url = req.url ?? '/';
+    // Only serve non-API paths
+    if (url.startsWith('/api/') || url.startsWith('/doctor') || url.startsWith('/runs') ||
+        url.startsWith('/code-tasks') || url.startsWith('/reviews') || url.startsWith('/commits') ||
+        url.startsWith('/settings')) return false;
+    const ext = url.split('.').pop() ?? '';
+    const mimeMap: Record<string, string> = { js: 'application/javascript', css: 'text/css', html: 'text/html', svg: 'image/svg+xml', ico: 'image/x-icon' };
+    const filePath = url === '/' || !ext || !mimeMap[ext] ? join(uiDist, 'index.html') : join(uiDist, url);
+    // Security: reject path traversal — resolved path must stay inside uiDist
+    if (!resolve(filePath).startsWith(uiDist + '/') && resolve(filePath) !== uiDist) {
+      const fallback = join(uiDist, 'index.html');
+      if (!existsSync(fallback)) return false;
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(readFileSync(fallback));
+      return true;
+    }
+    if (!existsSync(filePath)) {
+      const fallback = join(uiDist, 'index.html');
+      if (!existsSync(fallback)) return false;
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(readFileSync(fallback));
+      return true;
+    }
+    const mime = mimeMap[ext] ?? 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': mime });
+    res.end(readFileSync(filePath));
+    return true;
+  }
+
   return createServer((req, res) => {
-    void handleRequest(router, req, res);
+    if (!serveStatic(req, res)) {
+      void handleRequest(router, req, res);
+    }
   });
 }

@@ -43,13 +43,14 @@ export class CommitRepository {
 
   update(
     id: string,
-    fields: { status?: CommitStatus; commitSha?: string; errorMessage?: string; updatedAt: string },
+    fields: { status?: CommitStatus; commitSha?: string; branchName?: string; errorMessage?: string; updatedAt: string },
   ): void {
     const sets: string[] = ['updated_at = @updatedAt'];
     const params: Record<string, unknown> = { id, updatedAt: fields.updatedAt };
 
     if (fields.status !== undefined) { sets.push('status = @status'); params['status'] = fields.status; }
     if (fields.commitSha !== undefined) { sets.push('commit_sha = @commitSha'); params['commitSha'] = fields.commitSha; }
+    if (fields.branchName !== undefined) { sets.push('branch_name = @branchName'); params['branchName'] = fields.branchName; }
     if (fields.errorMessage !== undefined) { sets.push('error_message = @errorMessage'); params['errorMessage'] = fields.errorMessage; }
 
     this.db.prepare(`UPDATE commit_records SET ${sets.join(', ')} WHERE id = @id`).run(params);

@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 // Allow overriding ports via env vars to avoid conflicts in CI or when
 // local services are already running on the defaults.
@@ -22,6 +22,11 @@ export default defineConfig({
     // Bypass proxy for browser requests to localhost as well.
     proxy: { server: 'http://localhost', bypass: 'localhost,127.0.0.1' },
   },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
   webServer: [
     {
       command: `node scripts/e2e-server.mjs`,

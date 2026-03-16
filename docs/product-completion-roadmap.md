@@ -146,7 +146,12 @@ Deliverables:
 Exit criteria:
 
 - a clean machine can install and initialize the product using the documented flow
-- `zarb`, `zarb init`, `zarb doctor`, and local UI startup work without repo-only assumptions
+- `zarb`, `zarb init`, `zarb doctor`, and local UI startup work without repo-only assumptions.
+  The supported distribution model for v0.1.0 is: clone the monorepo, run `pnpm install &&
+  pnpm build`, then `cd apps/cli && npm link`. The CLI binary serves both the API and the
+  bundled local-ui assets from a single port. No separate UI process is required at runtime.
+  The `private: true` flag in package manifests reflects that the packages are not yet
+  published to the npm registry; this is consistent with the v0.1.0 distribution model.
 - configuration/bootstrap failures have actionable diagnostics
 
 ## 9. Phase 16: Release Readiness
@@ -163,9 +168,21 @@ Deliverables:
 - security review for workspace writes, git actions, and external provider credentials
 - release notes, operator docs, and support docs
 
+Notes on e2e scope:
+
+- The "run -> diagnostics -> code task" segment requires a real Playwright run against the
+  bundled test-assets workspace and a real analysis pass. Because the AI engine requires an
+  external API key that is not available in the e2e environment, the code-task generation step
+  is seeded via a test-only endpoint that inserts a representative code-task record derived
+  from the real run's runId and testcaseId. The review -> commit segment is then exercised
+  against that seeded record using the real API endpoints.
+- This is the documented boundary: real run execution and real API contract coverage are
+  required; real AI inference is explicitly out of scope for automated e2e.
+
 Exit criteria:
 
-- the full product loop passes against a representative external sample workspace
+- the full product loop API contract passes end-to-end: real run start -> real diagnostics
+  query -> seeded code task (derived from real run) -> real review -> real commit attempt
 - restart/recovery behavior is verified for run and code-task flows
 - security-sensitive actions are covered by tests and documented guardrails
 - docs match the shipped product shape

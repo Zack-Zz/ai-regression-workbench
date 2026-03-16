@@ -290,6 +290,55 @@ describe('ArtifactWriter', () => {
     expect(diffContent).toContain('x = 2');
     expect(patchContent).toBe(diffContent);
   });
+
+  it('generateArtifacts: newly created untracked files appear in changedFiles and diff', () => {
+    const ws = join(dir, 'ws2');
+    mkdirSync(ws, { recursive: true });
+    execSync('git init', { cwd: ws });
+    execSync('git config user.email "test@test.com"', { cwd: ws });
+    execSync('git config user.name "Test"', { cwd: ws });
+    writeFileSync(join(ws, 'existing.ts'), 'const a = 1;\n');
+    execSync('git add .', { cwd: ws });
+    execSync('git commit -m "init"', { cwd: ws });
+    // Create a new untracked file (not staged)
+    writeFileSync(join(ws, 'new-file.ts'), 'export const b = 2;\n');
+
+    const db = makeDb(); seedRun(db);
+    new CodeTaskRepository(db).create({ taskId: 'task2', runId: 'r1', workspacePath: ws, goal: 'fix', createdAt: new Date().toISOString() });
+
+    const writer = new ArtifactWriter(dir, db);
+    const result = writer.generateArtifacts({ taskId: 'task2', sessionId: 'sess2', workspacePath: ws, verificationCommands: [] });
+
+    expect(result.changedFiles).toContain('new-file.ts');
+    const diffContent = readFileSync(join(dir, result.diffPath), 'utf8');
+    expect(diffContent).toContain('new-file.ts');
+  });
+
+  it('generateArtifacts: does not destroy pre-existing staged changes', () => {
+    const ws = join(dir, 'ws3');
+    mkdirSync(ws, { recursive: true });
+    execSync('git init', { cwd: ws });
+    execSync('git config user.email "test@test.com"', { cwd: ws });
+    execSync('git config user.name "Test"', { cwd: ws });
+    writeFileSync(join(ws, 'staged.ts'), 'const x = 1;\n');
+    execSync('git add .', { cwd: ws });
+    execSync('git commit -m "init"', { cwd: ws });
+    // Stage a modification
+    writeFileSync(join(ws, 'staged.ts'), 'const x = 99;\n');
+    execSync('git add staged.ts', { cwd: ws });
+    // Also create an untracked file
+    writeFileSync(join(ws, 'untracked.ts'), 'export const y = 3;\n');
+
+    const db = makeDb(); seedRun(db);
+    new CodeTaskRepository(db).create({ taskId: 'task3', runId: 'r1', workspacePath: ws, goal: 'fix', createdAt: new Date().toISOString() });
+
+    const writer = new ArtifactWriter(dir, db);
+    writer.generateArtifacts({ taskId: 'task3', sessionId: 'sess3', workspacePath: ws, verificationCommands: [] });
+
+    // Staged change must still be staged after artifact generation
+    const stagedAfter = execSync('git diff --cached --name-only', { cwd: ws, encoding: 'utf8' }).trim();
+    expect(stagedAfter).toContain('staged.ts');
+  });
 });
 
 // ---------------------------------------------------------------------------

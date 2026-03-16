@@ -12,6 +12,8 @@ import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationCo
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
+import { CodexCliAgent } from '@zarb/agent-harness';
+import { CommitManager } from '@zarb/review-manager';
 import { SettingsService } from '../src/services/settings-service.js';
 import { DoctorService } from '../src/services/doctor-service.js';
 import { buildRouter } from '../src/handlers/index.js';
@@ -31,7 +33,9 @@ beforeEach(() => {
   db = openDb(join(dir, 'test.db'));
   runMigrations(db, MIGRATIONS_DIR);
   runSvc = new RunService(db);
-  taskSvc = new CodeTaskService(db);
+  const mockAgent = { run: () => Promise.resolve({ rawOutput: '', exitCode: 0 }) } as unknown as CodexCliAgent;
+  const mockCommitMgr = { commit: () => ({ success: true, commitSha: 'abc123' }) } as unknown as CommitManager;
+  taskSvc = new CodeTaskService(db, dir, mockAgent, mockCommitMgr);
   router = buildRouter(runSvc, new DiagnosticsService(db, dir), taskSvc, new SettingsService(join(dir, 'config.json')));
 });
 
@@ -187,13 +191,19 @@ describe('CodeTask lifecycle flow', () => {
     await router.handle(req('POST', '/code-tasks/t1/approve'), approve.res);
     expect(approve.status()).toBe(200);
 
-    // Execute
+    // Execute — returns immediately (fire-and-forget)
     const execute = res();
     await router.handle(req('POST', '/code-tasks/t1/execute'), execute.res);
     expect(execute.status()).toBe(200);
 
-    // Manually advance to SUCCEEDED so review is allowed
-    db.prepare("UPDATE code_tasks SET status='SUCCEEDED' WHERE task_id='t1'").run();
+    // Wait for background execution to complete (mock agent resolves synchronously)
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    // After real execution, task should be SUCCEEDED (verify passes with no commands)
+    const afterExec = res();
+    await router.handle(req('GET', '/code-tasks/t1'), afterExec.res);
+    const afterExecData = afterExec.body().data as { summary: { status: string } };
+    expect(afterExecData.summary.status).toBe('SUCCEEDED');
 
     // Submit review (accept)
     const review = res();
@@ -211,6 +221,52 @@ describe('CodeTask lifecycle flow', () => {
     const commit = res();
     await router.handle(req('POST', '/commits', { taskId: 't1', commitMessage: 'fix: stabilize test', expectedTaskVersion: 1 }), commit.res);
     expect(commit.status()).toBe(200);
+  });
+
+
+  it('submitReview rejects stale codeTaskVersion', async () => {
+    seedTask('tv1');
+    db.prepare("UPDATE code_tasks SET status='SUCCEEDED' WHERE task_id='tv1'").run();
+    const r = res();
+    await router.handle(req('POST', '/reviews', { taskId: 'tv1', decision: 'accept', codeTaskVersion: 99 }), r.res);
+    expect(r.status()).toBe(409);
+  });
+
+  it('submitReview rejects FAILED task without forceReviewOnVerifyFailure', async () => {
+    seedTask('tv2');
+    db.prepare("UPDATE code_tasks SET status='FAILED', verify_passed=0, diff_path='code-tasks/tv2/changes.diff' WHERE task_id='tv2'").run();
+    const r = res();
+    await router.handle(req('POST', '/reviews', { taskId: 'tv2', decision: 'accept', codeTaskVersion: 1 }), r.res);
+    expect(r.status()).toBe(409);
+  });
+
+  it('submitReview rejects FAILED task that has no verify artifacts (agent crash, not verify failure)', async () => {
+    seedTask('tv2b');
+    db.prepare("UPDATE code_tasks SET status='FAILED' WHERE task_id='tv2b'").run();
+    const r = res();
+    await router.handle(req('POST', '/reviews', { taskId: 'tv2b', decision: 'accept', codeTaskVersion: 1, forceReviewOnVerifyFailure: true }), r.res);
+    expect(r.status()).toBe(409);
+  });
+
+  it('submitReview accepts FAILED task with forceReviewOnVerifyFailure=true when verify artifacts exist', async () => {
+    seedTask('tv3');
+    db.prepare("UPDATE code_tasks SET status='FAILED', verify_passed=0, diff_path='code-tasks/tv3/changes.diff' WHERE task_id='tv3'").run();
+    const r = res();
+    await router.handle(req('POST', '/reviews', { taskId: 'tv3', decision: 'accept', codeTaskVersion: 1, forceReviewOnVerifyFailure: true }), r.res);
+    expect(r.status()).toBe(200);
+  });
+
+  it('execute persists changedFiles in task detail', async () => {
+    seedTask('tv4');
+    const approve = res();
+    await router.handle(req('POST', '/code-tasks/tv4/approve'), approve.res);
+    await router.handle(req('POST', '/code-tasks/tv4/execute'), res().res);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    const detail = res();
+    await router.handle(req('GET', '/code-tasks/tv4'), detail.res);
+    const d = detail.body().data as { changedFiles: unknown[] };
+    // changedFiles is an array (empty in test env since /ws is not a git repo, but field must exist)
+    expect(Array.isArray(d.changedFiles)).toBe(true);
   });
 
   it('cancel task', async () => {

@@ -5,5 +5,7 @@ export { CodeTaskService } from './services/code-task-service.js';
 export { SettingsService } from './services/settings-service.js';
 export { DoctorService } from './services/doctor-service.js';
 export type { DoctorResult, DoctorCheckResult } from './services/doctor-service.js';
+export { InitService } from './services/init-service.js';
+export type { InitResult } from './services/init-service.js';
 export { createHarness } from './harness-factory.js';
 export { buildRouter } from './handlers/index.js';

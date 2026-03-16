@@ -66,6 +66,9 @@ importers:
       '@zarb/log-bridge':
         specifier: workspace:*
         version: link:../log-bridge
+      '@zarb/review-manager':
+        specifier: workspace:*
+        version: link:../review-manager
       '@zarb/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -142,7 +145,14 @@ importers:
         specifier: ^12.8.0
         version: 12.8.0
 
-  apps/review-manager: {}
+  apps/review-manager:
+    dependencies:
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@zarb/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
 
   apps/test-runner:
     dependencies:

@@ -11,6 +11,7 @@
     { "path": "../../packages/storage" },
     { "path": "../../packages/config" },
     { "path": "../../packages/agent-harness" },
+    { "path": "../review-manager" },
     { "path": "../test-runner" },
     { "path": "../trace-bridge" },
     { "path": "../log-bridge" }

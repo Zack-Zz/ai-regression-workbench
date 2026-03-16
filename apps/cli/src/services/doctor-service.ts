@@ -23,6 +23,7 @@ const EXPECTED_MIGRATIONS = [
   '004_ai_engine_persistence',
   '010_storage_indexes',
   '020_cleanup_run_by_id',
+  '021_code_task_verify_output_path',
 ];
 
 function check(name: string, fn: () => 'ok' | 'warn' | 'fail' | { status: 'ok' | 'warn' | 'fail'; message: string }): DoctorCheckResult {
@@ -107,6 +108,19 @@ export class DoctorService {
       check('playwright.available', () => {
         const ver = commandVersion('npx playwright');
         return ver ? { status: 'ok', message: ver } : { status: 'warn', message: 'playwright not found — run: npx playwright install' };
+      }),
+
+      check('playwright.browsers', () => {
+        try {
+          const out = execSync('npx playwright install --dry-run 2>&1', { stdio: 'pipe', timeout: 10_000 }).toString();
+          // If dry-run output mentions "no browsers to install", browsers are present
+          const allInstalled = out.includes('no browsers') || out.trim() === '';
+          return allInstalled
+            ? { status: 'ok', message: 'browsers installed' }
+            : { status: 'warn', message: 'some browsers may be missing — run: npx playwright install' };
+        } catch {
+          return { status: 'warn', message: 'could not verify browser installation — run: npx playwright install' };
+        }
       }),
 
       // Codex CLI

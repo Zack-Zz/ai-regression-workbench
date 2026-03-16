@@ -15,3 +15,6 @@ export type { HarnessPolicy, StopConditions } from './harness-policy.js';
 
 export { ObservedHarness } from './observed-harness.js';
 export type { ObservabilityAdapter, ObservabilityEvent, ObservabilitySummary } from './observability.js';
+
+export { CodexCliAgent } from './codex-cli-agent.js';
+export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
