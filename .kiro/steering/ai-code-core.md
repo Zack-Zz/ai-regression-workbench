@@ -13,7 +13,10 @@ This workspace is a multi-assistant toolkit for ChatGPT, Codex, Claude, Kiro, Cu
 - Explain key tradeoffs briefly before major multi-file changes.
 - Validate with relevant tests and report exact commands run.
 
-## Quality and safety
+## Language
+
+- All responses, comments, and explanations must be in Chinese or English only.
+- Do not use Korean or any other language.
 
 - Do not hardcode secrets, tokens, or credentials.
 - Validate external input at boundaries.

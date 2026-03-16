@@ -14,7 +14,10 @@
     "@zarb/shared-types": "workspace:*",
     "@zarb/storage": "workspace:*",
     "@zarb/config": "workspace:*",
-    "@zarb/agent-harness": "workspace:*"
+    "@zarb/agent-harness": "workspace:*",
+    "@zarb/test-runner": "workspace:*",
+    "@zarb/trace-bridge": "workspace:*",
+    "@zarb/log-bridge": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

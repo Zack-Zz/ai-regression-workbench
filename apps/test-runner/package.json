@@ -3,8 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@zarb/shared-types": "workspace:*",
+    "@zarb/storage": "workspace:*",
+    "@zarb/event-store": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "better-sqlite3": "^9.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@playwright/test": "^1.58.2"
   }
 }

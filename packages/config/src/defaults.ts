@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
   },
   trace: {
     provider: 'jaeger',
-    endpoint: 'http://localhost:16686/api/traces',
+    endpoint: 'http://localhost:16686',
   },
   logs: {
     provider: 'loki',

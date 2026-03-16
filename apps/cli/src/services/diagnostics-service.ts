@@ -3,12 +3,19 @@ import {
   TestResultRepository, CorrelationContextRepository, DiagnosticFetchRepository, AnalysisRepository,
   ApiCallRepository, UiActionRepository, FlowStepRepository,
 } from '@zarb/storage';
+import { traceSummaryPath, logSummaryPath } from '@zarb/storage';
 import type {
   FailureReportSummary, FailureReport, DiagnosticsDetail, AnalysisDetail, ActionResult,
-  TestcaseExecutionProfile, TraceDetail, LogDetail,
+  TestcaseExecutionProfile, TraceDetail, LogDetail, TraceProvider, LogProvider,
+  ConfigObserver, SettingsSnapshot,
 } from '@zarb/shared-types';
+import { randomUUID } from 'node:crypto';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { createTraceProvider } from '@zarb/trace-bridge';
+import { createLogProvider } from '@zarb/log-bridge';
 
-export class DiagnosticsService {
+export class DiagnosticsService implements ConfigObserver {
   private readonly results: TestResultRepository;
   private readonly correlations: CorrelationContextRepository;
   private readonly diagnosticFetches: DiagnosticFetchRepository;
@@ -16,8 +23,15 @@ export class DiagnosticsService {
   private readonly apiCalls: ApiCallRepository;
   private readonly uiActions: UiActionRepository;
   private readonly flowSteps: FlowStepRepository;
+  private traceProvider: TraceProvider;
+  private logProvider: LogProvider;
 
-  constructor(private readonly db: Db) {
+  constructor(
+    private readonly db: Db,
+    private readonly dataRoot: string,
+    traceProvider?: TraceProvider,
+    logProvider?: LogProvider,
+  ) {
     this.results = new TestResultRepository(db);
     this.correlations = new CorrelationContextRepository(db);
     this.diagnosticFetches = new DiagnosticFetchRepository(db);
@@ -25,6 +39,14 @@ export class DiagnosticsService {
     this.apiCalls = new ApiCallRepository(db);
     this.uiActions = new UiActionRepository(db);
     this.flowSteps = new FlowStepRepository(db);
+    this.traceProvider = traceProvider ?? createTraceProvider({ provider: 'none', endpoint: '' });
+    this.logProvider = logProvider ?? createLogProvider({ provider: 'none', endpoint: '', defaultLimit: 100 });
+  }
+
+  onConfigUpdated(snapshot: SettingsSnapshot): Promise<void> {
+    this.traceProvider = createTraceProvider(snapshot.values.trace);
+    this.logProvider = createLogProvider({ ...snapshot.values.logs, logFields: snapshot.values.diagnostics.correlationKeys.logFields });
+    return Promise.resolve();
   }
 
   listFailureReports(runId: string): FailureReportSummary[] {
@@ -130,33 +152,39 @@ export class DiagnosticsService {
     };
   }
 
-  getTrace(runId: string, testcaseId: string): TraceDetail | null {
+  async getTrace(runId: string, testcaseId: string): Promise<TraceDetail | null> {
     const fetches = this.diagnosticFetches.findByTestcase(runId, testcaseId);
-    const traceFetch = fetches.find(f => f.type === 'trace' && f.status === 'succeeded');
+    let traceFetch = fetches.find(f => f.type === 'trace' && f.status === 'succeeded');
+    if (!traceFetch) {
+      // On-demand fetch if not yet populated
+      await this.fetchDiagnostics(runId, testcaseId);
+      const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
+      traceFetch = updated.find(f => f.type === 'trace' && f.status === 'succeeded');
+    }
     if (!traceFetch) return null;
+    const summary = traceFetch.summary_json
+      ? JSON.parse(traceFetch.summary_json) as import('@zarb/shared-types').TraceSummary
+      : { traceId: traceFetch.id, hasError: false, errorSpans: [], topSlowSpans: [] };
     return {
-      summary: {
-        traceId: traceFetch.id,
-        hasError: false,
-        errorSpans: [],
-        topSlowSpans: [],
-        ...(traceFetch.raw_link ? { rawLink: traceFetch.raw_link } : {}),
-      },
+      summary: { ...summary, ...(traceFetch.raw_link ? { rawLink: traceFetch.raw_link } : {}) },
       fetchedAt: traceFetch.created_at,
     };
   }
 
-  getLogs(runId: string, testcaseId: string): LogDetail | null {
+  async getLogs(runId: string, testcaseId: string): Promise<LogDetail | null> {
     const fetches = this.diagnosticFetches.findByTestcase(runId, testcaseId);
-    const logFetch = fetches.find(f => f.type === 'log' && f.status === 'succeeded');
+    let logFetch = fetches.find(f => f.type === 'log' && f.status === 'succeeded');
+    if (!logFetch) {
+      await this.fetchDiagnostics(runId, testcaseId);
+      const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
+      logFetch = updated.find(f => f.type === 'log' && f.status === 'succeeded');
+    }
     if (!logFetch) return null;
+    const summary = logFetch.summary_json
+      ? JSON.parse(logFetch.summary_json) as import('@zarb/shared-types').LogSummary
+      : { matched: true, highlights: [], errorSamples: [] };
     return {
-      summary: {
-        matched: true,
-        highlights: [],
-        errorSamples: [],
-        ...(logFetch.raw_link ? { rawLink: logFetch.raw_link } : {}),
-      },
+      summary: { ...summary, ...(logFetch.raw_link ? { rawLink: logFetch.raw_link } : {}) },
       fetchedAt: logFetch.created_at,
     };
   }
@@ -175,6 +203,81 @@ export class DiagnosticsService {
       version: row.version,
       createdAt: row.created_at,
     };
+  }
+
+  /**
+   * fetchDiagnostics — call trace/log providers for a testcase and persist results.
+   * Writes summary JSON files to the documented diagnostics layout and DB rows.
+   * Provider failures are recorded as 'degraded' and do not throw.
+   */
+  async fetchDiagnostics(runId: string, testcaseId: string): Promise<void> {
+    const ctx = this.correlations.findByTestcase(runId, testcaseId);
+    const traceIds: string[] = ctx ? JSON.parse(ctx.trace_ids_json ?? '[]') as string[] : [];
+    const requestIds: string[] = ctx ? JSON.parse(ctx.request_ids_json ?? '[]') as string[] : [];
+    const sessionIds: string[] = ctx ? JSON.parse(ctx.session_ids_json ?? '[]') as string[] : [];
+    const fromTime = ctx?.from_time ?? new Date(Date.now() - 60_000).toISOString();
+    const toTime = ctx?.to_time ?? new Date().toISOString();
+    const now = new Date().toISOString();
+
+    // Fetch trace for each traceId
+    if (traceIds.length > 0) {
+      for (const traceId of traceIds) {
+        let status: 'succeeded' | 'degraded' = 'degraded';
+        let summaryJson: string | undefined;
+        try {
+          const summary = await this.traceProvider.getTrace(traceId);
+          if (summary) {
+            status = 'succeeded';
+            summaryJson = JSON.stringify(summary);
+            this.writeSummaryFile(traceSummaryPath(runId, testcaseId), summaryJson);
+          }
+        } catch { /* degraded */ }
+        this.diagnosticFetches.save({
+          id: randomUUID(),
+          runId,
+          testcaseId,
+          type: 'trace',
+          status,
+          provider: 'jaeger',
+          requestJson: JSON.stringify({ traceId }),
+          ...(summaryJson ? { summaryJson } : {}),
+          createdAt: now,
+        });
+      }
+    }
+
+    // Fetch logs
+    if (traceIds.length > 0 || requestIds.length > 0 || sessionIds.length > 0) {
+      let status: 'succeeded' | 'degraded' = 'degraded';
+      let summaryJson: string | undefined;
+      try {
+        const summary = await this.logProvider.query({ traceIds, requestIds, sessionIds, fromTime, toTime });
+        if (summary) {
+          status = 'succeeded';
+          summaryJson = JSON.stringify(summary);
+          this.writeSummaryFile(logSummaryPath(runId, testcaseId), summaryJson);
+        }
+      } catch { /* degraded */ }
+      this.diagnosticFetches.save({
+        id: randomUUID(),
+        runId,
+        testcaseId,
+        type: 'log',
+        status,
+        provider: 'loki',
+        requestJson: JSON.stringify({ traceIds, requestIds, sessionIds, fromTime, toTime }),
+        ...(summaryJson ? { summaryJson } : {}),
+        createdAt: now,
+      });
+    }
+  }
+
+  private writeSummaryFile(relativePath: string, content: string): void {
+    try {
+      const abs = join(this.dataRoot, relativePath);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, content, 'utf8');
+    } catch { /* non-fatal */ }
   }
 
   retryAnalysis(_runId: string, _testcaseId: string): ActionResult {

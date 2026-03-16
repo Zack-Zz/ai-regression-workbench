@@ -51,6 +51,11 @@ export class ConfigManager implements SettingsService {
     return Promise.resolve(this.snapshot);
   }
 
+  /** Synchronous access to current settings values — use only at startup. */
+  getSync(): SettingsSnapshot['values'] {
+    return this.snapshot.values;
+  }
+
   validateSettings(input: UpdateSettingsInput): Promise<SettingsValidationResult> {
     const errors: string[] = [];
     const patch = input.patch;

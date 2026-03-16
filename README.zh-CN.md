@@ -104,6 +104,7 @@ design.md
 ## 文档
 
 - 详细设计文档：[docs/design.md](./docs/design.md)
+- 产品收口路线图：[docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)
 - 模块设计文档：
   [orchestrator](./docs/orchestrator-design.md)、
   [diagnostics](./docs/diagnostics-design.md)、
@@ -124,4 +125,8 @@ design.md
 
 ## 当前状态
 
-当前仓库以设计文档和实现草案为主。下一步建议初始化 monorepo，并优先实现状态机、诊断链路和受控 CodeTask 流程。
+原始 Phase 0-10 路线图已经完成，仓库目前已经具备本地工作台基线、API/UI 流程、doctor 检查以及 hardening 覆盖。
+
+后续工作不再是“从零初始化实现”，而是把产品剩余的真实集成层补齐。当前最大的缺口是 `test-runner`、`trace-bridge`、`log-bridge`、`review-manager`、真实 `CodeAgent` 执行链，以及产品化安装与初始化流程。
+
+后续 Phase 11+ 计划见 [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)。

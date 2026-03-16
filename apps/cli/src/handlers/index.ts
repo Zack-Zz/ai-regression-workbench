@@ -68,20 +68,30 @@ export function buildRouter(
 
   router.post('/runs/:runId/pause', (_req, res, params) => {
     const result = runSvc.pauseRun(params['runId'] ?? '');
-    if (!result.success) { notFound(res, result.errorCode ?? 'RUN_NOT_FOUND', result.message); return; }
+    if (!result.success) {
+      if (result.errorCode === 'RUN_PAUSE_NOT_SUPPORTED') { badRequest(res, result.errorCode, result.message); return; }
+      if (result.errorCode === 'RUN_ALREADY_TERMINAL') { conflict(res, result.errorCode, result.message); return; }
+      notFound(res, result.errorCode ?? 'RUN_NOT_FOUND', result.message);
+      return;
+    }
     actionOk(res, result.message);
   });
 
   router.post('/runs/:runId/resume', (_req, res, params) => {
     const result = runSvc.resumeRun(params['runId'] ?? '');
-    if (!result.success) { notFound(res, result.errorCode ?? 'RUN_NOT_FOUND', result.message); return; }
+    if (!result.success) {
+      if (result.errorCode === 'RUN_RESUME_NOT_SUPPORTED') { badRequest(res, result.errorCode, result.message); return; }
+      if (result.errorCode === 'RUN_NOT_PAUSED') { conflict(res, result.errorCode, result.message); return; }
+      notFound(res, result.errorCode ?? 'RUN_NOT_FOUND', result.message);
+      return;
+    }
     actionOk(res, result.message);
   });
 
   router.post('/runs/:runId/cancel', (_req, res, params) => {
     const result = runSvc.cancelRun(params['runId'] ?? '');
     if (!result.success) {
-      if (result.errorCode === 'RUN_ALREADY_CANCELLED') { conflict(res, result.errorCode, result.message); return; }
+      if (result.errorCode === 'RUN_ALREADY_CANCELLED' || result.errorCode === 'RUN_ALREADY_TERMINAL') { conflict(res, result.errorCode, result.message); return; }
       notFound(res, result.errorCode ?? 'RUN_NOT_FOUND', result.message);
       return;
     }
@@ -109,12 +119,12 @@ export function buildRouter(
     ok(res, diagSvc.getDiagnostics(params['runId'] ?? '', params['testcaseId'] ?? ''));
   });
 
-  router.get('/runs/:runId/testcases/:testcaseId/trace', (_req, res, params) => {
-    ok(res, diagSvc.getTrace(params['runId'] ?? '', params['testcaseId'] ?? ''));
+  router.get('/runs/:runId/testcases/:testcaseId/trace', async (_req, res, params) => {
+    ok(res, await diagSvc.getTrace(params['runId'] ?? '', params['testcaseId'] ?? ''));
   });
 
-  router.get('/runs/:runId/testcases/:testcaseId/logs', (_req, res, params) => {
-    ok(res, diagSvc.getLogs(params['runId'] ?? '', params['testcaseId'] ?? ''));
+  router.get('/runs/:runId/testcases/:testcaseId/logs', async (_req, res, params) => {
+    ok(res, await diagSvc.getLogs(params['runId'] ?? '', params['testcaseId'] ?? ''));
   });
 
   router.get('/runs/:runId/testcases/:testcaseId/analysis', (_req, res, params) => {

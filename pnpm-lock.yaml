@@ -63,12 +63,21 @@ importers:
       '@zarb/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@zarb/log-bridge':
+        specifier: workspace:*
+        version: link:../log-bridge
       '@zarb/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@zarb/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@zarb/test-runner':
+        specifier: workspace:*
+        version: link:../test-runner
+      '@zarb/trace-bridge':
+        specifier: workspace:*
+        version: link:../trace-bridge
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.0
@@ -105,7 +114,11 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@25.5.0)
 
-  apps/log-bridge: {}
+  apps/log-bridge:
+    dependencies:
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
 
   apps/orchestrator:
     dependencies:
@@ -131,9 +144,36 @@ importers:
 
   apps/review-manager: {}
 
-  apps/test-runner: {}
+  apps/test-runner:
+    dependencies:
+      '@zarb/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@zarb/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.58.2
+        version: 1.58.2
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.37
+      better-sqlite3:
+        specifier: ^9.0.0
+        version: 9.6.0
 
-  apps/trace-bridge: {}
+  apps/trace-bridge:
+    dependencies:
+      '@zarb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
 
   packages/agent-harness:
     dependencies:

@@ -104,6 +104,7 @@ Typical correlation sources:
 ## Documentation
 
 - Detailed design: [docs/design.md](./docs/design.md)
+- Product completion roadmap: [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)
 - Module docs:
   [orchestrator](./docs/orchestrator-design.md),
   [diagnostics](./docs/diagnostics-design.md),
@@ -124,4 +125,8 @@ Typical correlation sources:
 
 ## Current Status
 
-This repository currently contains the design documentation and implementation plan. The next step is to initialize the monorepo and implement the state machine, diagnostics pipeline, and controlled code-task flow.
+The original Phase 0-10 roadmap is complete: the repository now includes the local workbench baseline, API/UI flow, doctor checks, and hardening coverage.
+
+The remaining work is product-completion work rather than initial implementation. The biggest open gaps are the real `test-runner`, `trace-bridge`, `log-bridge`, `review-manager`, real code-agent execution, and product packaging/bootstrap.
+
+See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the Phase 11+ plan.

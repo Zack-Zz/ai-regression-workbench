@@ -7,6 +7,14 @@ import type {
 } from '@zarb/shared-types';
 import type { RunScopeType } from '@zarb/shared-types';
 import { DEFAULT_SETTINGS } from '@zarb/config';
+import type { TestRunner } from '@zarb/test-runner';
+
+export interface RunServiceOptions {
+  /** Absolute path to the workbench data root (for artifact storage) */
+  dataRoot: string;
+  /** Optional runner — if provided, startRun will trigger real Playwright execution */
+  runner?: TestRunner;
+}
 
 function toSummary(row: RunRow): RunSummary {
   const base: RunSummary = {
@@ -39,13 +47,17 @@ export class RunService {
   private readonly results: TestResultRepository;
   private readonly findings: FindingRepository;
   private readonly executionReports: ExecutionReportRepository;
+  private readonly opts: RunServiceOptions;
+  /** Active runner references per runId — used by cancel/pause to control execution */
+  private readonly activeRunners = new Map<string, import('@zarb/test-runner').TestRunner>();
 
-  constructor(private readonly db: Db) {
+  constructor(private readonly db: Db, opts: RunServiceOptions = { dataRoot: './.ai-regression-workbench/data' }) {
     this.runs = new RunRepository(db);
     this.events = new RunEventRepository(db);
     this.results = new TestResultRepository(db);
     this.findings = new FindingRepository(db);
     this.executionReports = new ExecutionReportRepository(db);
+    this.opts = opts;
   }
 
   startRun(input: StartRunInput): StartRunResult {
@@ -102,6 +114,37 @@ export class RunService {
     const row = this.runs.findById(runId);
     const result: StartRunResult = { success: true, message: 'Run started' };
     if (row) result.run = toSummary(row);
+
+    // Trigger real Playwright execution asynchronously if runner is available
+    if (this.opts.runner && input.runMode === 'regression' && input.projectPath) {
+      const runner = this.opts.runner;
+      const dataRoot = this.opts.dataRoot;
+      const projectPath = input.projectPath;
+      // Use void + async IIFE so the HTTP response returns immediately while
+      // execution continues in the background (non-blocking)
+      void (async () => {
+        this.activeRunners.set(runId, runner);
+        this.runs.update(runId, { status: 'RUNNING_TESTS', currentStage: 'RUNNING_TESTS', updatedAt: new Date().toISOString() });
+        const runResult = await runner.execute({
+          runId,
+          workspacePath: projectPath,
+          dataRoot,
+          ...(sel ? { selector: sel } : {}),
+        });
+        this.activeRunners.delete(runId);
+        // If the run was cancelled or paused while executing, do not overwrite status
+        const current = this.runs.findById(runId);
+        if (current?.status === 'CANCELLED' || current?.status === 'PAUSED') return;
+        const endedAt = new Date().toISOString();
+        if (runResult.startupFailure) {
+          this.runs.update(runId, { status: 'FAILED', currentStage: 'FAILED', endedAt, updatedAt: endedAt });
+        } else {
+          const finalStatus: RunStatus = runResult.failed > 0 ? 'ANALYZING_FAILURES' : 'COMPLETED';
+          this.runs.update(runId, { status: finalStatus, currentStage: finalStatus, endedAt, updatedAt: endedAt });
+        }
+      })();
+    }
+
     return result;
   }
 
@@ -188,13 +231,41 @@ export class RunService {
   }
 
   pauseRun(runId: string): ActionResult {
-    if (!this.runs.findById(runId)) return { success: false, message: 'Run not found', errorCode: 'RUN_NOT_FOUND' };
+    const row = this.runs.findById(runId);
+    if (!row) return { success: false, message: 'Run not found', errorCode: 'RUN_NOT_FOUND' };
+    if (row.status === 'COMPLETED' || row.status === 'FAILED' || row.status === 'CANCELLED') {
+      return { success: false, message: 'Run is already in a terminal state', errorCode: 'RUN_ALREADY_TERMINAL' };
+    }
+    // Pause/resume for regression runs is not yet supported: Playwright has no
+    // built-in checkpoint/resume mechanism. Explicitly reject rather than
+    // presenting a non-functional API.
+    if (row.run_mode === 'regression' && this.activeRunners.has(runId)) {
+      return {
+        success: false,
+        message: 'Pause is not supported for in-progress regression runs. Use cancel instead.',
+        errorCode: 'RUN_PAUSE_NOT_SUPPORTED',
+      };
+    }
     this.runs.update(runId, { status: 'PAUSED', updatedAt: new Date().toISOString() });
     return { success: true, message: 'Run paused' };
   }
 
   resumeRun(runId: string): ActionResult {
-    if (!this.runs.findById(runId)) return { success: false, message: 'Run not found', errorCode: 'RUN_NOT_FOUND' };
+    const row = this.runs.findById(runId);
+    if (!row) return { success: false, message: 'Run not found', errorCode: 'RUN_NOT_FOUND' };
+    if (row.status !== 'PAUSED') {
+      return { success: false, message: 'Run is not paused', errorCode: 'RUN_NOT_PAUSED' };
+    }
+    // Resume for regression runs is not yet supported: there is no checkpoint
+    // to restart from. Explicitly reject rather than leaving the run in a false
+    // "running" state with no actual work dispatched.
+    if (row.run_mode === 'regression') {
+      return {
+        success: false,
+        message: 'Resume is not supported for regression runs. Start a new run instead.',
+        errorCode: 'RUN_RESUME_NOT_SUPPORTED',
+      };
+    }
     this.runs.update(runId, { status: 'RUNNING_TESTS', updatedAt: new Date().toISOString() });
     return { success: true, message: 'Run resumed' };
   }
@@ -203,6 +274,12 @@ export class RunService {
     const row = this.runs.findById(runId);
     if (!row) return { success: false, message: 'Run not found', errorCode: 'RUN_NOT_FOUND' };
     if (row.status === 'CANCELLED') return { success: false, message: 'Run already cancelled', errorCode: 'RUN_ALREADY_CANCELLED' };
+    if (row.status === 'COMPLETED' || row.status === 'FAILED') {
+      return { success: false, message: 'Run is already in a terminal state', errorCode: 'RUN_ALREADY_TERMINAL' };
+    }
+    // Terminate the in-flight Playwright process if running
+    this.activeRunners.get(runId)?.cancel(runId);
+    this.activeRunners.delete(runId);
     this.runs.update(runId, { status: 'CANCELLED', endedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     return { success: true, message: 'Run cancelled' };
   }

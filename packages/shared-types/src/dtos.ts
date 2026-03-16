@@ -367,6 +367,25 @@ export interface ArtifactRefs {
   networkLogPath?: string;
 }
 
+export interface LogQuery {
+  traceIds?: string[];
+  requestIds?: string[];
+  sessionIds?: string[];
+  services?: string[];
+  fromTime: string;
+  toTime: string;
+  keywords?: string[];
+  limit?: number;
+}
+
+export interface TraceProvider {
+  getTrace(traceId: string): Promise<TraceSummary | null>;
+}
+
+export interface LogProvider {
+  query(input: LogQuery): Promise<LogSummary | null>;
+}
+
 export interface TraceDetail {
   summary: TraceSummary;
   fetchedAt: string;

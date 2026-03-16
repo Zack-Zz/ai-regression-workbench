@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync, readdirSync, readFileSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository } from '@zarb/storage';
+import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository } from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -32,7 +32,7 @@ beforeEach(() => {
   runMigrations(db, MIGRATIONS_DIR);
   runSvc = new RunService(db);
   taskSvc = new CodeTaskService(db);
-  router = buildRouter(runSvc, new DiagnosticsService(db), taskSvc, new SettingsService(join(dir, 'config.json')));
+  router = buildRouter(runSvc, new DiagnosticsService(db, dir), taskSvc, new SettingsService(join(dir, 'config.json')));
 });
 
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
@@ -92,17 +92,31 @@ describe('Run lifecycle flow', () => {
     expect(afterData.summary.status).toBe('CANCELLED');
   });
 
-  it('pause and resume', async () => {
+  it('pause and resume — regression run returns not-supported for resume', async () => {
     const created = runSvc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     const runId = created.run?.runId as string;
 
+    // Pause a non-active regression run (no runner in flight) succeeds
     const pause = res();
     await router.handle(req('POST', `/runs/${runId}/pause`), pause.res);
     expect(pause.status()).toBe(200);
 
+    // Resume a paused regression run is explicitly not supported
     const resume = res();
     await router.handle(req('POST', `/runs/${runId}/resume`), resume.res);
-    expect(resume.status()).toBe(200);
+    expect(resume.status()).toBe(400);
+    const resumeBody = resume.body() as { success: boolean; errorCode: string };
+    expect(resumeBody.errorCode).toBe('RUN_RESUME_NOT_SUPPORTED');
+  });
+
+  it('resume on non-paused run returns 409', async () => {
+    const created = runSvc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
+    const runId = created.run?.runId as string;
+    // Run is CREATED (not PAUSED) — resume should be rejected
+    const r = res();
+    await router.handle(req('POST', `/runs/${runId}/resume`), r.res);
+    expect(r.status()).toBe(409);
+    expect((r.body() as { errorCode: string }).errorCode).toBe('RUN_NOT_PAUSED');
   });
 
   it('double-cancel returns 409', async () => {
@@ -113,6 +127,29 @@ describe('Run lifecycle flow', () => {
     const r = res();
     await router.handle(req('POST', `/runs/${runId}/cancel`), r.res);
     expect(r.status()).toBe(409);
+  });
+
+  it('pause on COMPLETED run returns 409', async () => {
+    const created = runSvc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
+    const runId = created.run?.runId as string;
+    // Force terminal state
+    new RunRepository(db).update(runId, { status: 'COMPLETED', updatedAt: new Date().toISOString() });
+
+    const r = res();
+    await router.handle(req('POST', `/runs/${runId}/pause`), r.res);
+    expect(r.status()).toBe(409);
+    expect((r.body() as { errorCode: string }).errorCode).toBe('RUN_ALREADY_TERMINAL');
+  });
+
+  it('cancel on COMPLETED run returns 409', async () => {
+    const created = runSvc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
+    const runId = created.run?.runId as string;
+    new RunRepository(db).update(runId, { status: 'COMPLETED', updatedAt: new Date().toISOString() });
+
+    const r = res();
+    await router.handle(req('POST', `/runs/${runId}/cancel`), r.res);
+    expect(r.status()).toBe(409);
+    expect((r.body() as { errorCode: string }).errorCode).toBe('RUN_ALREADY_TERMINAL');
   });
 
   it('exploration run requires exploration params', async () => {
@@ -292,11 +329,14 @@ describe('API contract: all documented endpoints exist', () => {
     expect(r.status()).not.toBe(404);
   });
 
-  it('POST /runs/:runId/resume', async () => {
+  it('POST /runs/:runId/resume returns 400 for regression run', async () => {
     const runId = seedRun();
+    // First pause the run so resume can be attempted
+    runSvc.pauseRun(runId);
     const r = res();
     await router.handle(req('POST', `/runs/${runId}/resume`), r.res);
-    expect(r.status()).not.toBe(404);
+    // regression runs return NOT_SUPPORTED
+    expect(r.status()).toBe(400);
   });
 
   it('POST /runs/:runId/cancel', async () => {
@@ -458,6 +498,44 @@ describe('API contract: all documented endpoints exist', () => {
     expect(r.body().data).toBeNull();
   });
 
+  it('GET /trace triggers fetchDiagnostics and writes trace-summary.json when provider returns data', async () => {
+    const runId = seedRun();
+    // Seed a correlation context with a traceId
+    new CorrelationContextRepository(db).save({
+      id: `ctx-${runId}`,
+      runId,
+      testcaseId: 'tc-diag',
+      traceIdsJson: JSON.stringify(['trace-xyz']),
+      requestIdsJson: '[]',
+      sessionIdsJson: '[]',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Inject a mock trace provider that returns a real TraceSummary
+    const mockSummary = { traceId: 'trace-xyz', hasError: false, errorSpans: [], topSlowSpans: [] };
+    const mockDiagSvc = new DiagnosticsService(db, dir, {
+      getTrace: () => Promise.resolve(mockSummary),
+    }, undefined);
+    const mockRouter = buildRouter(runSvc, mockDiagSvc, taskSvc, new SettingsService(join(dir, 'config.json')));
+
+    const r = res();
+    await mockRouter.handle(req('GET', `/runs/${runId}/testcases/tc-diag/trace`), r.res);
+    expect(r.status()).toBe(200);
+    expect((r.body().data as { summary: { traceId: string } } | null)?.summary.traceId).toBe('trace-xyz');
+
+    // Summary file should be written
+    const summaryFile = join(dir, 'diagnostics', runId, 'tc-diag', 'trace-summary.json');
+    const written = JSON.parse(readFileSync(summaryFile, 'utf8')) as { traceId: string };
+    expect(written.traceId).toBe('trace-xyz');
+  });
+
+  it('onConfigUpdated refreshes trace/log providers', async () => {
+    const diagSvc = new DiagnosticsService(db, dir);
+    // Calling onConfigUpdated should not throw and should swap providers
+    const snapshot = await new SettingsService(join(dir, 'config.json')).getSettings();
+    await expect(diagSvc.onConfigUpdated(snapshot)).resolves.toBeUndefined();
+  });
+
   it('GET /runs/:runId/testcases/:testcaseId/analysis returns null data for unknown testcase', async () => {
     const runId = seedRun();
     const r = res();
@@ -514,7 +592,7 @@ describe('API contract: all documented endpoints exist', () => {
 
   it('DoctorCheckResult fields align: name, status, message all strings', async () => {
     const settingsSvc = new SettingsService(join(dir, 'config.json'));
-    const doctorRouter = buildRouter(runSvc, new DiagnosticsService(db), taskSvc, settingsSvc, new DoctorService(db, settingsSvc));
+    const doctorRouter = buildRouter(runSvc, new DiagnosticsService(db, dir), taskSvc, settingsSvc, new DoctorService(db, settingsSvc));
     const r = res();
     await doctorRouter.handle(req('GET', '/doctor'), r.res);
     const checks = (r.body().data as { checks: Record<string, unknown>[] }).checks;
