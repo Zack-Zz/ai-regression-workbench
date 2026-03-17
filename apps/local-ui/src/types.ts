@@ -16,6 +16,7 @@ export interface RunSummary {
   startedAt: string; endedAt?: string;
   total: number; passed: number; failed: number; skipped: number;
   currentStage?: string;
+  summary?: string;
 }
 
 export interface TestResultSummary {
@@ -176,14 +177,21 @@ export interface SelectorCacheEntry {
 
 export interface StepLogEntry {
   ts: string; component: string; action: string; detail?: string;
-  status: 'ok' | 'warn' | 'error' | 'skip'; durationMs?: number;
+  status: 'ok' | 'warn' | 'error' | 'skip' | 'pending'; durationMs?: number;
   toolInput?: unknown; toolOutput?: unknown;
   pageState?: { url: string; title: string; formCount: number; linkCount: number; consoleErrors: number; networkErrors: number };
   reason?: string;
+  model?: string;
+  tool?: string;
+  actionId?: string;
 }
 export interface NetworkLogEntry {
   ts: string; url: string; method: string; status: number;
   durationMs: number; resourceType: string; error?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
 }
 
 export interface ActionResult {

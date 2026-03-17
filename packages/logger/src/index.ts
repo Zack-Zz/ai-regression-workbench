@@ -7,7 +7,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-export type StepStatus = 'ok' | 'warn' | 'error' | 'skip';
+export type StepStatus = 'ok' | 'warn' | 'error' | 'skip' | 'pending';
 
 export interface StepRecord {
   ts: string;
@@ -24,14 +24,19 @@ export interface StepRecord {
     consoleErrors: number; networkErrors: number;
   };
   reason?: string;           // why agent took this action / transitioned to next step
+  model?: string;            // AI model used for this step (if applicable)
+  tool?: string;             // specific tool used (e.g. 'playwright', 'fetch')
+  actionId?: string;         // groups pending + terminal records for the same logical action
 }
 
 export class StepLogger {
   private readonly path: string;
   private ready = false;
+  private readonly onLog?: () => void;
 
-  constructor(logPath: string) {
+  constructor(logPath: string, onLog?: () => void) {
     this.path = logPath;
+    if (onLog) this.onLog = onLog;
   }
 
   log(record: Omit<StepRecord, 'ts'>): void {
@@ -41,6 +46,7 @@ export class StepLogger {
     }
     const line: StepRecord = { ts: new Date().toISOString(), ...record };
     appendFileSync(this.path, JSON.stringify(line) + '\n', 'utf8');
+    this.onLog?.();
   }
 
   /** Convenience: wrap an async operation, log result with duration. */

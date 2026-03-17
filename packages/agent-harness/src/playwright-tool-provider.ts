@@ -31,7 +31,9 @@ export interface NetworkEntry {
   durationMs: number;
   resourceType: string;
   requestHeaders?: Record<string, string>;
+  requestBody?: string;
   responseHeaders?: Record<string, string>;
+  responseBody?: string;
   error?: string;
 }
 
@@ -57,14 +59,24 @@ export class PlaywrightToolProvider {
     this.context.on('response', (res: Response) => {
       const start = this.requestStartTimes.get(res.url()) ?? Date.now();
       this.requestStartTimes.delete(res.url());
-      this.networkLog.push({
+      const req = res.request();
+      const type = req.resourceType();
+      const entry: NetworkEntry = {
         ts: new Date().toISOString(),
         url: res.url(),
-        method: res.request().method(),
+        method: req.method(),
         status: res.status(),
         durationMs: Date.now() - start,
-        resourceType: res.request().resourceType(),
-      });
+        resourceType: type,
+        requestHeaders: req.headers(),
+        responseHeaders: res.headers(),
+      };
+      if (type === 'xhr' || type === 'fetch') {
+        const postData = req.postData();
+        if (postData) entry.requestBody = postData;
+        res.text().then(body => { entry.responseBody = body.slice(0, 4096); }).catch(() => undefined);
+      }
+      this.networkLog.push(entry);
     });
     this.context.on('requestfailed', (req: Request) => {
       this.requestStartTimes.delete(req.url());
@@ -158,9 +170,24 @@ export class PlaywrightToolProvider {
       await page.goto(cred.login_url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       const userSel = cred.username_selector ?? 'input[type="text"], input[name="username"], input[name="email"]';
       const passSel = cred.password_selector ?? 'input[type="password"]';
-      const submitSel = cred.submit_selector ?? 'button[type="submit"], input[type="submit"]';
       await page.fill(userSel, cred.username, { timeout: 10_000 });
       await page.fill(passSel, cred.password, { timeout: 10_000 });
+
+      let submitSel = cred.submit_selector;
+      if (!submitSel) {
+        // Try selectors in priority order, pick first visible one
+        const candidates = [
+          'button[type="submit"]',
+          'input[type="submit"]',
+          'button[type="button"]',
+          'button',
+        ];
+        for (const sel of candidates) {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 1000 }).catch(() => false)) { submitSel = sel; break; }
+        }
+        submitSel ??= 'button';
+      }
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined),
         page.click(submitSel, { timeout: 10_000 }),

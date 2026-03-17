@@ -158,12 +158,6 @@ export function QuickRunPanel(): React.ReactElement {
             </select>
           </label>
         )}
-        {projectId && repos && repos.length > 0 && (
-          <div style={{ fontSize: '0.82em', color: '#666', alignSelf: 'flex-end', paddingBottom: 6 }}>
-            工程目录: <code>{repos[0]?.path}</code>
-            {repos.length > 1 && <span style={{ color: '#aaa' }}> +{repos.length - 1}</span>}
-          </div>
-        )}
       </div>
 
       {/* Row 2: Mode + Selector */}

@@ -10,6 +10,8 @@ import type { PlaywrightToolProvider } from './playwright-tool-provider.js';
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
+  isConfigured(): boolean;
+  readonly model?: string;
 }
 
 export interface PageProbe {
@@ -67,6 +69,7 @@ export class ExplorationAgent {
     config: ExplorationConfig,
     probe: (url: string) => Promise<PageProbe>,
     dataRoot = '',
+    onStep?: () => void,
   ): Promise<ExplorationResult> {
     // Build ToolRegistry with policy from config
     const allowedHosts = config.allowedHosts ?? [];
@@ -88,14 +91,19 @@ export class ExplorationAgent {
           const cred = this.credentials.findById(config.credentialId);
           if (cred) {
             const baseUrl = config.startUrls[0] ?? '';
-            await this.playwrightProvider.applyCredential(cred, baseUrl);
+            try {
+              await this.playwrightProvider.applyCredential(cred, baseUrl);
+            } catch (credErr) {
+              console.warn('[ExplorationAgent] applyCredential failed, continuing without auth:', credErr);
+            }
           }
         }
         this.playwrightProvider.registerTools(registry);
         effectiveProbe = this.playwrightProvider.buildProbe();
         activePwProvider = this.playwrightProvider;
-      } catch {
+      } catch (e) {
         // Playwright unavailable (e.g. no browser installed) — fall back to probe callback
+        console.warn('[ExplorationAgent] Playwright launch failed, falling back to fetch:', e);
       }
     }
 
@@ -108,7 +116,7 @@ export class ExplorationAgent {
       dataRoot,
     });
 
-    const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'));
+    const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'), onStep);
     stepLogger.log({ component: 'ExplorationAgent', action: 'explore.start', detail: `urls=${config.startUrls.join(',')}, maxSteps=${String(config.maxSteps)}`, status: 'ok' });
 
     const maxSteps = config.maxSteps ?? 20;
@@ -131,19 +139,19 @@ export class ExplorationAgent {
         if (activePwProvider) {
           const result = await registry.call<PageProbe>('playwright.navigate', { url }, { sessionId: session.session_id, stepIndex });
           if (!result.ok) {
-            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url } });
+            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'playwright' });
             continue;
           }
           pageState = result.value!;
         } else {
           try { pageState = await effectiveProbe(url); } catch {
-            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url } });
+            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'fetch' });
             continue;
           }
         }
         const navDuration = Date.now() - navStart;
         const pageSnapshot = { url: pageState.url, title: pageState.title, formCount: pageState.formCount, linkCount: pageState.linkCount, consoleErrors: pageState.consoleErrors.length, networkErrors: pageState.networkErrors.length };
-        stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, pageState: pageSnapshot });
+        stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, toolOutput: pageState, pageState: pageSnapshot, tool: activePwProvider ? 'playwright' : 'fetch' });
 
         // Persist findings from this page
         const newFindings = this.extractFindings(runId, pageState, config);
@@ -161,14 +169,20 @@ export class ExplorationAgent {
 
         // Ask LLM for next action
         const llmStart = Date.now();
-        const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls]);
-        stepLogger.log({
-          component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
-          detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
-          toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount },
-          toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl },
-          reason: nextStep.reasoning,
-        });
+        const llmActionId = `llm-${String(llmStart)}`;
+        stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'pending', detail: `deciding next step from ${url}`, toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount }, actionId: llmActionId });
+        const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls], stepLogger, llmActionId);
+        if (nextStep.action !== 'done') {
+          stepLogger.log({
+            component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
+            detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
+            toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount },
+            toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl },
+            reason: nextStep.reasoning,
+            actionId: llmActionId,
+            ...(this.provider.model ? { model: this.provider.model } : {}),
+          });
+        }
         if (nextStep.action === 'done') break;
         if (nextStep.action === 'navigate' && nextStep.targetUrl) {
           if (!visitedUrls.has(nextStep.targetUrl)) pendingUrls.unshift(nextStep.targetUrl);
@@ -181,6 +195,7 @@ export class ExplorationAgent {
           timestamp: new Date().toISOString(),
         }, dataRoot);
 
+        onStep?.();
         stepIndex++;
       }
     } finally {
@@ -234,6 +249,8 @@ export class ExplorationAgent {
     config: ExplorationConfig,
     stepIndex: number,
     visited: string[],
+    stepLogger: StepLogger,
+    actionId?: string,
   ): Promise<ExplorationStep> {
     const focusAreas = config.focusAreas ?? [];
     const prompt = [
@@ -249,18 +266,34 @@ export class ExplorationAgent {
       'Choose "done" if the page has been thoroughly explored or there is nothing new to find.',
     ].join('\n');
 
+    let raw = '';
+    const toolInput = { currentUrl: page.url, formCount: page.formCount, linkCount: page.linkCount };
     try {
-      const raw = await this.provider.complete(prompt);
-      const parsed = parseJson<{ action?: string; targetUrl?: string; reasoning?: string }>(raw, {});
-      return {
-        stepIndex,
-        action: (parsed.action === 'done' ? 'done' : 'navigate') as ExplorationStep['action'],
-        targetUrl: parsed.targetUrl,
-        reasoning: parsed.reasoning ?? '',
-      };
-    } catch {
+      raw = await this.provider.complete(prompt);
+    } catch (e) {
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: `LLM call threw: ${String(e)}`, reason: 'LLM unavailable', toolInput, toolOutput: { error: String(e) }, ...(actionId ? { actionId } : {}) });
       return { stepIndex, action: 'done', reasoning: 'LLM unavailable' };
     }
+
+    if (!raw || raw.trim() === '') {
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: 'LLM returned empty response', reason: 'empty response', toolInput, toolOutput: { status: 'empty' }, ...(actionId ? { actionId } : {}) });
+      return { stepIndex, action: 'done', reasoning: 'LLM returned empty response' };
+    }
+
+    const parsed = parseJson<{ action?: string; targetUrl?: string; reasoning?: string }>(raw, {});
+
+    // navigate without a targetUrl is meaningless — treat as done
+    if (parsed.action !== 'done' && !parsed.targetUrl) {
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'warn', detail: 'LLM returned navigate without targetUrl — treating as done', toolInput, toolOutput: parsed, ...(actionId ? { actionId } : {}) });
+      return { stepIndex, action: 'done', reasoning: parsed.reasoning ?? 'no targetUrl in LLM response' };
+    }
+
+    return {
+      stepIndex,
+      action: (parsed.action === 'done' ? 'done' : 'navigate') as ExplorationStep['action'],
+      targetUrl: parsed.targetUrl,
+      reasoning: parsed.reasoning ?? '',
+    };
   }
 }
 

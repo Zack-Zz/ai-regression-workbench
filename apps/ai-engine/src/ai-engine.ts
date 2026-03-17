@@ -16,6 +16,8 @@ import { renderTemplate, TEMPLATE_VERSIONS } from './prompt-loader.js';
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
+  isConfigured(): boolean;
+  readonly model?: string;
 }
 
 /**
@@ -26,8 +28,10 @@ export class OpenAICompatibleProvider implements AIProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
-    private readonly model: string,
+    readonly model: string,
   ) {}
+
+  isConfigured(): boolean { return !!this.apiKey; }
 
   async complete(prompt: string): Promise<string> {
     if (!this.apiKey) return '';
@@ -63,6 +67,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
  * Returns empty string so callers degrade gracefully.
  */
 export class NullAIProvider implements AIProvider {
+  isConfigured(): boolean { return false; }
   complete(_prompt: string): Promise<string> { return Promise.resolve(''); }
 }
 

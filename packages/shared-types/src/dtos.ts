@@ -58,6 +58,7 @@ export interface RunSummary {
   failed: number;
   skipped: number;
   currentStage?: string;
+  summary?: string;
 }
 
 export interface RunDetail {

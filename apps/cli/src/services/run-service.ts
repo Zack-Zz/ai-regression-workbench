@@ -50,6 +50,7 @@ function toSummary(row: RunRow, projectName?: string, siteName?: string, siteBas
   if (credLabel) base.credLabel = credLabel;
   if (row.ended_at) base.endedAt = row.ended_at;
   if (row.current_stage) base.currentStage = row.current_stage;
+  if (row.summary) base.summary = row.summary;
   return base;
 }
 
@@ -269,9 +270,21 @@ export class RunService {
     this.emitRun(runId);
 
     if (this.opts.aiEngine && explorationConfig) {
-      const { ExplorationAgent } = await import('@zarb/agent-harness');
-      const providerAdapter = this.opts.aiProvider ?? { complete: async (_p: string) => '' };
-      const agent = new ExplorationAgent(this.db, providerAdapter);
+      const { ExplorationAgent, PlaywrightToolProvider } = await import('@zarb/agent-harness');
+      const providerAdapter = this.opts.aiProvider ?? { complete: async (_p: string) => '', isConfigured: () => false };
+
+      // Detect null/unconfigured provider early and fail fast with a clear run summary
+      if (!providerAdapter.isConfigured()) {
+        const nowErr = new Date().toISOString();
+        this.runs.update(runId, {
+          status: 'FAILED', currentStage: 'FAILED', endedAt: nowErr, updatedAt: nowErr,
+          summary: 'EXPLORATION_PROVIDER_NOT_CONFIGURED',
+        });
+        this.emitRun(runId);
+        return;
+      }
+
+      const agent = new ExplorationAgent(this.db, providerAdapter, new PlaywrightToolProvider());
       const now1 = new Date().toISOString();
       this.runs.update(runId, { status: 'RUNNING_EXPLORATION', currentStage: 'RUNNING_EXPLORATION', updatedAt: now1 });
       this.emitRun(runId);
@@ -289,7 +302,7 @@ export class RunService {
         }
       };
       try {
-        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, dataRoot);
+        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, dataRoot, () => { this.emitRun(runId, 'run.step.updated'); });
         this.emitRun(runId, 'run.step.updated');
       } catch { /* degrade gracefully */ }
     } else {

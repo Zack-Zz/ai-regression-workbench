@@ -4,6 +4,7 @@ import type { SSEEvent, SSEEventType } from './types.js';
 export type { SSEEvent, SSEEventType };
 
 type Listener = (e: SSEEvent) => void;
+type ConnectListener = () => void;
 
 // --- Singleton EventSource with exponential backoff reconnect ---
 let es: EventSource | null = null;
@@ -11,6 +12,7 @@ let refCount = 0;
 let retryDelay = 1000;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<Listener>();
+const connectListeners = new Set<ConnectListener>();
 
 function dispatch(e: SSEEvent): void {
   listeners.forEach(fn => fn(e));
@@ -28,7 +30,10 @@ function connect(): void {
     } catch { /* ignore malformed frames */ }
   };
 
-  es.onopen = () => { retryDelay = 1000; };
+  es.onopen = () => {
+    retryDelay = 1000;
+    connectListeners.forEach(fn => fn());
+  };
 
   es.onerror = () => {
     es?.close();
@@ -71,11 +76,13 @@ if (typeof document !== 'undefined') {
   });
 }
 
-export function subscribeSSE(fn: Listener): () => void {
+export function subscribeSSE(fn: Listener, onConnect?: ConnectListener): () => void {
   acquire();
   listeners.add(fn);
+  if (onConnect) connectListeners.add(onConnect);
   return () => {
     listeners.delete(fn);
+    if (onConnect) connectListeners.delete(onConnect);
     release();
   };
 }

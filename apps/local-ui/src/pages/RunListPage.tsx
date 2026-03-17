@@ -5,6 +5,7 @@ import { useAsync, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, Button, Table } from '../components/ui.js';
 import type { RunSummary } from '../types.js';
+import { fmtDatetime } from '../utils.js';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -23,7 +24,7 @@ export function RunListPage(): React.ReactElement {
     r.projectName ?? r.projectId?.slice(0, 8) ?? '—',
     r.siteName ?? r.siteId?.slice(0, 8) ?? '—',
     `✓${String(r.passed)} ✗${String(r.failed)} ↷${String(r.skipped)}`,
-    r.startedAt.slice(0, 16).replace('T', ' '),
+    fmtDatetime(r.startedAt),
     <Button key="v" onClick={() => { navigate(`/runs/${r.runId}`); }}>查看</Button>,
   ]);
 

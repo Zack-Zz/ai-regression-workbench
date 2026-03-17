@@ -48,34 +48,32 @@ export function useServerEvents(
   types: SSEEventType[],
   callback: (event: SSEEvent) => void,
   filter?: (event: SSEEvent) => boolean,
+  onConnect?: () => void,
 ): { connected: boolean } {
   const [connected, setConnected] = useState(false);
   const cbRef = useRef(callback);
   cbRef.current = callback;
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const onConnectRef = useRef(onConnect);
+  onConnectRef.current = onConnect;
   const typesKey = types.join(',');
 
   useEffect(() => {
-    const unsub = subscribeSSE((e) => {
-      if (!types.includes(e.type)) return;
-      if (filterRef.current && !filterRef.current(e)) return;
-      cbRef.current(e);
-    });
-
-    // Track connection state by polling es readyState via a small interval
-    const id = setInterval(() => {
-      // subscribeSSE manages the singleton; we detect open state indirectly
-      // by checking if we received any event recently — simplest: just mark
-      // connected=true after first successful subscription
-      setConnected(true);
-    }, 500);
-    // Mark immediately
-    setConnected(true);
+    const unsub = subscribeSSE(
+      (e) => {
+        if (!types.includes(e.type)) return;
+        if (filterRef.current && !filterRef.current(e)) return;
+        cbRef.current(e);
+      },
+      () => {
+        setConnected(true);
+        onConnectRef.current?.();
+      },
+    );
 
     return () => {
       unsub();
-      clearInterval(id);
       setConnected(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
