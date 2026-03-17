@@ -104,12 +104,12 @@ Typical correlation sources:
 ## Documentation
 
 - Detailed design: [docs/design.md](./docs/design.md)
-- Product completion roadmap: [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)
-- Feature design docs:
-  [project & site management](./docs/project-site-design.md),
-  [exploration](./docs/exploration-design.md),
-  [codetask automation](./docs/codetask-automation-design.md)
-- Module docs:
+- Development history: [docs/development-completed.md](./docs/development-completed.md)
+- Operator guide: [docs/operator-guide.md](./docs/operator-guide.md)
+- Local debug guide: [docs/local-debug-guide.md](./docs/local-debug-guide.md)
+- Release notes: [docs/release-notes.md](./docs/release-notes.md)
+
+Module design docs (implemented):
   [orchestrator](./docs/orchestrator-design.md),
   [diagnostics](./docs/diagnostics-design.md),
   [ai-engine](./docs/ai-engine-design.md),
@@ -123,9 +123,12 @@ Typical correlation sources:
   [observability](./docs/observability-design.md),
   [app-services](./docs/app-services-design.md),
   [storage-mapping](./docs/storage-mapping-design.md)
-- External references:
-  [Codex CLI](https://developers.openai.com/codex/cli),
-  [Kiro CLI](https://kiro.dev/docs/cli/)
+
+Future feature specs (not yet implemented):
+  [project & site management](./docs/project-site-design.md),
+  [real exploration](./docs/exploration-design.md),
+  [codetask automation](./docs/codetask-automation-design.md)
+
 - Chinese README: [README.zh-CN.md](./README.zh-CN.md)
 
 ## Current Status
@@ -137,4 +140,4 @@ Active design work (spec phase, not yet implemented):
 - Real exploration — Playwright-backed browser exploration replacing the current `fetch` stub
 - CodeTask automation — auto-trigger on regression failure and exploration findings
 
-See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the original phase plan.
+See [docs/development-completed.md](./docs/development-completed.md) for the full phase-by-phase delivery summary.
