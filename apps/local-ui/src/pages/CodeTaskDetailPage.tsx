@@ -98,6 +98,7 @@ export function CodeTaskDetailPage(): React.ReactElement {
               <Button variant="primary" disabled={actionLoading} onClick={() => {
                 const input: SubmitReviewInput = { taskId: id, decision: reviewDecision, codeTaskVersion: summary.taskVersion };
                 if (reviewComment) input.comment = reviewComment;
+                if (summary.verifyPassed === false && reviewDecision === 'accept') input.forceReviewOnVerifyFailure = true;
                 void doAction(() => api.submitReview(input));
               }}>{t('review.submitReview')}</Button>
             </div>

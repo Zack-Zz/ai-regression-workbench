@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAsync, usePoll } from '../hooks.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, RunStatusBadge, Card, Button } from '../components/ui.js';
+import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, Button } from '../components/ui.js';
 import { QuickRunPanel } from '../components/QuickRunPanel.js';
 import type { RunSummary } from '../types.js';
 
@@ -12,6 +12,7 @@ const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 export function HomePage(): React.ReactElement {
   const navigate = useNavigate();
   const { data, loading, error, reload } = useAsync(() => api.listRuns('limit=5'), []);
+  const { data: pendingTasks } = useAsync(() => api.listCodeTasks('status=PENDING_APPROVAL&limit=10'), []);
   const hasActive = data?.items.some(r => !TERMINAL.has(r.status)) ?? false;
   usePoll(reload, 5000, hasActive);
 
@@ -20,6 +21,20 @@ export function HomePage(): React.ReactElement {
       <Card title={t('run.start')}>
         <QuickRunPanel />
       </Card>
+      {pendingTasks && pendingTasks.items.length > 0 && (
+        <Card title={`待审批任务 (${String(pendingTasks.items.length)})`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {pendingTasks.items.map(task => (
+              <div key={task.taskId} onClick={() => { navigate(`/code-tasks/${task.taskId}`); }}
+                style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.5rem', border: '1px solid #ffc107', borderRadius: 4, cursor: 'pointer', background: '#fffbf0' }}>
+                <TaskStatusBadge status={task.status} />
+                <span style={{ fontSize: '0.85em', flex: 1 }}>{task.goal}</span>
+                <span style={{ fontSize: '0.8em', color: '#888', fontFamily: 'monospace' }}>{task.taskId}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card title={t('nav.runs')}>
         {loading && <Loading />}
         {error && <ErrorBanner message={error} onRetry={reload} />}

@@ -147,33 +147,39 @@ export class RunService {
         if (runResult.startupFailure) {
           this.runs.update(runId, { status: 'FAILED', currentStage: 'FAILED', endedAt, updatedAt: endedAt });
         } else {
-          const finalStatus: RunStatus = runResult.failed > 0 ? 'ANALYZING_FAILURES' : 'COMPLETED';
+          const finalStatus: RunStatus = (runResult.failed > 0 && input.runMode === 'regression') ? 'ANALYZING_FAILURES' : 'COMPLETED';
           this.runs.update(runId, {
             status: finalStatus, currentStage: finalStatus, endedAt, updatedAt: endedAt,
             total: runResult.total, passed: runResult.passed, failed: runResult.failed, skipped: runResult.skipped,
           });
-          // Trigger AI failure analysis for failed tests
-          if (runResult.failed > 0 && this.opts.aiEngine) {
-            const aiEngine = this.opts.aiEngine;
-            void (async () => {
-              const failedResults = this.results.findByRun(runId).filter(r => r.status === 'failed');
-              for (const r of failedResults) {
-                try {
-                  const analysis = await aiEngine.analyzeFailure({
-                    runId,
-                    testcaseId: r.testcase_id,
-                    testcaseName: r.testcase_id,
-                    ...(r.error_message ? { errorMessage: r.error_message } : {}),
-                    ...(r.error_type ? { errorType: r.error_type } : {}),
-                  });
-                  await aiEngine.createCodeTaskDraft(analysis);
-                } catch { /* degrade gracefully — analysis failure must not affect run state */ }
-              }
+          // Trigger AI failure analysis for failed tests (regression-only mode)
+          if (runResult.failed > 0 && input.runMode === 'regression') {
+            if (this.opts.aiEngine) {
+              const aiEngine = this.opts.aiEngine;
+              void (async () => {
+                const failedResults = this.results.findByRun(runId).filter(r => r.status === 'failed');
+                for (const r of failedResults) {
+                  try {
+                    const analysis = await aiEngine.analyzeFailure({
+                      runId,
+                      testcaseId: r.testcase_id,
+                      testcaseName: r.testcase_id,
+                      ...(r.error_message ? { errorMessage: r.error_message } : {}),
+                      ...(r.error_type ? { errorType: r.error_type } : {}),
+                    });
+                    await aiEngine.createCodeTaskDraft(analysis);
+                  } catch { /* degrade gracefully — analysis failure must not affect run state */ }
+                }
+                const now2 = new Date().toISOString();
+                this.runs.update(runId, { status: 'COMPLETED', currentStage: 'COMPLETED', updatedAt: now2 });
+              })();
+            } else {
+              // No AI engine — skip analysis, mark completed immediately
               const now2 = new Date().toISOString();
               this.runs.update(runId, { status: 'COMPLETED', currentStage: 'COMPLETED', updatedAt: now2 });
-            })();
+            }
           }
-          // hybrid: chain exploration after regression
+          // hybrid: chain exploration after regression (exploration will set final COMPLETED)
           if (input.runMode === 'hybrid' && input.exploration) {
             void this.runExploration(runId, input.exploration);
           }
@@ -184,6 +190,10 @@ export class RunService {
     // Pure exploration mode: run ExplorationAgent directly
     // hybrid exploration is chained after regression completes (see regression block above)
     if (input.runMode === 'exploration') {
+      void this.runExploration(runId, input.exploration);
+    }
+    // hybrid without runner: skip regression, go straight to exploration
+    if (input.runMode === 'hybrid' && (!this.opts.runner || !input.projectPath) && input.exploration) {
       void this.runExploration(runId, input.exploration);
     }
 

@@ -30,6 +30,11 @@ export function buildRouter(
   router.post('/runs', async (req, res) => {
     try {
       const body = await readBody<StartRunInput>(req);
+      // Inject projectPath from settings if not provided by caller
+      if (!body.projectPath) {
+        const cfg = settingsSvc.getSync();
+        if (cfg.workspace?.targetProjectPath) body.projectPath = cfg.workspace.targetProjectPath;
+      }
       const result = runSvc.startRun(body);
       if (!result.success) { badRequest(res, result.errorCode ?? 'RUN_SELECTOR_INVALID', result.message); return; }
       ok(res, result);
