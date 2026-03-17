@@ -105,6 +105,10 @@ design.md
 
 - 详细设计文档：[docs/design.md](./docs/design.md)
 - 产品收口路线图：[docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)
+- 功能设计文档：
+  [项目与站点管理](./docs/project-site-design.md)、
+  [探索模块](./docs/exploration-design.md)、
+  [CodeTask 自动化](./docs/codetask-automation-design.md)
 - 模块设计文档：
   [orchestrator](./docs/orchestrator-design.md)、
   [diagnostics](./docs/diagnostics-design.md)、
@@ -128,6 +132,9 @@ design.md
 
 Phase 0-16 已经完成，仓库目前已具备本地工作台基线、API/UI 流程、AI 多提供商集成（OpenAI + DeepSeek，支持运行时切换）、doctor 检查以及 hardening 覆盖。
 
-后续工作是补齐真实外部服务集成：`test-runner`、`trace-bridge`、`log-bridge`、`review-manager`、真实 CodeAgent 执行链，以及产品化安装与初始化流程。
+正在进行的设计工作（spec 阶段，尚未实现）：
+- 项目与站点管理 — 多项目、多域名、按项目隔离代码仓库和数据目录
+- 真实探索 — 基于 Playwright 的浏览器探索，替代当前的 `fetch` 占位实现
+- CodeTask 自动化 — 回归失败和探索发现后自动触发修复任务
 
 后续计划见 [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)。

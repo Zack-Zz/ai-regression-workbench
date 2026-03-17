@@ -42,7 +42,10 @@ export function createAppServer(opts: ServerOptions) {
     },
   });
 
-  const runSvc = new RunService(opts.db, { dataRoot, runner, aiEngine, aiProvider });
+  const runSvcOpts: import('./services/run-service.js').RunServiceOptions = { dataRoot, runner, aiEngine, aiProvider, autoApprove: cfg.codeAgent.autoApprove ?? false };
+  if (cfg.codeAgent.autoApproveMaxRiskLevel) runSvcOpts.autoApproveMaxRiskLevel = cfg.codeAgent.autoApproveMaxRiskLevel;
+  if (cfg.workspace.testSuitesRoot) runSvcOpts.testSuitesRoot = cfg.workspace.testSuitesRoot;
+  const runSvc = new RunService(opts.db, runSvcOpts);
   const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider, aiEngine);
   settingsSvc.registerObserver(diagSvc);
   const taskSvc = new CodeTaskService(
@@ -51,13 +54,13 @@ export function createAppServer(opts: ServerOptions) {
     cfg.codeAgent.engine === 'kiro' ? new KiroCliAgent() : new CodexCliAgent(),
   );
   const doctorSvc = new DoctorService(opts.db, settingsSvc);
-  const router = buildRouter(runSvc, diagSvc, taskSvc, settingsSvc, doctorSvc);
+  const router = buildRouter(runSvc, diagSvc, taskSvc, settingsSvc, doctorSvc, opts.db);
 
   // Resolve local-ui dist relative to this file (apps/cli/dist/server.js → apps/local-ui/dist)
   const uiDist = resolve(dirname(new URL(import.meta.url).pathname), '../../local-ui/dist');
 
   // Known API path prefixes — these must NOT be intercepted by static serving
-  const API_PREFIXES = ['/runs', '/code-tasks', '/reviews', '/commits', '/settings', '/doctor'];
+  const API_PREFIXES = ['/runs', '/projects', '/code-tasks', '/reviews', '/commits', '/settings', '/doctor', '/utils', '/events'];
 
   function serveStatic(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean {
     if (!existsSync(uiDist)) return false;

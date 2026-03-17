@@ -11,6 +11,14 @@
 
 总设计文档负责描述项目全貌，模块级细节拆分到以下文档：
 
+功能设计文档（当前活跃设计，spec 阶段）：
+
+- [项目与站点管理设计](./project-site-design.md)
+- [探索模块设计](./exploration-design.md)
+- [CodeTask 自动化设计](./codetask-automation-design.md)
+
+模块设计文档：
+
 - [Orchestrator 详细设计](./orchestrator-design.md)
 - [Diagnostics 详细设计](./diagnostics-design.md)
 - [AI Engine 详细设计](./ai-engine-design.md)

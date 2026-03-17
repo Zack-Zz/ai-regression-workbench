@@ -105,6 +105,10 @@ Typical correlation sources:
 
 - Detailed design: [docs/design.md](./docs/design.md)
 - Product completion roadmap: [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)
+- Feature design docs:
+  [project & site management](./docs/project-site-design.md),
+  [exploration](./docs/exploration-design.md),
+  [codetask automation](./docs/codetask-automation-design.md)
 - Module docs:
   [orchestrator](./docs/orchestrator-design.md),
   [diagnostics](./docs/diagnostics-design.md),
@@ -128,6 +132,9 @@ Typical correlation sources:
 
 Phase 0-16 is complete: the repository includes the local workbench baseline, API/UI flow, AI provider integration (OpenAI + DeepSeek with runtime switching), doctor checks, and hardening coverage.
 
-The remaining work is real integration of external services: `test-runner`, `trace-bridge`, `log-bridge`, `review-manager`, real code-agent execution, and product packaging/bootstrap.
+Active design work (spec phase, not yet implemented):
+- Project & site management — multi-project, multi-domain, per-project code repos and data directories
+- Real exploration — Playwright-backed browser exploration replacing the current `fetch` stub
+- CodeTask automation — auto-trigger on regression failure and exploration findings
 
-See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the full plan.
+See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the original phase plan.

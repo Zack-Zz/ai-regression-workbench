@@ -6,6 +6,18 @@ export * from './paths.js';
 export { RunRepository } from './repos/run-repo.js';
 export type { RunRow, CreateRunInput, UpdateRunInput, ListRunsFilter, RunPage } from './repos/run-repo.js';
 
+export { ProjectRepository } from './repos/project-repo.js';
+export type { ProjectRow, SaveProjectInput } from './repos/project-repo.js';
+
+export { SiteRepository } from './repos/site-repo.js';
+export type { SiteRow, SaveSiteInput } from './repos/site-repo.js';
+
+export { SiteCredentialRepository } from './repos/site-credential-repo.js';
+export type { SiteCredentialRow, SaveCredentialInput } from './repos/site-credential-repo.js';
+
+export { LocalRepoRepository } from './repos/local-repo-repo.js';
+export type { LocalRepoRow, SaveLocalRepoInput } from './repos/local-repo-repo.js';
+
 export { CodeTaskRepository } from './repos/code-task-repo.js';
 export type { CodeTaskRow, CreateCodeTaskInput, UpdateCodeTaskInput, ListCodeTasksFilter, CodeTaskPage } from './repos/code-task-repo.js';
 
@@ -56,3 +68,7 @@ export type { SystemEventRow, SaveSystemEventInput } from './repos/system-event-
 
 export { RunEventRepository } from './repos/run-event-repo.js';
 export type { RunEventRow, SaveRunEventInput, ListRunEventsFilter } from './repos/run-event-repo.js';
+
+export { SelectorCacheRepository } from './repos/selector-cache-repo.js';
+export type { SelectorCacheRow, SelectorType, SelectorSource } from './repos/selector-cache-repo.js';
+

@@ -18,7 +18,9 @@
   },
   "dependencies": {
     "@zarb/shared-types": "workspace:*",
-    "@zarb/storage": "workspace:*"
+    "@zarb/storage": "workspace:*",
+    "@zarb/logger": "workspace:*",
+    "playwright": "^1.40.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

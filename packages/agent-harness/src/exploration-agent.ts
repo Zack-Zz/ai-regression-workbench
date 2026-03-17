@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import type { ExplorationConfig } from '@zarb/shared-types';
 import type { Db } from '@zarb/storage';
-import { FindingRepository } from '@zarb/storage';
+import { FindingRepository, SiteCredentialRepository } from '@zarb/storage';
 import { HarnessSessionManager } from './session-manager.js';
+import { ToolRegistry } from './tool-registry.js';
+import { StepLogger } from '@zarb/logger';
+import type { PlaywrightToolProvider } from './playwright-tool-provider.js';
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
@@ -46,13 +50,16 @@ export interface ExplorationResult {
 export class ExplorationAgent {
   private readonly findings: FindingRepository;
   private readonly sessionManager: HarnessSessionManager;
+  private readonly credentials: SiteCredentialRepository;
 
   constructor(
     private readonly db: Db,
     private readonly provider: AIProvider,
+    private readonly playwrightProvider?: PlaywrightToolProvider,
   ) {
     this.findings = new FindingRepository(db);
     this.sessionManager = new HarnessSessionManager(db);
+    this.credentials = new SiteCredentialRepository(db);
   }
 
   async explore(
@@ -61,14 +68,49 @@ export class ExplorationAgent {
     probe: (url: string) => Promise<PageProbe>,
     dataRoot = '',
   ): Promise<ExplorationResult> {
+    // Build ToolRegistry with policy from config
+    const allowedHosts = config.allowedHosts ?? [];
+    const registry = new ToolRegistry({
+      requireApprovalFor: [],
+      toolCallTimeoutMs: 30_000,
+      allowedHosts,
+      allowedWriteScopes: [],
+    });
+
+    // If PlaywrightToolProvider is available, launch it and use its probe
+    let activePwProvider: PlaywrightToolProvider | null = null;
+    let effectiveProbe = probe;
+    if (this.playwrightProvider) {
+      try {
+        await this.playwrightProvider.launch();
+        // Apply credential if specified
+        if (config.credentialId) {
+          const cred = this.credentials.findById(config.credentialId);
+          if (cred) {
+            const baseUrl = config.startUrls[0] ?? '';
+            await this.playwrightProvider.applyCredential(cred, baseUrl);
+          }
+        }
+        this.playwrightProvider.registerTools(registry);
+        effectiveProbe = this.playwrightProvider.buildProbe();
+        activePwProvider = this.playwrightProvider;
+      } catch {
+        // Playwright unavailable (e.g. no browser installed) — fall back to probe callback
+      }
+    }
+
     // Create Harness session for audit trail
     const session = this.sessionManager.startSession({
       runId,
       kind: 'exploration',
       agentName: 'ExplorationAgent',
-      policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 15_000, allowedHosts: config.allowedHosts ?? [], allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
+      policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 30_000, allowedHosts, allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
       dataRoot,
     });
+
+    const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'));
+    stepLogger.log({ component: 'ExplorationAgent', action: 'explore.start', detail: `urls=${config.startUrls.join(',')}, maxSteps=${String(config.maxSteps)}`, status: 'ok' });
+
     const maxSteps = config.maxSteps ?? 20;
     const maxPages = config.maxPages ?? 10;
     const visitedUrls = new Set<string>();
@@ -77,55 +119,80 @@ export class ExplorationAgent {
     let noNewFindingsStreak = 0;
     let totalFindings = 0;
 
-    while (stepIndex < maxSteps && visitedUrls.size < maxPages && pendingUrls.length > 0) {
-      const url = pendingUrls.shift()!;
-      if (visitedUrls.has(url)) continue;
-      visitedUrls.add(url);
+    try {
+      while (stepIndex < maxSteps && visitedUrls.size < maxPages && pendingUrls.length > 0) {
+        const url = pendingUrls.shift()!;
+        if (visitedUrls.has(url)) continue;
+        visitedUrls.add(url);
 
-      // Probe the page
-      let pageState: PageProbe;
-      try {
-        pageState = await probe(url);
-      } catch {
-        continue;
-      }
-
-      // Persist findings from this page
-      const newFindings = this.extractFindings(runId, pageState, config);
-      for (const f of newFindings) {
-        this.findings.save(f);
-        totalFindings++;
-      }
-
-      if (newFindings.length === 0) {
-        noNewFindingsStreak++;
-      } else {
-        noNewFindingsStreak = 0;
-      }
-
-      // Soft stop: 3 consecutive pages with no findings
-      if (noNewFindingsStreak >= 3) break;
-
-      // Ask LLM for next action
-      const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls]);
-      if (nextStep.action === 'done') break;
-      if (nextStep.action === 'navigate' && nextStep.targetUrl) {
-        if (!visitedUrls.has(nextStep.targetUrl)) {
-          pendingUrls.unshift(nextStep.targetUrl);
+        // Navigate via ToolRegistry (enforces allowedHosts) or fall back to probe
+        let pageState: PageProbe;
+        const navStart = Date.now();
+        if (activePwProvider) {
+          const result = await registry.call<PageProbe>('playwright.navigate', { url }, { sessionId: session.session_id, stepIndex });
+          if (!result.ok) {
+            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url } });
+            continue;
+          }
+          pageState = result.value!;
+        } else {
+          try { pageState = await effectiveProbe(url); } catch {
+            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url } });
+            continue;
+          }
         }
+        const navDuration = Date.now() - navStart;
+        const pageSnapshot = { url: pageState.url, title: pageState.title, formCount: pageState.formCount, linkCount: pageState.linkCount, consoleErrors: pageState.consoleErrors.length, networkErrors: pageState.networkErrors.length };
+        stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, pageState: pageSnapshot });
+
+        // Persist findings from this page
+        const newFindings = this.extractFindings(runId, pageState, config);
+        for (const f of newFindings) { this.findings.save(f); totalFindings++; }
+        if (newFindings.length > 0) {
+          stepLogger.log({
+            component: 'ExplorationAgent', action: 'findings', status: 'ok',
+            detail: `${String(newFindings.length)} findings on ${url}`,
+            toolOutput: newFindings.map(f => ({ category: f.category, severity: f.severity, title: f.title, summary: f.summary })),
+          });
+        }
+
+        noNewFindingsStreak = newFindings.length === 0 ? noNewFindingsStreak + 1 : 0;
+        if (noNewFindingsStreak >= 3) break;
+
+        // Ask LLM for next action
+        const llmStart = Date.now();
+        const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls]);
+        stepLogger.log({
+          component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
+          detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
+          toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount },
+          toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl },
+          reason: nextStep.reasoning,
+        });
+        if (nextStep.action === 'done') break;
+        if (nextStep.action === 'navigate' && nextStep.targetUrl) {
+          if (!visitedUrls.has(nextStep.targetUrl)) pendingUrls.unshift(nextStep.targetUrl);
+        }
+
+        this.sessionManager.appendStep(session.session_id, {
+          stepIndex,
+          description: `navigate: ${url}`,
+          outcome: `findings: ${String(newFindings.length)}, errors: ${String(pageState.consoleErrors.length + pageState.networkErrors.length)}`,
+          timestamp: new Date().toISOString(),
+        }, dataRoot);
+
+        stepIndex++;
       }
-
-      // Record step in Harness session trace
-      this.sessionManager.appendStep(session.session_id, {
-        stepIndex,
-        description: `navigate: ${url}`,
-        outcome: `findings: ${String(newFindings.length)}, errors: ${String(pageState.consoleErrors.length + pageState.networkErrors.length)}`,
-        timestamp: new Date().toISOString(),
-      }, dataRoot);
-
-      stepIndex++;
+    } finally {
+      if (activePwProvider) {
+        if (dataRoot) {
+          activePwProvider.flushNetworkLog(join(dataRoot, 'runs', runId, 'network.jsonl'));
+        }
+        await activePwProvider.close().catch(() => undefined);
+      }
     }
 
+    stepLogger.log({ component: 'ExplorationAgent', action: 'explore.done', detail: `steps=${String(stepIndex)}, pages=${String(visitedUrls.size)}, findings=${String(totalFindings)}`, status: 'ok' });
     this.sessionManager.completeSession(session.session_id);
     return { findingCount: totalFindings, stepsExecuted: stepIndex, pagesVisited: visitedUrls.size };
   }

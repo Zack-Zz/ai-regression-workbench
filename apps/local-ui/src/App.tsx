@@ -8,6 +8,8 @@ import { FailureReportPage } from './pages/FailureReportPage.js';
 import { ExecutionReportPage } from './pages/ExecutionReportPage.js';
 import { CodeTaskDetailPage } from './pages/CodeTaskDetailPage.js';
 import { CodeTaskListPage } from './pages/CodeTaskListPage.js';
+import { ProjectsPage } from './pages/ProjectsPage.js';
+import { ProjectDetailPage } from './pages/ProjectDetailPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 
 export function App(): React.ReactElement {
@@ -22,6 +24,8 @@ export function App(): React.ReactElement {
         <Route path="code-tasks" element={<CodeTaskListPage />} />
         <Route path="code-tasks/:taskId" element={<CodeTaskDetailPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:projectId" element={<ProjectDetailPage />} />
       </Route>
     </Routes>
   );

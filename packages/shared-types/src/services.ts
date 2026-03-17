@@ -57,6 +57,9 @@ export interface StartRunInput {
     testcaseId?: string;
   };
   projectPath?: string;
+  projectId?: string;
+  siteId?: string;
+  credentialId?: string;
   includeSharedInRuns?: boolean;
   includeGeneratedInRuns?: boolean;
   exploration?: {
@@ -71,6 +74,7 @@ export interface StartRunInput {
 
 export interface UpdateWorkspaceInput {
   targetProjectPath: string;
+  testSuitesRoot?: string;
 }
 
 export interface SubmitReviewInput {
@@ -105,6 +109,7 @@ export interface PersonalSettings {
   };
   workspace: {
     targetProjectPath: string;
+    testSuitesRoot: string;
     gitRootStrategy: 'auto' | 'strict';
     allowOutsideToolWorkspace: boolean;
   };
@@ -162,6 +167,8 @@ export interface PersonalSettings {
     allowedWriteScopes: string[];
     defaultVerifyCommands: string[];
     allowReviewOnVerifyFailure?: boolean;
+    autoApprove?: boolean;
+    autoApproveMaxRiskLevel?: 'low' | 'medium' | 'high';
   };
   report: {
     port: number;

@@ -3,6 +3,9 @@ import type { RunStatus, RunMode } from '@zarb/shared-types';
 
 export interface RunRow {
   run_id: string;
+  project_id: string | null;
+  site_id: string | null;
+  credential_id: string | null;
   scope_type: string;
   scope_value: string | null;
   selector_json: string;
@@ -29,6 +32,9 @@ export interface RunRow {
 
 export interface CreateRunInput {
   runId: string;
+  projectId?: string;
+  siteId?: string;
+  credentialId?: string;
   scopeType: string;
   scopeValue?: string;
   selectorJson?: string;
@@ -60,6 +66,8 @@ export interface UpdateRunInput {
 export interface ListRunsFilter {
   status?: RunStatus;
   runMode?: RunMode;
+  projectId?: string;
+  siteId?: string;
   cursor?: string;
   limit?: number;
 }
@@ -75,11 +83,11 @@ export class RunRepository {
   constructor(private readonly db: Db) {
     this.insertStmt = db.prepare(`
       INSERT INTO test_runs
-        (run_id, scope_type, scope_value, selector_json, run_mode, trigger_type,
+        (run_id, project_id, site_id, credential_id, scope_type, scope_value, selector_json, run_mode, trigger_type,
          environment, exploration_config_json, status, workspace_path,
          timeout_at, started_at, updated_at)
       VALUES
-        (@runId, @scopeType, @scopeValue, @selectorJson, @runMode, @triggerType,
+        (@runId, @projectId, @siteId, @credentialId, @scopeType, @scopeValue, @selectorJson, @runMode, @triggerType,
          @environment, @explorationConfigJson, 'CREATED', @workspacePath,
          @timeoutAt, @startedAt, @startedAt)
     `);
@@ -88,6 +96,9 @@ export class RunRepository {
   create(input: CreateRunInput): void {
     this.insertStmt.run({
       runId: input.runId,
+      projectId: input.projectId ?? null,
+      siteId: input.siteId ?? null,
+      credentialId: input.credentialId ?? null,
       scopeType: input.scopeType,
       scopeValue: input.scopeValue ?? null,
       selectorJson: input.selectorJson ?? '{}',
@@ -132,6 +143,8 @@ export class RunRepository {
 
     if (filter.status) { conditions.push('status = ?'); params.push(filter.status); }
     if (filter.runMode) { conditions.push('run_mode = ?'); params.push(filter.runMode); }
+    if (filter.projectId) { conditions.push('project_id = ?'); params.push(filter.projectId); }
+    if (filter.siteId) { conditions.push('site_id = ?'); params.push(filter.siteId); }
     if (filter.cursor) { conditions.push('started_at < ?'); params.push(filter.cursor); }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

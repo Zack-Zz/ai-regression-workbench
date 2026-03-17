@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { useAsync, usePoll } from '../hooks.js';
+import { useAsync, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, Button, Table } from '../components/ui.js';
 import type { RunSummary } from '../types.js';
@@ -14,13 +14,14 @@ export function RunListPage(): React.ReactElement {
   const [modeFilter, setModeFilter] = useState('');
   const qs = [statusFilter && `status=${statusFilter}`, modeFilter && `runMode=${modeFilter}`].filter(Boolean).join('&');
   const { data, loading, error, reload } = useAsync(() => api.listRuns(qs || undefined), [qs]);
-  const hasActive = data?.items.some(r => !TERMINAL.has(r.status)) ?? false;
-  usePoll(reload, 5000, hasActive);
+  useServerEvents(['run.created', 'run.updated'], () => reload());
 
   const rows: React.ReactNode[][] = (data?.items ?? []).map((r: RunSummary) => [
     <RunStatusBadge key="s" status={r.status} />,
     r.runMode,
     `${r.scopeType ?? ''}${r.scopeValue ? `:${r.scopeValue}` : ''}`,
+    r.projectName ?? r.projectId?.slice(0, 8) ?? '—',
+    r.siteName ?? r.siteId?.slice(0, 8) ?? '—',
     `✓${String(r.passed)} ✗${String(r.failed)} ↷${String(r.skipped)}`,
     r.startedAt.slice(0, 16).replace('T', ' '),
     <Button key="v" onClick={() => { navigate(`/runs/${r.runId}`); }}>查看</Button>,
@@ -44,7 +45,7 @@ export function RunListPage(): React.ReactElement {
       </div>
       {loading && <Loading />}
       {error && <ErrorBanner message={error} onRetry={reload} />}
-      {data && <Table headers={[t('common.status'), t('run.mode'), t('run.scope'), '统计', t('run.startedAt'), t('common.actions')]} rows={rows} />}
+      {data && <Table headers={[t('common.status'), t('run.mode'), t('run.scope'), '项目', '站点', '统计', t('run.startedAt'), t('common.actions')]} rows={rows} />}
     </div>
   );
 }

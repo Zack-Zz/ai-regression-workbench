@@ -24,6 +24,12 @@ const EXPECTED_MIGRATIONS = [
   '010_storage_indexes',
   '020_cleanup_run_by_id',
   '021_code_task_verify_output_path',
+  '030_projects_sites',
+  '031_runs_project_site',
+  '032_default_project',
+  '033_selector_cache',
+  '034_repo_base_branch',
+  '035_runs_credential',
 ];
 
 function check(name: string, fn: () => 'ok' | 'warn' | 'fail' | { status: 'ok' | 'warn' | 'fail'; message: string }): DoctorCheckResult {

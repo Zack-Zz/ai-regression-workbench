@@ -22,3 +22,6 @@ export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
 
 export { ExplorationAgent } from './exploration-agent.js';
 export type { AIProvider as ExplorationAIProvider, PageProbe, ExplorationStep, ExplorationResult } from './exploration-agent.js';
+
+export { PlaywrightToolProvider } from './playwright-tool-provider.js';
+export type { PlaywrightToolProviderOptions } from './playwright-tool-provider.js';

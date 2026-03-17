@@ -22,18 +22,13 @@
 
 ### better-sqlite3（native 模块）
 
-`pnpm install` 时会自动编译，需要系统有 C++ 编译工具：
+`pnpm install` 时会通过 `prebuild-install` 自动下载预编译 binary，支持 Node 20/22/24，**无需本地 C++ 编译工具**。
+
+如果网络受限导致预编译 binary 下载失败，会 fallback 到从源码编译，此时需要：
 
 - macOS：`xcode-select --install`
 - Linux：`apt install build-essential python3`
 - Windows：安装 Visual Studio Build Tools
-
-> macOS 上如果已安装完整 Xcode，执行 `xcode-select --install` 会提示已安装，直接跳过即可。
-
-编译失败时手动重试：
-```bash
-pnpm rebuild better-sqlite3
-```
 
 ---
 
@@ -291,13 +286,14 @@ pnpm --filter @zarb/shared-types build
 ```
 
 **Q：`better-sqlite3` 安装失败**
+
+正常情况下 `pnpm install` 会自动下载预编译 binary，无需额外操作。
+
+如果在网络受限环境下下载失败并 fallback 到源码编译：
 ```bash
 # macOS
 xcode-select --install
 pnpm install
-
-# 或强制重新编译
-pnpm rebuild better-sqlite3
 ```
 
 **Q：UI 访问 5173 但 API 请求 404**

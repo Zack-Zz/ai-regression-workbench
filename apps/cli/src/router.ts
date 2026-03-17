@@ -27,6 +27,7 @@ export class Router {
   get(path: string, handler: Handler): void { this.add('GET', path, handler); }
   post(path: string, handler: Handler): void { this.add('POST', path, handler); }
   put(path: string, handler: Handler): void { this.add('PUT', path, handler); }
+  delete(path: string, handler: Handler): void { this.add('DELETE', path, handler); }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url?.split('?')[0] ?? '/';

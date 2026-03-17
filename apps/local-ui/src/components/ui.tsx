@@ -43,15 +43,18 @@ export function TaskStatusBadge({ status }: { status: CodeTaskStatus }): React.R
   return <StatusBadge status={status} type="task" />;
 }
 
-export function Button({ children, onClick, disabled, variant = 'default' }: {
+export function Button({ children, onClick, disabled, variant = 'default', type = 'button', style }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean;
   variant?: 'default' | 'primary' | 'danger';
+  type?: 'button' | 'submit' | 'reset';
+  style?: React.CSSProperties;
+
 }): React.ReactElement {
   const bg = variant === 'primary' ? '#36c' : variant === 'danger' ? '#c33' : '#eee';
   const fg = variant === 'default' ? '#333' : '#fff';
   return (
-    <button onClick={onClick} disabled={disabled}
-      style={{ padding: '6px 14px', background: bg, color: fg, border: 'none', borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1 }}>
+    <button type={type} onClick={onClick} disabled={disabled}
+      style={{ padding: '6px 14px', background: bg, color: fg, border: 'none', borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1, ...style }}>
       {children}
     </button>
   );

@@ -7,6 +7,7 @@ import type {
   CodeTaskSummary, CodeTaskDetail, CodeTaskSummaryPage, ActionResult,
   ListCodeTasksQuery, SubmitReviewInput, CreateCommitInput,
 } from '@zarb/shared-types';
+import { emitEvent } from '../event-bus.js';
 
 function toSummary(row: CodeTaskRow): CodeTaskSummary {
   return {
@@ -50,6 +51,10 @@ export class CodeTaskService {
     this.commitManager = commitManager ?? new CommitManager(db);
   }
 
+  private emitTask(taskId: string, type: 'code-task.created' | 'code-task.updated' = 'code-task.updated'): void {
+    emitEvent({ type, id: taskId });
+  }
+
   listCodeTasks(query: ListCodeTasksQuery = {}): CodeTaskSummaryPage {
     const filter: import('@zarb/storage').ListCodeTasksFilter = { limit: query.limit ?? 20 };
     if (query.runId !== undefined) filter.runId = query.runId;
@@ -85,6 +90,7 @@ export class CodeTaskService {
     });
     // Set status to PENDING_APPROVAL after creation
     this.tasks.update(taskId, { status: 'PENDING_APPROVAL', updatedAt: now });
+    this.emitTask(taskId, 'code-task.created');
     return { success: true, message: 'Promoted to CodeTask', taskId };
   }
 
@@ -132,7 +138,7 @@ export class CodeTaskService {
     if (row.status !== 'PENDING_APPROVAL' && row.status !== 'DRAFT') {
       return { success: false, message: `CodeTask cannot be approved in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
-    this.tasks.update(taskId, { status: 'APPROVED', updatedAt: new Date().toISOString() });
+    this.tasks.update(taskId, { status: 'APPROVED', updatedAt: new Date().toISOString() }); this.emitTask(taskId);
     return { success: true, message: 'CodeTask approved' };
   }
 
@@ -143,6 +149,7 @@ export class CodeTaskService {
       return { success: false, message: `CodeTask cannot be rejected in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
     this.tasks.update(taskId, { status: 'REJECTED', updatedAt: new Date().toISOString() });
+    this.emitTask(taskId);
     return { success: true, message: 'CodeTask rejected' };
   }
 
@@ -155,6 +162,7 @@ export class CodeTaskService {
 
     const now = new Date().toISOString();
     this.tasks.update(taskId, { status: 'RUNNING', updatedAt: now });
+    this.emitTask(taskId);
 
     // Fire-and-forget: return immediately, run agent in background
     void this.runExecution(taskId, row);
@@ -190,12 +198,14 @@ export class CodeTaskService {
       if (agentResult.exitCode !== 0) {
         this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
         this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath: `code-tasks/${taskId}/raw-output.txt`, updatedAt: new Date().toISOString() });
+        this.emitTask(taskId);
         this.sessionManager.completeSession(session.session_id);
         return;
       }
 
       // VERIFYING stage
       this.tasks.update(taskId, { status: 'VERIFYING', updatedAt: new Date().toISOString() });
+      this.emitTask(taskId);
 
       const artifacts = this.artifactWriter.generateArtifacts({
         taskId,
@@ -207,9 +217,11 @@ export class CodeTaskService {
 
       const finalStatus = artifacts.verifyPassed ? 'SUCCEEDED' : 'FAILED';
       this.tasks.update(taskId, { status: finalStatus, updatedAt: new Date().toISOString() });
+      this.emitTask(taskId);
       this.sessionManager.completeSession(session.session_id);
     } catch (err) {
       this.tasks.update(taskId, { status: 'FAILED', updatedAt: new Date().toISOString() });
+      this.emitTask(taskId);
       this.sessionManager.completeSession(session.session_id);
       // Log but don't rethrow — background task
       console.error(`[CodeTaskService] execution failed for ${taskId}:`, err);
@@ -250,6 +262,7 @@ export class CodeTaskService {
       return { success: false, message: `CodeTask cannot be cancelled in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
     this.tasks.update(taskId, { status: 'CANCELLED', updatedAt: new Date().toISOString() });
+    this.emitTask(taskId);
     return { success: true, message: 'CodeTask cancelled' };
   }
 
@@ -290,11 +303,14 @@ export class CodeTaskService {
 
     if (input.decision === 'accept') {
       this.tasks.update(input.taskId, { status: 'COMMIT_PENDING', updatedAt: now });
+      this.emitTask(input.taskId);
     } else if (input.decision === 'reject') {
       this.tasks.update(input.taskId, { status: 'REJECTED', updatedAt: now });
+      this.emitTask(input.taskId);
     } else {
       // retry: mark original as superseded and immediately create new attempt
       this.tasks.update(input.taskId, { status: 'FAILED', updatedAt: now });
+      this.emitTask(input.taskId);
       const newTaskId = `task-${String(Date.now())}`;
       this.tasks.create({
         taskId: newTaskId,

@@ -24,9 +24,9 @@ export function Layout(): React.ReactElement {
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
       <header style={{ display: 'flex', alignItems: 'center', padding: '0 1.5rem', height: 48, background: '#1a1a2e', color: '#fff', gap: '1.5rem' }}>
         <span style={{ fontWeight: 700, fontSize: '1.1em', marginRight: '1rem' }}>ZARB</span>
-        {(['/', '/runs', '/code-tasks'] as const).map((path, i) => (
+        {(['/', '/runs', '/code-tasks', '/projects'] as const).map((path, i) => (
           <NavLink key={path} to={path} end={path === '/'} style={({ isActive }) => ({ color: isActive ? '#7af' : '#ccc', textDecoration: 'none', fontSize: '0.9em' })}>
-            {[t('nav.home'), t('nav.runs'), t('nav.codeTasks')][i]}
+            {[t('nav.home'), t('nav.runs'), t('nav.codeTasks'), t('nav.projects')][i]}
           </NavLink>
         ))}
         <div style={{ flex: 1 }} />

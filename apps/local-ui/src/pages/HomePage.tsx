@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { useAsync, usePoll } from '../hooks.js';
+import { useAsync, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, Button } from '../components/ui.js';
 import { QuickRunPanel } from '../components/QuickRunPanel.js';
@@ -13,8 +13,7 @@ export function HomePage(): React.ReactElement {
   const navigate = useNavigate();
   const { data, loading, error, reload } = useAsync(() => api.listRuns('limit=5'), []);
   const { data: pendingTasks } = useAsync(() => api.listCodeTasks('status=PENDING_APPROVAL&limit=10'), []);
-  const hasActive = data?.items.some(r => !TERMINAL.has(r.status)) ?? false;
-  usePoll(reload, 5000, hasActive);
+  useServerEvents(['run.created', 'run.updated'], () => reload());
 
   return (
     <div>
@@ -56,6 +55,8 @@ function RunRow({ run, onClick }: { run: RunSummary; onClick: () => void }): Rea
       <RunStatusBadge status={run.status} />
       <span style={{ fontSize: '0.85em', color: '#555' }}>{run.runMode}</span>
       <span style={{ fontSize: '0.85em', flex: 1 }}>{run.scopeType}{run.scopeValue ? `: ${run.scopeValue}` : ''}</span>
+      {(run.projectName ?? run.projectId) && <span style={{ fontSize: '0.8em', color: '#666', background: '#f5f5f5', padding: '1px 5px', borderRadius: 3 }}>{run.projectName ?? run.projectId!.slice(0, 8)}</span>}
+      {(run.siteName ?? run.siteId) && <span style={{ fontSize: '0.8em', color: '#666', background: '#eef5ff', padding: '1px 5px', borderRadius: 3 }}>{run.siteName ?? run.siteId!.slice(0, 8)}</span>}
       <span style={{ fontSize: '0.8em', color: '#888' }}>{run.startedAt.slice(0, 16).replace('T', ' ')}</span>
       <span style={{ fontSize: '0.85em' }}>✓{run.passed} ✗{run.failed}</span>
     </div>

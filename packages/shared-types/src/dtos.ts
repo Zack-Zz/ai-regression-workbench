@@ -36,6 +36,7 @@ export interface ExplorationConfig {
   maxPages: number;
   focusAreas?: Array<'smoke' | 'navigation' | 'forms' | 'console-errors' | 'network-errors' | 'auth'>;
   persistAsCandidateTests?: boolean;
+  credentialId?: string;
 }
 
 export interface RunSummary {
@@ -44,6 +45,12 @@ export interface RunSummary {
   status: RunStatus;
   scopeType?: RunScopeType;
   scopeValue?: string;
+  projectId?: string;
+  siteId?: string;
+  projectName?: string;
+  siteName?: string;
+  siteBaseUrl?: string;
+  credLabel?: string;
   startedAt: string;
   endedAt?: string;
   total: number;

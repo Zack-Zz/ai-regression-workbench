@@ -1,11 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFileSync, existsSync } from 'node:fs';
 import type { RunService } from '../services/run-service.js';
 import type { DiagnosticsService } from '../services/diagnostics-service.js';
 import type { CodeTaskService } from '../services/code-task-service.js';
 import type { DoctorService } from '../services/doctor-service.js';
 import type { ConfigManager } from '@zarb/config';
+import type { Db } from '@zarb/storage';
 import { Router, parseQuery, readBody, ok, actionOk, notFound, badRequest, conflict, serverError, json } from '../router.js';
-import type { StartRunInput, SubmitReviewInput, CreateCommitInput, UpdateSettingsInput, ListRunsQuery, ListCodeTasksQuery, RunEventsQuery } from '@zarb/shared-types';
+import type { StartRunInput, SubmitReviewInput, CreateCommitInput, UpdateSettingsInput, ListRunsQuery, ListCodeTasksQuery, RunEventsQuery, SSEEvent } from '@zarb/shared-types';
+import { registerProjectRoutes } from './project-handlers.js';
+import { eventBus, _buffer } from '../event-bus.js';
 
 function q(val: string | undefined): string | undefined { return val || undefined; }
 function qn(val: string | undefined): number | undefined { return val ? Number(val) : undefined; }
@@ -23,8 +27,45 @@ export function buildRouter(
   taskSvc: CodeTaskService,
   settingsSvc: ConfigManager,
   doctorSvc?: DoctorService,
+  db?: Db,
 ): Router {
   const router = new Router();
+
+  if (db) registerProjectRoutes(router, db);
+
+  // --- SSE events ---
+  router.get('/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // disable nginx buffering for reverse proxy deployments
+    });
+
+    const send = (event: SSEEvent): void => {
+      res.write(`id: ${event.ts}\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+
+    // Replay events missed since Last-Event-ID
+    const lastId = req.headers['last-event-id'];
+    if (lastId) {
+      const since = Number(lastId);
+      _buffer.filter(e => e.ts > since).forEach(send);
+    }
+
+    // Initial connected signal
+    send({ type: 'run.updated', ts: Date.now() } as SSEEvent & { type: 'run.updated' });
+    res.write(': connected\n\n');
+
+    const heartbeat = setInterval(() => { res.write(': ping\n\n'); }, 25000);
+    const listener = (e: SSEEvent): void => { send(e); };
+    eventBus.on('sse', listener);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      eventBus.off('sse', listener);
+    });
+  });
 
   // --- Runs ---
   router.post('/runs', async (req, res) => {
@@ -69,6 +110,16 @@ export function buildRouter(
     const cursor = q(p['cursor']); if (cursor !== undefined) query.cursor = cursor;
     const limit = qn(p['limit']); if (limit !== undefined) query.limit = limit;
     ok(res, runSvc.getRunEvents(params['runId'] ?? '', query));
+  });
+
+  router.get('/runs/:runId/steps', (_req, res, params) => {
+    const filePath = runSvc.getRunFilePath(params['runId'] ?? '', 'steps.ndjson');
+    serveNdjson(res, filePath);
+  });
+
+  router.get('/runs/:runId/network', (_req, res, params) => {
+    const filePath = runSvc.getRunFilePath(params['runId'] ?? '', 'network.jsonl');
+    serveNdjson(res, filePath);
   });
 
   router.post('/runs/:runId/pause', (_req, res, params) => {
@@ -250,6 +301,14 @@ export function buildRouter(
   });
 
   return router;
+}
+
+function serveNdjson(res: ServerResponse, filePath: string): void {
+  if (!existsSync(filePath)) { ok(res, []); return; }
+  try {
+    const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+    ok(res, lines.map(l => JSON.parse(l) as unknown));
+  } catch { ok(res, []); }
 }
 
 export async function handleRequest(

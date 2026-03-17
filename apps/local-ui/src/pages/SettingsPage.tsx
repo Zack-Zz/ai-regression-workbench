@@ -100,16 +100,7 @@ export function SettingsPage(): React.ReactElement {
       </SettingsSection>
 
       <SettingsSection title={t('settings.workspace')}>
-        <SettingRow label={t('settings.field.targetProjectPath')} value={String(val('workspace', 'targetProjectPath'))} onChange={v => { set('workspace', 'targetProjectPath', v); }} description={t('settings.field.targetProjectPath.desc')} />
-        <SettingRow label={t('settings.field.gitRootStrategy')} value={String(val('workspace', 'gitRootStrategy'))} onChange={v => { set('workspace', 'gitRootStrategy', v); }} description={t('settings.field.gitRootStrategy.desc')} />
-        <KV label={t('settings.field.allowOutsideToolWorkspace')} value={String(val('workspace', 'allowOutsideToolWorkspace'))} />
-      </SettingsSection>
-
-      <SettingsSection title={t('settings.testAssets')}>
-        <SettingRow label={t('settings.field.sharedRoot')} value={(val('testAssets', 'sharedRoot') as string | undefined) ?? ''} onChange={v => { set('testAssets', 'sharedRoot', v); }} description={t('settings.field.sharedRoot.desc')} />
-        <SettingRow label={t('settings.field.generatedRoot')} value={String(val('testAssets', 'generatedRoot'))} onChange={v => { set('testAssets', 'generatedRoot', v); }} description={t('settings.field.generatedRoot.desc')} />
-        <KV label={t('settings.field.includeSharedInRuns')} value={String(val('testAssets', 'includeSharedInRuns'))} />
-        <KV label={t('settings.field.includeGeneratedInRuns')} value={String(val('testAssets', 'includeGeneratedInRuns'))} />
+        <SettingRow label="Playwright 测试集根目录" value={String(val('workspace', 'testSuitesRoot') ?? '')} onChange={v => { set('workspace', 'testSuitesRoot', v); }} description="存放所有项目 Playwright 测试集的根目录" />
       </SettingsSection>
 
       <SettingsSection title={t('settings.diagnostics')}>
@@ -174,6 +165,8 @@ export function SettingsPage(): React.ReactElement {
         })}
 
         <SettingRow label={t('settings.approvalRequired')} value={String(val('codeAgent', 'defaultApprovalRequired'))} onChange={v => { set('codeAgent', 'defaultApprovalRequired', v === 'true'); }} description={t('settings.approvalRequired')} />
+        <SettingRow label="自动审批 (autoApprove)" value={String(val('codeAgent', 'autoApprove') ?? false)} onChange={v => { set('codeAgent', 'autoApprove', v === 'true'); }} description="开启后 CodeTask 草稿自动晋升并审批，无需人工确认" />
+        <SettingRow label="自动审批最高风险级别" value={String(val('codeAgent', 'autoApproveMaxRiskLevel') ?? 'low')} onChange={v => { set('codeAgent', 'autoApproveMaxRiskLevel', v); }} description="low / medium / high，仅在 autoApprove=true 时生效" />
       </SettingsSection>
 
       <SettingsSection title={t('settings.report')}>

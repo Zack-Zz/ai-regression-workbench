@@ -11,6 +11,8 @@ export type CodeTaskStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'RUNNIN
 export interface RunSummary {
   runId: string; runMode: RunMode; status: RunStatus;
   scopeType?: string; scopeValue?: string;
+  projectId?: string; siteId?: string;
+  projectName?: string; siteName?: string; siteBaseUrl?: string; credLabel?: string;
   startedAt: string; endedAt?: string;
   total: number; passed: number; failed: number; skipped: number;
   currentStage?: string;
@@ -149,6 +151,41 @@ export interface CodeTaskDraftRow {
   prompt_template_version: string; status: string; created_at: string;
 }
 
+export interface Project {
+  id: string; name: string; description?: string; createdAt: string; updatedAt: string;
+}
+export interface Site {
+  id: string; projectId: string; name: string; baseUrl: string;
+  description?: string; createdAt: string; updatedAt: string;
+}
+export interface SiteCredential {
+  id: string; siteId: string; label: string; username?: string;
+  authType?: 'userpass' | 'cookie' | 'token';
+  isDefault: boolean; createdAt: string;
+}
+export interface LocalRepo {
+  id: string; projectId: string; name: string; path: string;
+  description?: string; testOutputDir?: string; baseBranch?: string; createdAt: string; updatedAt: string;
+}
+
+export interface SelectorCacheEntry {
+  id: string; site_id: string; repo_id: string;
+  type: 'suite' | 'scenario' | 'tag' | 'testcase';
+  value: string; source: 'scan' | 'history'; last_seen: string;
+}
+
+export interface StepLogEntry {
+  ts: string; component: string; action: string; detail?: string;
+  status: 'ok' | 'warn' | 'error' | 'skip'; durationMs?: number;
+  toolInput?: unknown; toolOutput?: unknown;
+  pageState?: { url: string; title: string; formCount: number; linkCount: number; consoleErrors: number; networkErrors: number };
+  reason?: string;
+}
+export interface NetworkLogEntry {
+  ts: string; url: string; method: string; status: number;
+  durationMs: number; resourceType: string; error?: string;
+}
+
 export interface ActionResult {
   success: boolean; message: string; errorCode?: string; nextSuggestedAction?: string;
 }
@@ -157,7 +194,10 @@ export interface StartRunInput {
   runMode: RunMode;
   selector?: { suite?: string; scenarioId?: string; tag?: string; testcaseId?: string };
   projectPath?: string;
-  exploration?: { startUrls: string[]; allowedHosts?: string[]; maxSteps: number; maxPages: number; focusAreas?: string[]; persistAsCandidateTests?: boolean };
+  projectId?: string;
+  siteId?: string;
+  credentialId?: string;
+  exploration?: { startUrls: string[]; allowedHosts?: string[]; maxSteps: number; maxPages: number; focusAreas?: string[]; persistAsCandidateTests?: boolean; credentialId?: string };
 }
 
 export interface StartRunResult extends ActionResult { run?: RunSummary; }
@@ -199,3 +239,8 @@ export interface SettingsSnapshot { version: number; sourcePath: string; updated
 export interface UpdateSettingsInput { patch: Partial<PersonalSettings>; expectedVersion?: number; }
 export interface SettingsValidationResult { valid: boolean; errors: string[]; warnings?: string[]; }
 export interface SettingsApplyResult extends ActionResult { version?: number; requiresRestart?: boolean; reloadedModules?: string[]; nextRunOnlyKeys?: string[]; }
+
+export type SSEEventType =
+  | 'run.created' | 'run.updated' | 'run.step.updated'
+  | 'code-task.created' | 'code-task.updated';
+export interface SSEEvent { type: SSEEventType; id?: string; projectId?: string; ts: number; }

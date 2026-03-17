@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
   },
   workspace: {
     targetProjectPath: '',
+    testSuitesRoot: '',
     gitRootStrategy: 'auto',
     allowOutsideToolWorkspace: true,
   },
