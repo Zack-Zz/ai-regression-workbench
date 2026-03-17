@@ -109,6 +109,7 @@ design.md
   [orchestrator](./docs/orchestrator-design.md)、
   [diagnostics](./docs/diagnostics-design.md)、
   [ai-engine](./docs/ai-engine-design.md)、
+  [ai-provider](./docs/ai-provider-design.md)、
   [agent-harness](./docs/agent-harness-design.md)、
   [code-task](./docs/code-task-design.md)、
   [api-contract](./docs/api-contract-design.md)、
@@ -125,8 +126,8 @@ design.md
 
 ## 当前状态
 
-原始 Phase 0-10 路线图已经完成，仓库目前已经具备本地工作台基线、API/UI 流程、doctor 检查以及 hardening 覆盖。
+Phase 0-16 已经完成，仓库目前已具备本地工作台基线、API/UI 流程、AI 多提供商集成（OpenAI + DeepSeek，支持运行时切换）、doctor 检查以及 hardening 覆盖。
 
-后续工作不再是“从零初始化实现”，而是把产品剩余的真实集成层补齐。当前最大的缺口是 `test-runner`、`trace-bridge`、`log-bridge`、`review-manager`、真实 `CodeAgent` 执行链，以及产品化安装与初始化流程。
+后续工作是补齐真实外部服务集成：`test-runner`、`trace-bridge`、`log-bridge`、`review-manager`、真实 CodeAgent 执行链，以及产品化安装与初始化流程。
 
-后续 Phase 11+ 计划见 [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)。
+后续计划见 [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md)。

@@ -109,6 +109,7 @@ Typical correlation sources:
   [orchestrator](./docs/orchestrator-design.md),
   [diagnostics](./docs/diagnostics-design.md),
   [ai-engine](./docs/ai-engine-design.md),
+  [ai-provider](./docs/ai-provider-design.md),
   [agent-harness](./docs/agent-harness-design.md),
   [code-task](./docs/code-task-design.md),
   [api-contract](./docs/api-contract-design.md),
@@ -125,8 +126,8 @@ Typical correlation sources:
 
 ## Current Status
 
-The original Phase 0-10 roadmap is complete: the repository now includes the local workbench baseline, API/UI flow, doctor checks, and hardening coverage.
+Phase 0-16 is complete: the repository includes the local workbench baseline, API/UI flow, AI provider integration (OpenAI + DeepSeek with runtime switching), doctor checks, and hardening coverage.
 
-The remaining work is product-completion work rather than initial implementation. The biggest open gaps are the real `test-runner`, `trace-bridge`, `log-bridge`, `review-manager`, real code-agent execution, and product packaging/bootstrap.
+The remaining work is real integration of external services: `test-runner`, `trace-bridge`, `log-bridge`, `review-manager`, real code-agent execution, and product packaging/bootstrap.
 
-See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the Phase 11+ plan.
+See [docs/product-completion-roadmap.md](./docs/product-completion-roadmap.md) for the full plan.
