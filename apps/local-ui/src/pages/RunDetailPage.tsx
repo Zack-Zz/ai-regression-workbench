@@ -71,7 +71,7 @@ export function RunDetailPage(): React.ReactElement {
       {testResults.length > 0 && (
         <Card title={`测试结果 (${String(testResults.length)})`}>
           <Table
-            headers={['Testcase', t('common.status'), '耗时', '错误']}
+            headers={['Testcase', t('common.status'), t('common.duration'), t('common.error')]}
             rows={testResults.map(r => [
               <button key="tc" onClick={() => { navigate(`/runs/${id}/testcases/${r.testcaseId}/failure-report`); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline' }}>{r.testcaseId}</button>,
               <span key="s" style={{ color: r.status === 'passed' ? '#2a7' : r.status === 'failed' ? '#c33' : '#888' }}>{r.status}</span>,
@@ -140,11 +140,11 @@ function ExplorationSessionPanel({ runId }: { runId: string }): React.ReactEleme
   if (!steps || steps.length === 0) return <></>;
 
   return (
-    <Card title="探索步骤日志">
+    <Card title={t('exploration.steps.title')}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
         {network && network.length > 0 && (
           <Button onClick={() => { setNetworkModal(true); }}>
-            网络请求 ({network.length})
+            {t('exploration.steps.network')} ({network.length}{t('exploration.steps.networkCount') ? ` ${t('exploration.steps.networkCount')}` : ''})
           </Button>
         )}
       </div>
@@ -280,8 +280,8 @@ function CopyPrettyBlock({ label, value, isJson }: { label: string; value: strin
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span style={{ fontWeight: 600, fontSize: '0.9em' }}>{label}</span>
-        {isJson && <button onClick={() => { setPretty(p => !p); }} style={{ fontSize: '0.75em', padding: '1px 6px', borderRadius: 3, border: '1px solid #ddd', cursor: 'pointer', background: pretty ? '#e8f0fe' : '#fff' }}>pretty</button>}
-        <button onClick={() => { void navigator.clipboard.writeText(value); }} style={{ fontSize: '0.75em', padding: '1px 6px', borderRadius: 3, border: '1px solid #ddd', cursor: 'pointer', background: '#fff' }}>copy</button>
+        {isJson && <button onClick={() => { setPretty(p => !p); }} style={{ fontSize: '0.75em', padding: '1px 6px', borderRadius: 3, border: '1px solid #ddd', cursor: 'pointer', background: pretty ? '#e8f0fe' : '#fff' }}>{t('network.modal.pretty')}</button>}
+        <button onClick={() => { void navigator.clipboard.writeText(value); }} style={{ fontSize: '0.75em', padding: '1px 6px', borderRadius: 3, border: '1px solid #ddd', cursor: 'pointer', background: '#fff' }}>{t('network.modal.copy')}</button>
       </div>
       <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '6px 8px', margin: 0, overflowX: 'auto', fontSize: '0.85em', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 200, overflowY: 'auto' }}>{display}</pre>
     </div>
@@ -314,8 +314,8 @@ function NetworkModal({ entries, onClose }: { entries: NetworkLogEntry[]; onClos
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: '#fff', borderRadius: 8, width: '90vw', maxWidth: 1100, height: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderBottom: '1px solid #eee', flexWrap: 'wrap', flexShrink: 0 }}>
-          <span style={{ fontWeight: 600, flex: 1 }}>网络请求 ({filtered.length}/{entries.length}，{errors.length} 个错误)</span>
-          <input value={search} onChange={e => { setSearch(e.target.value); }} placeholder="过滤 URL..." style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid #ddd', fontSize: '0.85em', width: 180 }} />
+          <span style={{ fontWeight: 600, flex: 1 }}>{t('network.modal.title')} ({filtered.length}/{entries.length}，{errors.length} {t('network.modal.errors')})</span>
+          <input value={search} onChange={e => { setSearch(e.target.value); }} placeholder={t('network.modal.filterUrl')} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid #ddd', fontSize: '0.85em', width: 180 }} />
           {filterBtn('all', 'All')}
           {filterBtn('xhr', 'XHR')}
           {filterBtn('fetch', 'Fetch')}
@@ -345,28 +345,28 @@ function NetworkModal({ entries, onClose }: { entries: NetworkLogEntry[]; onClos
             <div style={{ width: detailOpen ? 400 : 32, borderLeft: '1px solid #eee', display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width 0.15s' }}>
               <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px', borderBottom: '1px solid #eee', gap: 6, flexShrink: 0 }}>
                 <button onClick={() => { setDetailOpen(o => !o); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1em', color: '#666' }}>{detailOpen ? '›' : '‹'}</button>
-                {detailOpen && <span style={{ fontWeight: 600, fontSize: '0.85em' }}>请求详情</span>}
+                {detailOpen && <span style={{ fontWeight: 600, fontSize: '0.85em' }}>{t('network.modal.detail')}</span>}
               </div>
               {detailOpen && (
                 <div style={{ overflowY: 'auto', padding: '0.75rem', fontSize: '0.82em', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1, minHeight: 0 }}>
                   <KV label="URL" value={selected.url} />
-                  <KV label="Method" value={selected.method} />
-                  <KV label="Status" value={String(selected.status)} />
-                  <KV label="Duration" value={fmtDuration(selected.durationMs)} />
-                  <KV label="Type" value={selected.resourceType} />
-                  <KV label="Time" value={fmtDatetime(selected.ts)} />
-                  {selected.error && <KV label="Error" value={selected.error} />}
+                  <KV label={t('common.method')} value={selected.method} />
+                  <KV label={t('common.status')} value={String(selected.status)} />
+                  <KV label={t('common.duration')} value={fmtDuration(selected.durationMs)} />
+                  <KV label={t('common.type')} value={selected.resourceType} />
+                  <KV label={t('common.time')} value={fmtDatetime(selected.ts)} />
+                  {selected.error && <KV label={t('common.error')} value={selected.error} />}
                   {isXhrLike && selected.requestHeaders && Object.keys(selected.requestHeaders).length > 0 && (
-                    <CopyPrettyBlock label="请求 Headers" value={JSON.stringify(selected.requestHeaders, null, 2)} isJson />
+                    <CopyPrettyBlock label={t('network.modal.reqHeaders')} value={JSON.stringify(selected.requestHeaders, null, 2)} isJson />
                   )}
                   {isXhrLike && selected.requestBody && (
-                    <CopyPrettyBlock label="请求 Body" value={selected.requestBody} isJson={selected.requestBody.trimStart().startsWith('{') || selected.requestBody.trimStart().startsWith('[')} />
+                    <CopyPrettyBlock label={t('network.modal.reqBody')} value={selected.requestBody} isJson={selected.requestBody.trimStart().startsWith('{') || selected.requestBody.trimStart().startsWith('[')} />
                   )}
                   {isXhrLike && selected.responseHeaders && Object.keys(selected.responseHeaders).length > 0 && (
-                    <CopyPrettyBlock label="响应 Headers" value={JSON.stringify(selected.responseHeaders, null, 2)} isJson />
+                    <CopyPrettyBlock label={t('network.modal.resHeaders')} value={JSON.stringify(selected.responseHeaders, null, 2)} isJson />
                   )}
                   {isXhrLike && selected.responseBody && (
-                    <CopyPrettyBlock label="响应 Body" value={selected.responseBody} isJson={selected.responseBody.trimStart().startsWith('{') || selected.responseBody.trimStart().startsWith('[')} />
+                    <CopyPrettyBlock label={t('network.modal.resBody')} value={selected.responseBody} isJson={selected.responseBody.trimStart().startsWith('{') || selected.responseBody.trimStart().startsWith('[')} />
                   )}
                 </div>
               )}
