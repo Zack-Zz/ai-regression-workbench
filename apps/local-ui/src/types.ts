@@ -98,11 +98,13 @@ export interface DiagnosticsDetail {
 export interface TraceDetail {
   summary: { traceId: string; hasError: boolean; errorSpans: unknown[]; topSlowSpans: unknown[]; rawLink?: string };
   fetchedAt: string;
+  unavailableReason?: string;
 }
 
 export interface LogDetail {
   summary: { matched: boolean; highlights: string[]; errorSamples: unknown[]; rawLink?: string };
   fetchedAt: string;
+  unavailableReason?: string;
 }
 
 export interface AnalysisDetail {

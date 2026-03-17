@@ -97,11 +97,108 @@ function parseJaegerTrace(traceId: string, body: JaegerResponse): TraceSummary |
 }
 
 /**
+ * SkywalkingTraceProvider — fetches trace summaries from Apache SkyWalking OAP via GraphQL.
+ * Endpoint format: http://host:12800
+ *
+ * Degrades gracefully: any network or parse error returns null.
+ */
+export class SkywalkingTraceProvider implements TraceProvider {
+  constructor(private readonly endpoint: string) {}
+
+  async getTrace(traceId: string): Promise<TraceSummary | null> {
+    try {
+      const query = `
+        query($traceId: ID!) {
+          trace: queryTrace(traceId: $traceId) {
+            spans {
+              spanId traceId segmentId parentSpanId
+              serviceCode endpointName startTime endTime
+              isError layer tags { key value }
+            }
+          }
+        }`;
+      const res = await fetch(`${this.endpoint}/graphql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { traceId } }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return null;
+      const body = await res.json() as SkywalkingResponse;
+      return parseSkywalkingTrace(traceId, body);
+    } catch {
+      return null;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SkyWalking response parsing
+// ---------------------------------------------------------------------------
+
+interface SkywalkingSpan {
+  spanId: number;
+  traceId: string;
+  segmentId: string;
+  parentSpanId: number;
+  serviceCode: string;
+  endpointName: string;
+  startTime: number; // epoch ms
+  endTime: number;   // epoch ms
+  isError: boolean;
+  layer: string;
+  tags: Array<{ key: string; value: string }>;
+}
+
+interface SkywalkingResponse {
+  data?: { trace?: { spans?: SkywalkingSpan[] } };
+}
+
+function parseSkywalkingTrace(traceId: string, body: SkywalkingResponse): TraceSummary | null {
+  const spans = body.data?.trace?.spans;
+  if (!spans?.length) return null;
+
+  const root = spans.find(s => s.parentSpanId === -1) ?? spans[0];
+  const hasError = spans.some(s => s.isError);
+
+  const errorSpans = spans
+    .filter(s => s.isError)
+    .slice(0, 5)
+    .map(s => ({
+      spanId: `${s.segmentId}-${String(s.spanId)}`,
+      service: s.serviceCode,
+      operation: s.endpointName,
+      durationMs: s.endTime - s.startTime,
+    }));
+
+  const topSlowSpans = [...spans]
+    .sort((a, b) => (b.endTime - b.startTime) - (a.endTime - a.startTime))
+    .slice(0, 3)
+    .map(s => ({
+      spanId: `${s.segmentId}-${String(s.spanId)}`,
+      service: s.serviceCode,
+      operation: s.endpointName,
+      durationMs: s.endTime - s.startTime,
+    }));
+
+  return {
+    traceId,
+    ...(root ? { rootService: root.serviceCode, rootOperation: root.endpointName, durationMs: root.endTime - root.startTime } : {}),
+    hasError,
+    errorSpans,
+    topSlowSpans,
+  };
+}
+
+/**
  * createTraceProvider — factory that reads config and returns the appropriate provider.
  */
 export function createTraceProvider(config: { provider: string; endpoint: string }): TraceProvider {
   if (config.provider === 'jaeger' && config.endpoint) {
     return new JaegerTraceProvider(config.endpoint);
+  }
+  if (config.provider === 'skywalking' && config.endpoint) {
+    return new SkywalkingTraceProvider(config.endpoint);
   }
   return new NullTraceProvider();
 }

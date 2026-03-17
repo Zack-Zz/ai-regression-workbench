@@ -17,6 +17,7 @@ export { ObservedHarness } from './observed-harness.js';
 export type { ObservabilityAdapter, ObservabilityEvent, ObservabilitySummary } from './observability.js';
 
 export { CodexCliAgent } from './codex-cli-agent.js';
+export { KiroCliAgent } from './kiro-cli-agent.js';
 export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
 
 export { ExplorationAgent } from './exploration-agent.js';

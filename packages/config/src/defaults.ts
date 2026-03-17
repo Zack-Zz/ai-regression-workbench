@@ -68,6 +68,7 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
     persistAsCandidateTests: true,
   },
   codeAgent: {
+    engine: 'kiro' as const,
     defaultApprovalRequired: true,
     allowedWriteScopes: [
       'packages/test-assets',

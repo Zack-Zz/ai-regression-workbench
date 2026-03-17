@@ -163,7 +163,23 @@ export class DiagnosticsService implements ConfigObserver {
       const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
       traceFetch = updated.find(f => f.type === 'trace' && f.status === 'succeeded');
     }
-    if (!traceFetch) return null;
+    if (!traceFetch) {
+      // Return a degraded detail with reason instead of null
+      const ctx = this.correlations.findByTestcase(runId, testcaseId);
+      const traceIds: string[] = ctx ? JSON.parse(ctx.trace_ids_json ?? '[]') as string[] : [];
+      const degraded = fetches.find(f => f.type === 'trace' && f.status === 'degraded')
+        ?? this.diagnosticFetches.findByTestcase(runId, testcaseId).find(f => f.type === 'trace' && f.status === 'degraded');
+      const reason = traceIds.length === 0
+        ? 'No trace IDs found in correlation context'
+        : degraded
+          ? `Trace provider returned no data for trace ID(s): ${traceIds.join(', ')}`
+          : 'Trace provider not configured or not reachable';
+      return {
+        summary: { traceId: traceIds[0] ?? '', hasError: false, errorSpans: [], topSlowSpans: [] },
+        fetchedAt: new Date().toISOString(),
+        unavailableReason: reason,
+      };
+    }
     const summary = traceFetch.summary_json
       ? JSON.parse(traceFetch.summary_json) as import('@zarb/shared-types').TraceSummary
       : { traceId: traceFetch.id, hasError: false, errorSpans: [], topSlowSpans: [] };
@@ -181,7 +197,25 @@ export class DiagnosticsService implements ConfigObserver {
       const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
       logFetch = updated.find(f => f.type === 'log' && f.status === 'succeeded');
     }
-    if (!logFetch) return null;
+    if (!logFetch) {
+      const ctx = this.correlations.findByTestcase(runId, testcaseId);
+      const hasIds = ctx && (
+        JSON.parse(ctx.trace_ids_json ?? '[]') as string[]).length > 0 ||
+        (JSON.parse(ctx?.request_ids_json ?? '[]') as string[]).length > 0 ||
+        (JSON.parse(ctx?.session_ids_json ?? '[]') as string[]).length > 0;
+      const degraded = fetches.find(f => f.type === 'log' && f.status === 'degraded')
+        ?? this.diagnosticFetches.findByTestcase(runId, testcaseId).find(f => f.type === 'log' && f.status === 'degraded');
+      const reason = !hasIds
+        ? 'No correlation IDs found in context'
+        : degraded
+          ? 'Log provider returned no matching entries'
+          : 'Log provider not configured or not reachable';
+      return {
+        summary: { matched: false, highlights: [], errorSamples: [] },
+        fetchedAt: new Date().toISOString(),
+        unavailableReason: reason,
+      };
+    }
     const summary = logFetch.summary_json
       ? JSON.parse(logFetch.summary_json) as import('@zarb/shared-types').LogSummary
       : { matched: true, highlights: [], errorSamples: [] };

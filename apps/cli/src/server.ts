@@ -7,6 +7,7 @@ import { TestRunner } from '@zarb/test-runner';
 import { createTraceProvider } from '@zarb/trace-bridge';
 import { createLogProvider } from '@zarb/log-bridge';
 import { LocalAIEngine, createAIProvider } from '@zarb/ai-engine';
+import { CodexCliAgent, KiroCliAgent } from '@zarb/agent-harness';
 import { RunService } from './services/run-service.js';
 import { DiagnosticsService } from './services/diagnostics-service.js';
 import { CodeTaskService } from './services/code-task-service.js';
@@ -44,7 +45,11 @@ export function createAppServer(opts: ServerOptions) {
   const runSvc = new RunService(opts.db, { dataRoot, runner, aiEngine, aiProvider });
   const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider, aiEngine);
   settingsSvc.registerObserver(diagSvc);
-  const taskSvc = new CodeTaskService(opts.db, dataRoot);
+  const taskSvc = new CodeTaskService(
+    opts.db,
+    dataRoot,
+    cfg.codeAgent.engine === 'kiro' ? new KiroCliAgent() : new CodexCliAgent(),
+  );
   const doctorSvc = new DoctorService(opts.db, settingsSvc);
   const router = buildRouter(runSvc, diagSvc, taskSvc, settingsSvc, doctorSvc);
 

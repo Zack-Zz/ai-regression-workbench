@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db, CodeTaskRow } from '@zarb/storage';
 import { CodeTaskRepository, ReviewRepository, CommitRepository, CodeTaskDraftRepository, AnalysisRepository } from '@zarb/storage';
-import { HarnessSessionManager, ArtifactWriter, CodexCliAgent, DEFAULT_CODE_REPAIR_POLICY } from '@zarb/agent-harness';
+import { HarnessSessionManager, ArtifactWriter, CodexCliAgent, KiroCliAgent, DEFAULT_CODE_REPAIR_POLICY } from '@zarb/agent-harness';
 import { CommitManager } from '@zarb/review-manager';
 import type {
   CodeTaskSummary, CodeTaskDetail, CodeTaskSummaryPage, ActionResult,
@@ -35,10 +35,10 @@ export class CodeTaskService {
   private readonly analyses: AnalysisRepository;
   private readonly sessionManager: HarnessSessionManager;
   private readonly artifactWriter: ArtifactWriter;
-  private readonly agent: CodexCliAgent;
+  private readonly agent: CodexCliAgent | KiroCliAgent;
   private readonly commitManager: CommitManager;
 
-  constructor(private readonly db: Db, private readonly dataRoot: string, agent?: CodexCliAgent, commitManager?: CommitManager) {
+  constructor(private readonly db: Db, private readonly dataRoot: string, agent?: CodexCliAgent | KiroCliAgent, commitManager?: CommitManager) {
     this.tasks = new CodeTaskRepository(db);
     this.reviews = new ReviewRepository(db);
     this.commits = new CommitRepository(db);
@@ -167,7 +167,7 @@ export class CodeTaskService {
       runId: row.run_id,
       taskId,
       kind: 'code-repair',
-      agentName: 'CodexCliAgent',
+      agentName: this.agent instanceof KiroCliAgent ? 'KiroCliAgent' : 'CodexCliAgent',
       policy: DEFAULT_CODE_REPAIR_POLICY,
       dataRoot: this.dataRoot,
     });

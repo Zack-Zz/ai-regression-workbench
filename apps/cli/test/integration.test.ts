@@ -538,20 +538,23 @@ describe('API contract: all documented endpoints exist', () => {
     expect(Array.isArray(d.diagnosticFetches)).toBe(true);
   });
 
-  it('GET /runs/:runId/testcases/:testcaseId/trace returns null data for unknown testcase', async () => {
+  it('GET /runs/:runId/testcases/:testcaseId/trace returns unavailableReason for unknown testcase', async () => {
     const runId = seedRun();
     const r = res();
     await router.handle(req('GET', `/runs/${runId}/testcases/no-tc/trace`), r.res);
     expect(r.status()).toBe(200);
-    expect(r.body().data).toBeNull();
+    // Now returns a degraded detail with unavailableReason instead of null
+    expect(r.body().data).not.toBeNull();
+    expect((r.body().data as { unavailableReason?: string }).unavailableReason).toBeTruthy();
   });
 
-  it('GET /runs/:runId/testcases/:testcaseId/logs returns null data for unknown testcase', async () => {
+  it('GET /runs/:runId/testcases/:testcaseId/logs returns unavailableReason for unknown testcase', async () => {
     const runId = seedRun();
     const r = res();
     await router.handle(req('GET', `/runs/${runId}/testcases/no-tc/logs`), r.res);
     expect(r.status()).toBe(200);
-    expect(r.body().data).toBeNull();
+    expect(r.body().data).not.toBeNull();
+    expect((r.body().data as { unavailableReason?: string }).unavailableReason).toBeTruthy();
   });
 
   it('GET /trace triggers fetchDiagnostics and writes trace-summary.json when provider returns data', async () => {

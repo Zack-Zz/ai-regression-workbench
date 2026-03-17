@@ -68,7 +68,12 @@ export function FailureReportPage(): React.ReactElement {
         {trace.loading && <Loading />}
         {trace.error && <ErrorBanner message={trace.error} />}
         {!trace.loading && !trace.data && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无 trace 数据</span>}
-        {trace.data && (
+        {trace.data && trace.data.unavailableReason && (
+          <div style={{ color: '#b45309', fontSize: '0.9em', padding: '0.5rem', background: '#fffbeb', borderRadius: 4, border: '1px solid #fde68a' }}>
+            ⚠ {trace.data.unavailableReason}
+          </div>
+        )}
+        {trace.data && !trace.data.unavailableReason && (
           <>
             <KV label="Trace ID" value={trace.data.summary.traceId} />
             <KV label="有错误" value={trace.data.summary.hasError ? '是' : '否'} />
@@ -82,7 +87,12 @@ export function FailureReportPage(): React.ReactElement {
         {logs.loading && <Loading />}
         {logs.error && <ErrorBanner message={logs.error} />}
         {!logs.loading && !logs.data && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无日志数据</span>}
-        {logs.data && (
+        {logs.data && logs.data.unavailableReason && (
+          <div style={{ color: '#b45309', fontSize: '0.9em', padding: '0.5rem', background: '#fffbeb', borderRadius: 4, border: '1px solid #fde68a' }}>
+            ⚠ {logs.data.unavailableReason}
+          </div>
+        )}
+        {logs.data && !logs.data.unavailableReason && (
           <>
             <KV label="命中" value={logs.data.summary.matched ? '是' : '否'} />
             {logs.data.summary.rawLink && <KV label="原始链接" value={<a href={logs.data.summary.rawLink} target="_blank" rel="noreferrer">查看</a>} />}

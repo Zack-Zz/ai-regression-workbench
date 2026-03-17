@@ -157,6 +157,7 @@ export interface PersonalSettings {
     persistAsCandidateTests?: boolean;
   };
   codeAgent: {
+    engine: 'codex' | 'kiro';
     defaultApprovalRequired: boolean;
     allowedWriteScopes: string[];
     defaultVerifyCommands: string[];

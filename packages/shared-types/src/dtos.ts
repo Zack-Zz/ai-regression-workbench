@@ -390,11 +390,13 @@ export interface LogProvider {
 export interface TraceDetail {
   summary: TraceSummary;
   fetchedAt: string;
+  unavailableReason?: string;
 }
 
 export interface LogDetail {
   summary: LogSummary;
   fetchedAt: string;
+  unavailableReason?: string;
 }
 
 export interface AnalysisDetail {
