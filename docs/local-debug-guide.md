@@ -28,6 +28,13 @@
 - Linux：`apt install build-essential python3`
 - Windows：安装 Visual Studio Build Tools
 
+> macOS 上如果已安装完整 Xcode，执行 `xcode-select --install` 会提示已安装，直接跳过即可。
+
+编译失败时手动重试：
+```bash
+pnpm rebuild better-sqlite3
+```
+
 ---
 
 ## 2. 打包（构建产物）
