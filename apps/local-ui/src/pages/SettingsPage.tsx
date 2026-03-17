@@ -128,9 +128,51 @@ export function SettingsPage(): React.ReactElement {
       </SettingsSection>
 
       <SettingsSection title={t('settings.ai')}>
-        <SettingRow label={t('settings.field.provider')} value={String(val('ai', 'provider'))} onChange={v => { set('ai', 'provider', v); }} />
-        <SettingRow label={t('settings.field.model')} value={String(val('ai', 'model'))} onChange={v => { set('ai', 'model', v); }} description={t('settings.field.model.desc')} />
-        <SettingRow label={t('settings.field.apiKeyEnvVar')} value={val('ai', 'apiKeyEnvVar') as string | undefined ?? ''} onChange={v => { set('ai', 'apiKeyEnvVar', v); }} description={t('settings.field.apiKeyEnvVar.desc')} />
+        {/* Active provider selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9em' }}>
+          <div style={{ minWidth: 220, fontWeight: 500 }}>{t('settings.field.activeProvider')}</div>
+          <select
+            value={String(val('ai', 'activeProvider'))}
+            onChange={e => { set('ai', 'activeProvider', e.target.value); }}
+            style={{ flex: 1, padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }}
+          >
+            {Object.keys((v.ai?.providers ?? {})).map(k => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Per-provider config */}
+        {Object.entries(v.ai?.providers ?? {}).map(([providerKey, providerCfg]) => {
+          const patchedProviders = (patch.ai as { providers?: Record<string, unknown> } | undefined)?.providers ?? {};
+          const patchedCfg = (patchedProviders[providerKey] as Record<string, unknown> | undefined) ?? {};
+          const getField = (field: string): string => String(patchedCfg[field] ?? (providerCfg as Record<string, unknown>)[field] ?? '');
+          const setField = (field: string, value: string): void => {
+            setPatch(p => ({
+              ...p,
+              ai: {
+                ...(p.ai ?? {}),
+                providers: {
+                  ...((p.ai as { providers?: Record<string, unknown> } | undefined)?.providers ?? {}),
+                  [providerKey]: {
+                    ...(((p.ai as { providers?: Record<string, unknown> } | undefined)?.providers?.[providerKey] as Record<string, unknown> | undefined) ?? {}),
+                    [field]: value,
+                  },
+                },
+              },
+            }) as DeepPartial<PersonalSettings>);
+          };
+          return (
+            <div key={providerKey} style={{ border: '1px solid #eee', borderRadius: 6, padding: '0.75rem', marginTop: '0.5rem' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#555' }}>{providerKey}</div>
+              <SettingRow label={t('settings.field.baseUrl')} value={getField('baseUrl')} onChange={v => { setField('baseUrl', v); }} />
+              <SettingRow label={t('settings.field.model')} value={getField('model')} onChange={v => { setField('model', v); }} description={t('settings.field.model.desc')} />
+              <SettingRow label={t('settings.field.apiKey')} value={getField('apiKey')} onChange={v => { setField('apiKey', v); }} type="password" description={t('settings.field.apiKey.desc')} />
+              <SettingRow label={t('settings.field.apiKeyEnvVar')} value={getField('apiKeyEnvVar')} onChange={v => { setField('apiKeyEnvVar', v); }} description={t('settings.field.apiKeyEnvVar.desc')} />
+            </div>
+          );
+        })}
+
         <SettingRow label={t('settings.approvalRequired')} value={String(val('codeAgent', 'defaultApprovalRequired'))} onChange={v => { set('codeAgent', 'defaultApprovalRequired', v === 'true'); }} description={t('settings.approvalRequired')} />
       </SettingsSection>
 
@@ -150,14 +192,14 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
-function SettingRow({ label, value, onChange, description }: { label: string; value: string; onChange: (v: string) => void; description?: string }): React.ReactElement {
+function SettingRow({ label, value, onChange, description, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; description?: string; type?: string }): React.ReactElement {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9em' }}>
       <div style={{ minWidth: 220 }}>
         <div style={{ fontWeight: 500 }}>{label}</div>
         {description && <div style={{ color: '#888', fontSize: '0.8em' }}>{description}</div>}
       </div>
-      <input value={value} onChange={e => { onChange(e.target.value); }} style={{ flex: 1, padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
+      <input type={type} value={value} onChange={e => { onChange(e.target.value); }} style={{ flex: 1, padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
     </div>
   );
 }

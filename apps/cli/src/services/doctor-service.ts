@@ -146,13 +146,15 @@ export class DoctorService {
           : { status: 'warn', message: `${p} — no .git directory found` };
       }),
 
-      // AI API key env var
-      check('ai.apiKeyEnvVar', () => {
-        const envVar = v.ai.apiKeyEnvVar;
-        if (!envVar) return { status: 'warn', message: 'ai.apiKeyEnvVar not configured' };
+      // AI API key check (direct key or env var, per active provider)
+      check('ai.apiKey', () => {
+        const providerCfg = v.ai.providers[v.ai.activeProvider];
+        if (!providerCfg) return { status: 'warn', message: `ai.activeProvider '${v.ai.activeProvider}' not found in providers` };
+        if (providerCfg.apiKey) return { status: 'ok', message: 'API key configured directly' };
+        const envVar = providerCfg.apiKeyEnvVar;
+        if (!envVar) return { status: 'warn', message: 'No apiKey or apiKeyEnvVar configured for active provider' };
         const val = process.env[envVar];
         if (!val) return { status: 'warn', message: `$${envVar} is not set` };
-        // Warn if key looks like it might be stored in plain text in config
         return { status: 'ok', message: `$${envVar} is set` };
       }),
 

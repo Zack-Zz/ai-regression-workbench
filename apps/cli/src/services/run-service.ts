@@ -227,7 +227,7 @@ export class RunService {
         }
       };
       try {
-        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe);
+        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, this.opts.dataRoot);
       } catch { /* degrade gracefully */ }
     } else {
       await new Promise<void>(r => setTimeout(r, 800));

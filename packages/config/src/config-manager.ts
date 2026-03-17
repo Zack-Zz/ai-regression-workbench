@@ -48,7 +48,7 @@ export class ConfigManager implements SettingsService {
   }
 
   getSettings(): Promise<SettingsSnapshot> {
-    return Promise.resolve(this.snapshot);
+    return Promise.resolve(maskApiKeys(this.snapshot));
   }
 
   /** Synchronous access to current settings values — use only at startup. */
@@ -85,7 +85,9 @@ export class ConfigManager implements SettingsService {
       return { success: false, message: validation.errors.join('; ') };
     }
 
-    const merged = this.mergeIntoSettings(this.snapshot.values, input.patch);
+    // Strip masked placeholders from patch before merging so stored keys are preserved
+    const cleanPatch = stripMaskedApiKeys(input.patch);
+    const merged = this.mergeIntoSettings(this.snapshot.values, cleanPatch);
     const nextVersion = this.snapshot.version + 1;
     const updatedAt = new Date().toISOString();
 
@@ -150,4 +152,32 @@ function deepMergeSettings(
 /** Convenience factory that creates a ConfigManager with default config path. */
 export function createConfigManager(configPath: string): ConfigManager {
   return new ConfigManager(configPath);
+}
+
+const MASKED = '**masked**';
+
+/** Replace all providers[*].apiKey values with MASKED before returning to clients. */
+function maskApiKeys(snapshot: SettingsSnapshot): SettingsSnapshot {
+  const ai = snapshot.values.ai;
+  if (!ai?.providers) return snapshot;
+  const maskedProviders: typeof ai.providers = {};
+  for (const [k, p] of Object.entries(ai.providers)) {
+    maskedProviders[k] = p.apiKey ? { ...p, apiKey: MASKED } : { ...p };
+  }
+  return { ...snapshot, values: { ...snapshot.values, ai: { ...ai, providers: maskedProviders } } };
+}
+
+/** Remove apiKey entries that equal MASKED so stored keys are not overwritten. */
+function stripMaskedApiKeys(patch: Partial<PersonalSettings>): Partial<PersonalSettings> {
+  if (!patch.ai?.providers) return patch;
+  const cleanProviders: typeof patch.ai.providers = {};
+  for (const [k, p] of Object.entries(patch.ai.providers)) {
+    if (p.apiKey === MASKED) {
+      const { apiKey: _drop, ...rest } = p;
+      cleanProviders[k] = rest;
+    } else {
+      cleanProviders[k] = { ...p };
+    }
+  }
+  return { ...patch, ai: { ...patch.ai, providers: cleanProviders } };
 }

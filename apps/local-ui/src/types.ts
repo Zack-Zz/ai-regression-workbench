@@ -175,7 +175,19 @@ export interface PersonalSettings {
   diagnostics: { correlationKeys: { responseHeaders: string[]; responseBodyPaths: string[]; logFields: string[]; caseInsensitiveHeaderMatch: boolean; timeWindowSeconds: number } };
   trace: { provider: string; endpoint: string };
   logs: { provider: string; endpoint: string; defaultLimit: number; redactFields: string[] };
-  ai: { provider: string; model: string; enabled: boolean; apiKeyEnvVar?: string };
+  ai: {
+    activeProvider: string;
+    enabled: boolean;
+    promptTemplatesDir?: string;
+    providers: {
+      [key: string]: {
+        baseUrl: string;
+        model: string;
+        apiKey?: string;
+        apiKeyEnvVar?: string;
+      };
+    };
+  };
   codeAgent: { defaultApprovalRequired: boolean; allowedWriteScopes: string[]; defaultVerifyCommands: string[]; allowReviewOnVerifyFailure?: boolean };
   report: { port: number };
   ui?: { locale?: 'zh-CN' | 'en-US' };

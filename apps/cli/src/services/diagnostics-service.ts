@@ -9,6 +9,7 @@ import type {
   TestcaseExecutionProfile, TraceDetail, LogDetail, TraceProvider, LogProvider,
   ConfigObserver, SettingsSnapshot,
 } from '@zarb/shared-types';
+import type { AIEngine } from '@zarb/ai-engine';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -31,6 +32,7 @@ export class DiagnosticsService implements ConfigObserver {
     private readonly dataRoot: string,
     traceProvider?: TraceProvider,
     logProvider?: LogProvider,
+    private readonly aiEngine?: AIEngine,
   ) {
     this.results = new TestResultRepository(db);
     this.correlations = new CorrelationContextRepository(db);
@@ -280,7 +282,25 @@ export class DiagnosticsService implements ConfigObserver {
     } catch { /* non-fatal */ }
   }
 
-  retryAnalysis(_runId: string, _testcaseId: string): ActionResult {
+  retryAnalysis(runId: string, testcaseId: string): ActionResult {
+    if (!this.aiEngine) {
+      // Degrade gracefully — no AI engine configured, but don't fail the request
+      return { success: true, message: 'Analysis retry queued (no AI engine configured)', nextSuggestedAction: 'poll-analysis' };
+    }
+    const result = this.results.findByTestcase(runId, testcaseId);
+    const engine = this.aiEngine;
+    void (async () => {
+      try {
+        const analysis = await engine.analyzeFailure({
+          runId,
+          testcaseId,
+          testcaseName: testcaseId,
+          ...(result?.error_message ? { errorMessage: result.error_message } : {}),
+          ...(result?.error_type ? { errorType: result.error_type } : {}),
+        });
+        await engine.createCodeTaskDraft(analysis);
+      } catch { /* degrade gracefully */ }
+    })();
     return { success: true, message: 'Analysis retry queued', nextSuggestedAction: 'poll-analysis' };
   }
 }

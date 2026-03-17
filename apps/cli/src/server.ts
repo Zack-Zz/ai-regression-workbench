@@ -34,8 +34,15 @@ export function createAppServer(opts: ServerOptions) {
   const aiProvider = createAIProvider(cfg.ai);
   const aiEngine = new LocalAIEngine(aiProvider, opts.db, dataRoot);
 
+  // Hot-swap AI provider when user changes settings
+  settingsSvc.registerObserver({
+    onConfigUpdated: async (snapshot) => {
+      aiEngine.setProvider(createAIProvider(snapshot.values.ai));
+    },
+  });
+
   const runSvc = new RunService(opts.db, { dataRoot, runner, aiEngine, aiProvider });
-  const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider);
+  const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider, aiEngine);
   settingsSvc.registerObserver(diagSvc);
   const taskSvc = new CodeTaskService(opts.db, dataRoot);
   const doctorSvc = new DoctorService(opts.db, settingsSvc);

@@ -136,11 +136,17 @@ export interface PersonalSettings {
     redactFields: string[];
   };
   ai: {
-    provider: string;
-    model: string;
+    activeProvider: string;
     enabled: boolean;
     promptTemplatesDir?: string;
-    apiKeyEnvVar?: string;
+    providers: {
+      [key: string]: {
+        baseUrl: string;
+        model: string;
+        apiKey?: string;
+        apiKeyEnvVar?: string;
+      };
+    };
   };
   exploration?: {
     defaultMode?: RunMode;

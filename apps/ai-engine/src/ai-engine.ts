@@ -10,7 +10,7 @@ import type {
   CodeTaskDraft,
 } from '@zarb/shared-types';
 import type { Db } from '@zarb/storage';
-import { AnalysisRepository, GeneratedTestRepository, CodeTaskDraftRepository, generatedTestPath } from '@zarb/storage';
+import { AnalysisRepository, GeneratedTestRepository, CodeTaskDraftRepository, RunRepository, generatedTestPath } from '@zarb/storage';
 import { trimContext } from './context-trimmer.js';
 import { renderTemplate, TEMPLATE_VERSIONS } from './prompt-loader.js';
 
@@ -19,19 +19,20 @@ export interface AIProvider {
 }
 
 /**
- * OpenAIProvider — calls OpenAI chat completions API.
+ * OpenAICompatibleProvider — works with any OpenAI-compatible API (OpenAI, DeepSeek, etc.).
  * Falls back gracefully: if API key is missing or call fails, returns empty string.
  */
-export class OpenAIProvider implements AIProvider {
+export class OpenAICompatibleProvider implements AIProvider {
   constructor(
+    private readonly baseUrl: string,
     private readonly apiKey: string,
-    private readonly model: string = 'gpt-4o',
+    private readonly model: string,
   ) {}
 
   async complete(prompt: string): Promise<string> {
     if (!this.apiKey) return '';
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
         body: JSON.stringify({
@@ -50,6 +51,13 @@ export class OpenAIProvider implements AIProvider {
   }
 }
 
+/** @deprecated Use OpenAICompatibleProvider directly. Kept for backward compatibility. */
+export class OpenAIProvider extends OpenAICompatibleProvider {
+  constructor(apiKey: string, model = 'gpt-4o') {
+    super('https://api.openai.com/v1', apiKey, model);
+  }
+}
+
 /**
  * NullAIProvider — used when no AI provider is configured.
  * Returns empty string so callers degrade gracefully.
@@ -59,14 +67,20 @@ export class NullAIProvider implements AIProvider {
 }
 
 /**
- * createAIProvider — factory from settings config.
+ * createAIProvider — factory from settings ai config.
  */
-export function createAIProvider(config: { provider: string; model?: string; apiKeyEnvVar?: string }): AIProvider {
-  if (config.provider === 'openai') {
-    const apiKey = config.apiKeyEnvVar ? (process.env[config.apiKeyEnvVar] ?? '') : '';
-    return new OpenAIProvider(apiKey, config.model ?? 'gpt-4o');
-  }
-  return new NullAIProvider();
+export function createAIProvider(config: {
+  activeProvider: string;
+  enabled: boolean;
+  providers: { [key: string]: { baseUrl: string; model: string; apiKey?: string; apiKeyEnvVar?: string } };
+}): AIProvider {
+  if (!config.enabled) return new NullAIProvider();
+  const providerCfg = config.providers[config.activeProvider];
+  if (!providerCfg) return new NullAIProvider();
+  const apiKey = (providerCfg.apiKey && providerCfg.apiKey !== '**masked**')
+    ? providerCfg.apiKey
+    : (providerCfg.apiKeyEnvVar ? (process.env[providerCfg.apiKeyEnvVar] ?? '') : '');
+  return new OpenAICompatibleProvider(providerCfg.baseUrl, apiKey, providerCfg.model);
 }
 export interface AIEngine {
   analyzeFailure(input: FailureContext): Promise<FailureAnalysis>;
@@ -85,15 +99,22 @@ export class LocalAIEngine implements AIEngine {
   private readonly analysisRepo: AnalysisRepository;
   private readonly generatedTestRepo: GeneratedTestRepository;
   private readonly codeTaskDraftRepo: CodeTaskDraftRepository;
+  private readonly runRepo: RunRepository;
 
   constructor(
-    private readonly provider: AIProvider,
+    private provider: AIProvider,
     private readonly db: Db,
     private readonly dataRoot: string,
   ) {
     this.analysisRepo = new AnalysisRepository(db);
     this.generatedTestRepo = new GeneratedTestRepository(db);
     this.codeTaskDraftRepo = new CodeTaskDraftRepository(db);
+    this.runRepo = new RunRepository(db);
+  }
+
+  /** Hot-swap the underlying AI provider (e.g. when user switches in Settings). */
+  setProvider(provider: AIProvider): void {
+    this.provider = provider;
   }
 
   async analyzeFailure(input: FailureContext): Promise<FailureAnalysis> {
@@ -234,7 +255,7 @@ export class LocalAIEngine implements AIEngine {
       analysisId: input.id,
       goal: parsed.goal ?? '',
       target: parsed.target ?? 'app',
-      workspacePath: '',
+      workspacePath: this.runRepo.findById(input.runId)?.workspace_path ?? '',
       scopePaths: parsed.scopePaths ?? [],
       constraints: parsed.constraints ?? [],
       verificationCommands: parsed.verificationCommands ?? [],

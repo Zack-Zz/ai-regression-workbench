@@ -44,10 +44,20 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
     redactFields: ['authorization', 'cookie', 'token'],
   },
   ai: {
-    provider: 'openai',
-    model: 'gpt-4o',
+    activeProvider: 'openai',
     enabled: true,
-    apiKeyEnvVar: 'OPENAI_API_KEY',
+    providers: {
+      openai: {
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+        apiKeyEnvVar: 'OPENAI_API_KEY',
+      },
+      deepseek: {
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
+        apiKeyEnvVar: 'DEEPSEEK_API_KEY',
+      },
+    },
   },
   exploration: {
     defaultMode: 'hybrid',

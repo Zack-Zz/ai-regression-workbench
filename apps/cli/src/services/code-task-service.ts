@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Db, CodeTaskRow } from '@zarb/storage';
-import { CodeTaskRepository, ReviewRepository, CommitRepository, CodeTaskDraftRepository } from '@zarb/storage';
+import { CodeTaskRepository, ReviewRepository, CommitRepository, CodeTaskDraftRepository, AnalysisRepository } from '@zarb/storage';
 import { HarnessSessionManager, ArtifactWriter, CodexCliAgent, DEFAULT_CODE_REPAIR_POLICY } from '@zarb/agent-harness';
 import { CommitManager } from '@zarb/review-manager';
 import type {
@@ -32,6 +32,7 @@ export class CodeTaskService {
   private readonly reviews: ReviewRepository;
   private readonly commits: CommitRepository;
   private readonly drafts: CodeTaskDraftRepository;
+  private readonly analyses: AnalysisRepository;
   private readonly sessionManager: HarnessSessionManager;
   private readonly artifactWriter: ArtifactWriter;
   private readonly agent: CodexCliAgent;
@@ -42,6 +43,7 @@ export class CodeTaskService {
     this.reviews = new ReviewRepository(db);
     this.commits = new CommitRepository(db);
     this.drafts = new CodeTaskDraftRepository(db);
+    this.analyses = new AnalysisRepository(db);
     this.sessionManager = new HarnessSessionManager(db);
     this.artifactWriter = new ArtifactWriter(dataRoot, db);
     this.agent = agent ?? new CodexCliAgent();
@@ -59,7 +61,11 @@ export class CodeTaskService {
 
   listDrafts(runId: string, testcaseId?: string): import('@zarb/storage').CodeTaskDraftRow[] {
     const all = this.drafts.findByRun(runId);
-    return testcaseId ? all.filter(d => d.analysis_id?.includes(testcaseId) ?? true) : all;
+    if (!testcaseId) return all;
+    // Filter by testcaseId via the analysis record that links draft → testcase
+    const analysis = this.analyses.findByTestcase(runId, testcaseId);
+    if (!analysis) return [];
+    return all.filter(d => d.analysis_id === analysis.id);
   }
 
   promoteToCodeTask(draftId: string): ActionResult & { taskId?: string } {

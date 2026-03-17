@@ -137,7 +137,8 @@ export function buildRouter(
   });
 
   router.post('/runs/:runId/testcases/:testcaseId/analysis/retry', (_req, res, params) => {
-    actionOk(res, diagSvc.retryAnalysis(params['runId'] ?? '', params['testcaseId'] ?? '').message, { nextSuggestedAction: 'poll-analysis' });
+    const result = diagSvc.retryAnalysis(params['runId'] ?? '', params['testcaseId'] ?? '');
+    actionOk(res, result.message, { nextSuggestedAction: 'poll-analysis' });
   });
 
   router.get('/runs/:runId/testcases/:testcaseId/drafts', (_req, res, params) => {
