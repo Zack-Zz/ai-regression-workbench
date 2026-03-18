@@ -37,6 +37,8 @@ export interface ExplorationConfig {
   focusAreas?: Array<'smoke' | 'navigation' | 'forms' | 'console-errors' | 'network-errors' | 'auth'>;
   persistAsCandidateTests?: boolean;
   credentialId?: string;
+  /** Login strategy. Default 'none'. */
+  loginStrategy?: 'none' | 'static' | 'ai';
 }
 
 export interface RunSummary {

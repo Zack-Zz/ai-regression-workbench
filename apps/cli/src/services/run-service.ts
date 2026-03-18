@@ -312,8 +312,13 @@ export class RunService {
         const exploreResult = await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, dataRoot, () => { this.emitRun(runId, 'run.step.updated'); });
         this.emitRun(runId, 'run.step.updated');
         if (exploreResult.llmError) {
-          log.warn('exploration ended with LLM error', { runId, detail: exploreResult.llmError });
-          this.runs.update(runId, { summary: 'EXPLORATION_LLM_ERROR', updatedAt: new Date().toISOString() });
+          const summaryCode = exploreResult.llmError === 'LOGIN_FAILED' ? 'LOGIN_FAILED'
+            : exploreResult.llmError === 'LOGIN_AI_FAILED' ? 'LOGIN_AI_FAILED'
+            : exploreResult.llmError === 'LOGIN_AI_STEP_EXCEEDED' ? 'LOGIN_AI_STEP_EXCEEDED'
+            : exploreResult.llmError === 'AUTH_RETRY_EXCEEDED' ? 'AUTH_RETRY_EXCEEDED'
+            : 'EXPLORATION_LLM_ERROR';
+          log.warn('exploration ended early', { runId, reason: exploreResult.llmError });
+          this.runs.update(runId, { summary: summaryCode, updatedAt: new Date().toISOString() });
         }
       } catch { /* degrade gracefully */ }
     } else {

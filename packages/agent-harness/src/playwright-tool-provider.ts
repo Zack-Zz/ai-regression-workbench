@@ -160,6 +160,7 @@ export class PlaywrightToolProvider {
    * - cookie: inject cookies directly into context
    * - token: set extra HTTP headers on context
    * - userpass: navigate to loginUrl and fill the form
+   * After applying, verifies login succeeded (throws LoginFailedError if not).
    */
   async applyCredential(cred: SiteCredentialRow, baseUrl: string): Promise<void> {
     const ctx = this.context;
@@ -171,7 +172,6 @@ export class PlaywrightToolProvider {
         name: string; value: string; domain?: string; path?: string;
         expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: 'Strict' | 'Lax' | 'None';
       }>;
-      // Fill in domain from baseUrl if missing
       const domain = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
       await ctx.addCookies(cookies.map(c => ({ ...c, domain: c.domain ?? domain, path: c.path ?? '/' })));
       return;
@@ -184,7 +184,8 @@ export class PlaywrightToolProvider {
     }
 
     if (cred.auth_type === 'userpass' && cred.login_url && cred.username && cred.password) {
-      await page.goto(cred.login_url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const loginUrl = cred.login_url;
+      await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       const userSel = cred.username_selector ?? 'input[type="text"], input[name="username"], input[name="email"]';
       const passSel = cred.password_selector ?? 'input[type="password"]';
       await page.fill(userSel, cred.username, { timeout: 10_000 });
@@ -192,13 +193,7 @@ export class PlaywrightToolProvider {
 
       let submitSel = cred.submit_selector;
       if (!submitSel) {
-        // Try selectors in priority order, pick first visible one
-        const candidates = [
-          'button[type="submit"]',
-          'input[type="submit"]',
-          'button[type="button"]',
-          'button',
-        ];
+        const candidates = ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]', 'button'];
         for (const sel of candidates) {
           const el = page.locator(sel).first();
           if (await el.isVisible({ timeout: 1000 }).catch(() => false)) { submitSel = sel; break; }
@@ -209,7 +204,60 @@ export class PlaywrightToolProvider {
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined),
         page.click(submitSel, { timeout: 10_000 }),
       ]);
+
+      await this.verifyLoginSuccess(loginUrl);
     }
+  }
+
+  /** Verify the page is no longer the login page. Throws if login appears to have failed. */
+  private async verifyLoginSuccess(loginUrl: string): Promise<void> {
+    const page = this.requirePage();
+    const currentUrl = page.url();
+    const isStillLoginPage = currentUrl === loginUrl || isLoginUrl(currentUrl);
+    if (isStillLoginPage) {
+      throw new LoginFailedError(`Login verification failed: still on login page (${currentUrl})`);
+    }
+    // Check for password input still visible — indicates login form still present
+    const hasPasswordInput = await page.locator('input[type="password"]').isVisible({ timeout: 1000 }).catch(() => false);
+    if (hasPasswordInput) {
+      throw new LoginFailedError(`Login verification failed: password input still visible on ${currentUrl}`);
+    }
+  }
+
+  /** Collect a structured DOM snapshot for AI login decision-making. */
+  async collectDomSnapshot(): Promise<DomSnapshot> {
+    const page = this.requirePage();
+    const url = page.url();
+    const title = await page.title().catch(() => '');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const getLabelText = (el: any): string => {
+        const id = el.getAttribute('id');
+        if (id) { const lbl = doc.querySelector(`label[for="${id as string}"]`); if (lbl) return (lbl.textContent ?? '').trim(); }
+        const parent = el.closest('label');
+        return parent ? (parent.textContent ?? '').trim().replace(el.value ?? '', '').trim() : '';
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const inputs = Array.from(doc.querySelectorAll('input:not([type=hidden]):not([type=submit])')).slice(0, 20).map((el: any, i: number) => {
+        const id = el.getAttribute('id') as string | null;
+        const name = el.getAttribute('name') as string | null;
+        return { type: (el.getAttribute('type') ?? 'text') as string, name: name ?? undefined, id: id ?? undefined, placeholder: (el.getAttribute('placeholder') as string | null) ?? undefined, label: getLabelText(el) || undefined, selector: id ? `#${id}` : name ? `input[name="${name}"]` : `input:nth-of-type(${i + 1})` };
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const buttons = Array.from(doc.querySelectorAll('button, input[type=submit]')).slice(0, 10).map((el: any, i: number) => {
+        const id = el.getAttribute('id') as string | null;
+        return { text: ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim(), type: (el.getAttribute('type') as string | null) ?? undefined, selector: id ? `#${id}` : `button:nth-of-type(${i + 1})` };
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const forms = Array.from(doc.querySelectorAll('form')).slice(0, 5).map((f: any) => ({ action: (f.getAttribute('action') as string | null) ?? undefined, method: (f.getAttribute('method') as string | null) ?? undefined, inputCount: f.querySelectorAll('input').length as number }));
+      return { inputs, buttons, forms };
+    }).catch(() => ({ inputs: [], buttons: [], forms: [] }));
+
+    return { url, title, ...(raw as { inputs: DomSnapshot['inputs']; buttons: DomSnapshot['buttons']; forms: DomSnapshot['forms'] }) };
   }
 
   /** Write collected network entries as NDJSON to the given path. */
@@ -230,6 +278,11 @@ export class PlaywrightToolProvider {
   private requirePage(): Page {
     if (!this.page) throw new Error('PlaywrightToolProvider not launched');
     return this.page;
+  }
+
+  /** Returns the active page, or throws if not launched. */
+  getPage(): Page {
+    return this.requirePage();
   }
 
   private async collectState(page: Page, url: string): Promise<PageProbe> {
@@ -286,5 +339,32 @@ export class PlaywrightToolProvider {
         page.off('console', onConsole);
       }
     };
+  }
+}
+
+export interface DomSnapshot {
+  url: string;
+  title: string;
+  inputs: Array<{ type: string; name?: string; id?: string; placeholder?: string; label?: string; selector: string }>;
+  buttons: Array<{ text: string; type?: string; selector: string }>;
+  forms: Array<{ action?: string; method?: string; inputCount: number }>;
+}
+
+/** Thrown when login verification fails after applyCredential(). */
+export class LoginFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LoginFailedError';
+  }
+}
+
+const LOGIN_URL_PATTERNS = ['/login', '/signin', '/sign-in', '/auth', '/sso', '/account/login'];
+
+export function isLoginUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return LOGIN_URL_PATTERNS.some(p => path.includes(p));
+  } catch {
+    return false;
   }
 }

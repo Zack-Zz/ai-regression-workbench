@@ -401,8 +401,209 @@ Analyze the root cause and suggest a fix.
 
 ---
 
-## 8. 安全约束
+## 9. 登录策略设计
+
+### 9.1 概述
+
+登录分两种策略，通过 `ExplorationConfig.loginStrategy` 控制：
+
+| 策略 | 适用场景 | 实现方式 |
+|------|---------|---------|
+| `static` | 测试集场景，凭据已知 | `applyCredential()` 预置认证，exploration 前完成 |
+| `ai` | AI 探索场景，页面结构未知 | AI 识别登录表单，交互式完成登录 |
+| `none`（默认） | 无需登录的公开站点 | 跳过认证 |
+
+```ts
+interface ExplorationConfig {
+  // ...existing fields...
+  loginStrategy?: 'none' | 'static' | 'ai';  // 默认 'none'
+  credentialId?: string;  // static/ai 模式均需要
+}
+```
+
+---
+
+### 9.2 静态凭据登录（static）
+
+**流程**：
+
+```
+PlaywrightToolProvider.launch()
+  → applyCredential(cred, baseUrl)
+       ├─ cookie 模式：ctx.addCookies()
+       ├─ token 模式：ctx.setExtraHTTPHeaders()
+       └─ userpass 模式：
+            navigate(loginUrl)
+            fill(usernameSelector, username)
+            fill(passwordSelector, password)
+            click(submitSelector)
+            waitForNavigation()
+  → verifyLoginSuccess()   ← 新增
+       ├─ 检查当前 URL 不再是 loginUrl
+       ├─ 检查页面不含登录表单特征（input[type=password]）
+       └─ 失败则抛出 LoginFailedError，run fail fast
+```
+
+**改动点**：
+- `applyCredential()` 末尾新增 `verifyLoginSuccess()` 验证
+- 验证失败时记录步骤日志 `status: 'error'`，run summary 写 `LOGIN_FAILED`
+- 密码字段在步骤日志中替换为 `[REDACTED]`
+
+---
+
+### 9.3 AI 驱动交互式登录（ai）
+
+**核心问题**：AI 需要"看到"页面才能识别登录表单。
+
+**方案：DOM 快照（不用截图）**
+
+用 `page.evaluate()` 提取页面关键交互元素，结构化成 JSON 传给 LLM：
+
+```ts
+interface DomSnapshot {
+  url: string;
+  title: string;
+  inputs: Array<{
+    type: string;        // text / password / email / hidden
+    name?: string;
+    id?: string;
+    placeholder?: string;
+    label?: string;      // 关联 <label> 的文字
+  }>;
+  buttons: Array<{
+    text: string;
+    type?: string;       // submit / button
+    selector: string;    // 用于 click
+  }>;
+  links: Array<{
+    text: string;
+    href: string;
+  }>;
+  forms: Array<{
+    action?: string;
+    method?: string;
+    inputCount: number;
+  }>;
+}
+```
+
+**AI 登录流程**：
+
+```
+navigate(startUrl 或 loginUrl)
+  → collectDomSnapshot()
+  → LLM 判断：当前页面是否是登录页？
+       ├─ 否：继续正常 exploration
+       └─ 是：
+            LLM 决策：fill username selector + value
+            fill(selector, username)
+            LLM 决策：fill password selector + value
+            fill(selector, password)
+            LLM 决策：click submit selector
+            click(selector)
+            waitForNavigation()
+            → verifyLoginSuccess()
+                 ├─ 成功：继续 exploration
+                 └─ 失败：记录 LOGIN_AI_FAILED，停止 exploration
+```
+
+**LLM Prompt 设计**：
+
+```
+You are an AI login agent. Analyze the page and decide the next action.
+
+Page: https://example.com/login (title: "用户登录")
+DOM snapshot:
+  inputs: [
+    { type: "email", name: "email", placeholder: "请输入邮箱" },
+    { type: "password", name: "password", placeholder: "请输入密码" }
+  ]
+  buttons: [
+    { text: "登录", type: "submit", selector: "button[type=submit]" }
+  ]
+
+Credentials available: username=<email>, password=<available>
+
+Respond with JSON only:
+{
+  "isLoginPage": true,
+  "action": "fill" | "click" | "done" | "skip",
+  "selector": "input[name=email]",
+  "value": "<username>",
+  "reasoning": "..."
+}
+```
+
+**多轮交互**：AI 登录是多轮的（fill username → fill password → click submit），
+每轮 LLM 返回一个 action，最多执行 `maxLoginSteps`（默认 10）步，
+超出则记录 `LOGIN_AI_STEP_EXCEEDED` 并停止。
+
+---
+
+### 9.4 认证失效重试（两种策略共用）
+
+exploration 过程中若检测到认证失效，自动重新执行登录流程：
+
+**失效检测条件**（满足任一）：
+- 当前页面 URL 包含 `/login`、`/signin`、`/auth`、`/sso` 等特征
+- 连续两步 network errors 中出现 401 或 403
+
+**重试规则**：
+- 30 分钟滑动窗口内超过 3 次 → 中断，summary 写 `AUTH_RETRY_EXCEEDED`
+- 重试时重新执行对应策略的登录流程（static 重新 `applyCredential`，ai 重新走 AI 登录）
+
+---
+
+### 9.5 步骤日志记录规范
+
+登录相关步骤统一记录到 `steps.jsonl`：
+
+| action | status | detail |
+|--------|--------|--------|
+| `login.start` | `pending` | 登录策略 + credentialId |
+| `login.fill` | `ok` | selector（value 替换为 `[REDACTED]`） |
+| `login.click` | `ok` | selector |
+| `login.verify` | `ok` / `error` | 验证结果 |
+| `login.retry` | `warn` | 第 N 次重试 |
+| `login.failed` | `error` | 失败原因 code |
+
+---
+
+### 9.6 Run Summary Code 扩展
+
+| Code | 含义 |
+|------|------|
+| `LOGIN_FAILED` | 静态凭据登录验证失败 |
+| `LOGIN_AI_FAILED` | AI 登录验证失败 |
+| `LOGIN_AI_STEP_EXCEEDED` | AI 登录步骤超出上限 |
+| `AUTH_RETRY_EXCEEDED` | 认证失效重试超出限制 |
+
+---
+
+### 9.7 实现阶段
+
+**Phase B1（静态凭据完善）**：
+1. `applyCredential()` 新增 `verifyLoginSuccess()` 验证
+2. 登录失败时 run fail fast，summary 写 `LOGIN_FAILED`
+3. 步骤日志记录登录过程（密码 REDACTED）
+
+**Phase B2（AI 交互式登录）**：
+1. `PlaywrightToolProvider` 新增 `collectDomSnapshot()` 方法
+2. 新增 `playwright.snapshot` tool（返回 `DomSnapshot`）
+3. `ExplorationAgent` 新增 `runAiLogin()` 多轮登录流程
+4. `ExplorationConfig` 新增 `loginStrategy` 字段
+5. UI 启动探索对话框新增登录策略选择
+
+**Phase B3（认证失效重试）**：
+1. exploration 主循环新增失效检测逻辑
+2. 实现 `AuthRetryState` 滑动窗口计数
+3. 超限时中断并记录 `AUTH_RETRY_EXCEEDED`
+
+---
+
+## 10. 安全约束
 
 - 凭据不写 DB，不写日志文件，只在内存中存活
 - `allowedHosts` 在 `ToolRegistry` 层强制执行，Agent 无法绕过
 - exploration 默认 `allowedWriteScopes: []`（只读）
+- AI 登录时密码字段在步骤日志中替换为 `[REDACTED]`，不传给 LLM
