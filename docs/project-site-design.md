@@ -137,7 +137,7 @@ ALTER TABLE test_runs ADD COLUMN site_id TEXT;
 按项目 ID 划分，避免不同项目数据串混：
 
 ```
-.ai-regression-workbench/data/
+.zarb/data/
   projects/
     <projectId>/           ← 使用 project ID，不用项目名
       runs/

@@ -94,7 +94,7 @@ type AutomationLevel = 'headless' | 'interactive';
 
 - `packages/test-assets/**`
 - `playwright/**`
-- `.ai-regression-workbench/data/generated-tests/**`
+- `.zarb/data/generated-tests/**`
 
 默认禁止修改业务代码目录。
 

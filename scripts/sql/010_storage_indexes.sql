@@ -1,6 +1,6 @@
 -- Storage index initialization script
 -- Usage:
---   sqlite3 ./.ai-regression-workbench/data/sqlite/app.db < scripts/sql/010_storage_indexes.sql
+--   sqlite3 ./.zarb/data/sqlite/app.db < scripts/sql/010_storage_indexes.sql
 
 BEGIN;
 

@@ -13,6 +13,9 @@ import type { Db } from '@zarb/storage';
 import { AnalysisRepository, GeneratedTestRepository, CodeTaskDraftRepository, RunRepository, generatedTestPath } from '@zarb/storage';
 import { trimContext } from './context-trimmer.js';
 import { renderTemplate, TEMPLATE_VERSIONS } from './prompt-loader.js';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('AIEngine');
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
@@ -46,11 +49,16 @@ export class OpenAICompatibleProvider implements AIProvider {
         }),
         signal: AbortSignal.timeout(60_000),
       });
-      if (!res.ok) return '';
-      const body = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+      if (!res.ok) {
+        log.warn('AI provider HTTP error', { model: this.model, status: res.status, baseUrl: this.baseUrl });
+        return '';
+      }
+      const body = await res.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      log.debug('AI provider response', { model: this.model, promptTokens: body.usage?.prompt_tokens, completionTokens: body.usage?.completion_tokens });
       return body.choices?.[0]?.message?.content ?? '';
-    } catch {
-      return '';
+    } catch (err) {
+      log.error('AI provider request failed', { model: this.model, error: String(err) });
+      throw err;
     }
   }
 }
@@ -88,6 +96,7 @@ export function createAIProvider(config: {
   return new OpenAICompatibleProvider(providerCfg.baseUrl, apiKey, providerCfg.model);
 }
 export interface AIEngine {
+  getProvider(): AIProvider;
   analyzeFailure(input: FailureContext): Promise<FailureAnalysis>;
   summarizeFindings(input: ExplorationFindingContext): Promise<FindingSummary[]>;
   createGeneratedTestDraft(input: FailureContext | ExplorationFindingContext): Promise<GeneratedTestDraft[]>;
@@ -122,6 +131,10 @@ export class LocalAIEngine implements AIEngine {
     this.provider = provider;
   }
 
+  getProvider(): AIProvider {
+    return this.provider;
+  }
+
   async analyzeFailure(input: FailureContext): Promise<FailureAnalysis> {
     const ctx = trimContext({
       ...(input.errorMessage !== undefined ? { errorMessage: input.errorMessage } : {}),
@@ -133,7 +146,10 @@ export class LocalAIEngine implements AIEngine {
     const prompt = renderTemplate(TEMPLATE_VERSIONS.failureAnalysis, {
       context: JSON.stringify(ctx),
     });
+    log.info('analyzeFailure start', { runId: input.runId, testcaseId: input.testcaseId, model: this.provider.model });
+    const t0 = Date.now();
     const raw = await this.provider.complete(prompt);
+    log.info('analyzeFailure done', { runId: input.runId, testcaseId: input.testcaseId, durationMs: Date.now() - t0, hasOutput: raw.length > 0 });
     const parsed = parseJson<{
       category?: string;
       suspectedLayer?: string;
@@ -243,7 +259,10 @@ export class LocalAIEngine implements AIEngine {
     const prompt = renderTemplate(TEMPLATE_VERSIONS.codeTaskDraft, {
       analysis: JSON.stringify(input),
     });
+    log.info('createCodeTaskDraft start', { runId: input.runId, analysisId: input.id, model: this.provider.model });
+    const t0 = Date.now();
     const raw = await this.provider.complete(prompt);
+    log.info('createCodeTaskDraft done', { runId: input.runId, durationMs: Date.now() - t0 });
     const parsed = parseJson<{
       goal?: string;
       target?: 'app' | 'test';

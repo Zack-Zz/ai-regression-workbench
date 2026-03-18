@@ -11,6 +11,10 @@ import { DEFAULT_SETTINGS } from '@zarb/config';
 import type { TestRunner } from '@zarb/test-runner';
 import type { AIEngine, AIProvider } from '@zarb/ai-engine';
 import { emitEvent } from '../event-bus.js';
+import { appLogger } from '@zarb/logger';
+import { WORKBENCH_DIR } from '@zarb/config';
+
+const log = appLogger.child('RunService');
 
 export interface RunServiceOptions {
   /** Absolute path to the workbench data root (for artifact storage) */
@@ -19,8 +23,6 @@ export interface RunServiceOptions {
   runner?: TestRunner;
   /** Optional AI engine — if provided, triggers failure analysis after regression runs */
   aiEngine?: AIEngine;
-  /** Optional AI provider — used by ExplorationAgent for LLM decisions */
-  aiProvider?: AIProvider;
   /** If true, CodeTask drafts are automatically promoted and approved without human gate */
   autoApprove?: boolean;
   /** When autoApprove is true, only auto-approve tasks at or below this risk level */
@@ -78,7 +80,7 @@ export class RunService {
   /** Active runner references per runId — used by cancel/pause to control execution */
   private readonly activeRunners = new Map<string, import('@zarb/test-runner').TestRunner>();
 
-  constructor(private readonly db: Db, opts: RunServiceOptions = { dataRoot: './.ai-regression-workbench/data' }) {
+  constructor(private readonly db: Db, opts: RunServiceOptions = { dataRoot: `./${WORKBENCH_DIR}/data` }) {
     this.runs = new RunRepository(db);
     this.events = new RunEventRepository(db);
     this.results = new TestResultRepository(db);
@@ -167,6 +169,7 @@ export class RunService {
       ...(input.siteId ? { siteId: input.siteId } : {}),
       ...(input.credentialId ? { credentialId: input.credentialId } : {}),
     });
+    log.info('run created', { runId, runMode: input.runMode, scopeType, scopeValue });
     emitEvent({ type: 'run.created', id: runId, ...(input.projectId ? { projectId: input.projectId } : {}) });
     const row = this.runs.findById(runId);
     const result: StartRunResult = { success: true, message: 'Run started' };
@@ -180,6 +183,7 @@ export class RunService {
         this.activeRunners.set(runId, runner);
         this.runs.update(runId, { status: 'RUNNING_TESTS', currentStage: 'RUNNING_TESTS', updatedAt: new Date().toISOString() });
         this.emitRun(runId);
+        log.info('playwright execution started', { runId, testSuitePath });
         const runResult = await runner.execute({
           runId,
           workspacePath: testSuitePath,
@@ -196,9 +200,11 @@ export class RunService {
         if (current?.status === 'CANCELLED' || current?.status === 'PAUSED') return;
         const endedAt = new Date().toISOString();
         if (runResult.startupFailure) {
+          log.error('playwright startup failure', { runId, error: runResult.startupError });
           this.runs.update(runId, { status: 'FAILED', currentStage: 'FAILED', endedAt, updatedAt: endedAt });
           this.emitRun(runId);
         } else {
+          log.info('playwright execution completed', { runId, total: runResult.total, passed: runResult.passed, failed: runResult.failed, skipped: runResult.skipped });
           const finalStatus: RunStatus = (runResult.failed > 0 && input.runMode === 'regression') ? 'ANALYZING_FAILURES' : 'COMPLETED';
           this.runs.update(runId, {
             status: finalStatus, currentStage: finalStatus, endedAt, updatedAt: endedAt,
@@ -208,6 +214,7 @@ export class RunService {
           // Trigger AI failure analysis for failed tests (regression-only mode)
           if (runResult.failed > 0 && input.runMode === 'regression') {
             if (this.opts.aiEngine) {
+              log.info('triggering AI failure analysis', { runId, failedCount: runResult.failed });
               const aiEngine = this.opts.aiEngine;
               void (async () => {
                 const failedResults = this.results.findByRun(runId).filter(r => r.status === 'failed');
@@ -271,7 +278,7 @@ export class RunService {
 
     if (this.opts.aiEngine && explorationConfig) {
       const { ExplorationAgent, PlaywrightToolProvider } = await import('@zarb/agent-harness');
-      const providerAdapter = this.opts.aiProvider ?? { complete: async (_p: string) => '', isConfigured: () => false };
+      const providerAdapter = this.opts.aiEngine.getProvider();
 
       // Detect null/unconfigured provider early and fail fast with a clear run summary
       if (!providerAdapter.isConfigured()) {
@@ -302,8 +309,12 @@ export class RunService {
         }
       };
       try {
-        await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, dataRoot, () => { this.emitRun(runId, 'run.step.updated'); });
+        const exploreResult = await agent.explore(runId, explorationConfig as import('@zarb/shared-types').ExplorationConfig, probe, dataRoot, () => { this.emitRun(runId, 'run.step.updated'); });
         this.emitRun(runId, 'run.step.updated');
+        if (exploreResult.llmError) {
+          log.warn('exploration ended with LLM error', { runId, detail: exploreResult.llmError });
+          this.runs.update(runId, { summary: 'EXPLORATION_LLM_ERROR', updatedAt: new Date().toISOString() });
+        }
       } catch { /* degrade gracefully */ }
     } else {
       await new Promise<void>(r => setTimeout(r, 800));
@@ -573,6 +584,7 @@ export class RunService {
     this.activeRunners.get(runId)?.cancel(runId);
     this.activeRunners.delete(runId);
     this.runs.update(runId, { status: 'CANCELLED', endedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    log.info('run cancelled', { runId });
     this.emitRun(runId);
     return { success: true, message: 'Run cancelled' };
   }

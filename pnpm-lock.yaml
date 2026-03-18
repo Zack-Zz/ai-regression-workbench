@@ -38,6 +38,9 @@ importers:
 
   apps/ai-engine:
     dependencies:
+      '@zarb/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@zarb/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -69,6 +72,9 @@ importers:
       '@zarb/log-bridge':
         specifier: workspace:*
         version: link:../log-bridge
+      '@zarb/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@zarb/review-manager':
         specifier: workspace:*
         version: link:../review-manager
@@ -162,6 +168,9 @@ importers:
       '@zarb/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@zarb/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@zarb/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

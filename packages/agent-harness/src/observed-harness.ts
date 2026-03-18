@@ -2,6 +2,9 @@ import type { AgentSessionRow } from '@zarb/storage';
 import type { HarnessSessionManager, StartSessionInput, StepRecord, CheckpointData, ApprovalRecord } from './session-manager.js';
 import type { ToolCallRecord } from './tool-registry.js';
 import type { ObservabilityAdapter, ObservabilityEvent } from './observability.js';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('ObservedHarness');
 
 /**
  * ObservedHarness — optional decorator around HarnessSessionManager.
@@ -18,6 +21,7 @@ export class ObservedHarness {
 
   startSession(input: StartSessionInput): AgentSessionRow {
     const row = this.inner.startSession(input);
+    log.info('session started', { sessionId: row.session_id, runId: input.runId, agentName: input.agentName, kind: input.kind });
     this.emit({
       sessionId: row.session_id,
       runId: input.runId,
@@ -34,6 +38,7 @@ export class ObservedHarness {
     const startedAt = this.inner.findById(sessionId)?.started_at ?? new Date().toISOString();
     const row = this.inner.completeSession(sessionId, summary);
     const latencyMs = Date.now() - new Date(startedAt).getTime();
+    log.info('session completed', { sessionId, runId: row.run_id, latencyMs });
     this.emit({
       sessionId,
       runId: row.run_id,
@@ -81,6 +86,7 @@ export class ObservedHarness {
     this.inner.appendToolCall(sessionId, record, dataRoot);
     const row = this.inner.findById(sessionId);
     if (!row) return;
+    log.debug('tool call', { sessionId, toolName: record.toolName, status: record.status, durationMs: record.durationMs });
     this.emit({
       sessionId,
       runId: row.run_id,
@@ -139,10 +145,10 @@ export class ObservedHarness {
           ? this.adapter.onSessionEnd(event)
           : this.adapter.onEvent(event);
       if (result instanceof Promise) {
-        result.catch((e: unknown) => { console.warn('[ObservedHarness] adapter error:', e); });
+        result.catch((e: unknown) => { log.warn('adapter error', { error: String(e) }); });
       }
     } catch (e: unknown) {
-      console.warn('[ObservedHarness] adapter error:', e);
+      log.warn('adapter error', { error: String(e) });
     }
   }
 }

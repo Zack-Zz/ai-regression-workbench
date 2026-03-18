@@ -8,6 +8,9 @@ import type {
   ListCodeTasksQuery, SubmitReviewInput, CreateCommitInput,
 } from '@zarb/shared-types';
 import { emitEvent } from '../event-bus.js';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('CodeTaskService');
 
 function toSummary(row: CodeTaskRow): CodeTaskSummary {
   return {
@@ -180,12 +183,16 @@ export class CodeTaskService {
       dataRoot: this.dataRoot,
     });
 
+    log.info('code task execution started', { taskId, runId: row.run_id, agent: this.agent instanceof KiroCliAgent ? 'KiroCliAgent' : 'CodexCliAgent', goal: row.goal.slice(0, 120) });
+
     try {
       const verificationCommands: string[] = row.verification_commands_json
         ? JSON.parse(row.verification_commands_json) as string[]
         : [];
 
+      const t0 = Date.now();
       const agentResult = await this.agent.run({ workspacePath: row.workspace_path, prompt: row.goal });
+      log.info('agent run completed', { taskId, exitCode: agentResult.exitCode, durationMs: Date.now() - t0 });
 
       // Record agent execution step
       this.sessionManager.appendStep(session.session_id, {
@@ -196,6 +203,7 @@ export class CodeTaskService {
       }, this.dataRoot);
 
       if (agentResult.exitCode !== 0) {
+        log.warn('agent run failed', { taskId, exitCode: agentResult.exitCode });
         this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
         this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath: `code-tasks/${taskId}/raw-output.txt`, updatedAt: new Date().toISOString() });
         this.emitTask(taskId);
@@ -204,6 +212,7 @@ export class CodeTaskService {
       }
 
       // VERIFYING stage
+      log.info('code task verifying', { taskId, verificationCommands });
       this.tasks.update(taskId, { status: 'VERIFYING', updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
 
@@ -216,15 +225,15 @@ export class CodeTaskService {
       });
 
       const finalStatus = artifacts.verifyPassed ? 'SUCCEEDED' : 'FAILED';
+      log.info('code task verify done', { taskId, verifyPassed: artifacts.verifyPassed, finalStatus });
       this.tasks.update(taskId, { status: finalStatus, updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
       this.sessionManager.completeSession(session.session_id);
     } catch (err) {
+      log.error('code task execution threw', { taskId, error: String(err) });
       this.tasks.update(taskId, { status: 'FAILED', updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
       this.sessionManager.completeSession(session.session_id);
-      // Log but don't rethrow — background task
-      console.error(`[CodeTaskService] execution failed for ${taskId}:`, err);
     }
   }
 

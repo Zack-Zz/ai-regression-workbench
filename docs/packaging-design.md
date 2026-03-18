@@ -116,7 +116,7 @@ zarb
 
 ```text
 <repo>/
-  .ai-regression-workbench/
+  .zarb/
     config.local.yaml
     data/
       sqlite/
@@ -138,7 +138,7 @@ zarb
 ### 5.2 用户目录模式
 
 ```text
-~/.ai-regression-workbench/
+~/.zarb/
   config.local.yaml
   data/
     sqlite/

@@ -176,6 +176,10 @@ export interface PersonalSettings {
   ui?: {
     locale?: 'zh-CN' | 'en-US';
   };
+  log?: {
+    level?: 'debug' | 'info' | 'warn' | 'error';
+    file?: boolean;
+  };
 }
 
 export interface SettingsSnapshot {

@@ -495,7 +495,7 @@ ai-regression-workbench/
       fixtures/
       data/
       helpers/
-  .ai-regression-workbench/
+  .zarb/
     config.local.yaml
     data/
       sqlite/
@@ -2318,10 +2318,10 @@ app:
   baseUrl: http://localhost:8080
 
 storage:
-  sqlitePath: ./.ai-regression-workbench/data/sqlite/app.db
-  artifactRoot: ./.ai-regression-workbench/data/artifacts
-  diagnosticRoot: ./.ai-regression-workbench/data/diagnostics
-  codeTaskRoot: ./.ai-regression-workbench/data/code-tasks
+  sqlitePath: ./.zarb/data/sqlite/app.db
+  artifactRoot: ./.zarb/data/artifacts
+  diagnosticRoot: ./.zarb/data/diagnostics
+  codeTaskRoot: ./.zarb/data/code-tasks
   useWalMode: true
 
 workspace:
@@ -2332,7 +2332,7 @@ workspace:
 testAssets:
   sharedRoot: /absolute/or/relative/path
   sharedRootMode: auto
-  generatedRoot: ./.ai-regression-workbench/data/generated-tests
+  generatedRoot: ./.zarb/data/generated-tests
   includeSharedInRuns: true
   includeGeneratedInRuns: false
   requireGitForSharedRoot: false
@@ -2379,7 +2379,7 @@ ai:
   provider: openai
   model: gpt-5.4-thinking
   enabled: true
-  promptTemplatesDir: ./.ai-regression-workbench/prompts
+  promptTemplatesDir: ./.zarb/prompts
   apiKeyEnvVar: OPENAI_API_KEY
 
 exploration:
@@ -2399,7 +2399,7 @@ codeAgent:
   allowedWriteScopes:
     - packages/test-assets
     - playwright
-    - .ai-regression-workbench/data/generated-tests
+    - .zarb/data/generated-tests
   defaultVerifyCommands:
     - pnpm test
   allowReviewOnVerifyFailure: false
@@ -2834,7 +2834,7 @@ Code Agent 结果要求：
 
 - `packages/test-assets/**`
 - `playwright/**`
-- `.ai-regression-workbench/data/generated-tests/**`
+- `.zarb/data/generated-tests/**`
 
 禁止修改业务代码目录。
 

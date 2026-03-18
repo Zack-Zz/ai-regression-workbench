@@ -5,8 +5,10 @@ import type { Db } from '@zarb/storage';
 import { FindingRepository, SiteCredentialRepository } from '@zarb/storage';
 import { HarnessSessionManager } from './session-manager.js';
 import { ToolRegistry } from './tool-registry.js';
-import { StepLogger } from '@zarb/logger';
+import { StepLogger, appLogger } from '@zarb/logger';
 import type { PlaywrightToolProvider } from './playwright-tool-provider.js';
+
+const log = appLogger.child('ExplorationAgent');
 
 export interface AIProvider {
   complete(prompt: string): Promise<string>;
@@ -31,12 +33,15 @@ export interface ExplorationStep {
   selector?: string | undefined;
   value?: string | undefined;
   reasoning: string;
+  llmError?: string;
 }
 
 export interface ExplorationResult {
   findingCount: number;
   stepsExecuted: number;
   pagesVisited: number;
+  /** Set when exploration stopped early due to LLM failure */
+  llmError?: string;
 }
 
 /**
@@ -94,6 +99,7 @@ export class ExplorationAgent {
             try {
               await this.playwrightProvider.applyCredential(cred, baseUrl);
             } catch (credErr) {
+              log.warn('applyCredential failed, continuing without auth', { error: String(credErr) });
               console.warn('[ExplorationAgent] applyCredential failed, continuing without auth:', credErr);
             }
           }
@@ -103,6 +109,7 @@ export class ExplorationAgent {
         activePwProvider = this.playwrightProvider;
       } catch (e) {
         // Playwright unavailable (e.g. no browser installed) — fall back to probe callback
+        log.warn('Playwright launch failed, falling back to fetch', { error: String(e) });
         console.warn('[ExplorationAgent] Playwright launch failed, falling back to fetch:', e);
       }
     }
@@ -118,6 +125,7 @@ export class ExplorationAgent {
 
     const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'), onStep);
     stepLogger.log({ component: 'ExplorationAgent', action: 'explore.start', detail: `urls=${config.startUrls.join(',')}, maxSteps=${String(config.maxSteps)}`, status: 'ok' });
+    log.info('exploration started', { runId, startUrls: config.startUrls, maxSteps: config.maxSteps, maxPages: config.maxPages });
 
     const maxSteps = config.maxSteps ?? 20;
     const maxPages = config.maxPages ?? 10;
@@ -126,6 +134,7 @@ export class ExplorationAgent {
     let stepIndex = 0;
     let noNewFindingsStreak = 0;
     let totalFindings = 0;
+    let llmError: string | undefined;
 
     try {
       while (stepIndex < maxSteps && visitedUrls.size < maxPages && pendingUrls.length > 0) {
@@ -172,6 +181,11 @@ export class ExplorationAgent {
         const llmActionId = `llm-${String(llmStart)}`;
         stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'pending', detail: `deciding next step from ${url}`, toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount }, actionId: llmActionId });
         const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls], stepLogger, llmActionId);
+        if (nextStep.llmError) {
+          llmError = nextStep.llmError;
+          log.warn('LLM error during exploration, stopping early', { runId, llmError });
+          break;
+        }
         if (nextStep.action !== 'done') {
           stepLogger.log({
             component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
@@ -208,8 +222,9 @@ export class ExplorationAgent {
     }
 
     stepLogger.log({ component: 'ExplorationAgent', action: 'explore.done', detail: `steps=${String(stepIndex)}, pages=${String(visitedUrls.size)}, findings=${String(totalFindings)}`, status: 'ok' });
+    log.info('exploration done', { runId, stepsExecuted: stepIndex, pagesVisited: visitedUrls.size, findingCount: totalFindings, llmError });
     this.sessionManager.completeSession(session.session_id);
-    return { findingCount: totalFindings, stepsExecuted: stepIndex, pagesVisited: visitedUrls.size };
+    return { findingCount: totalFindings, stepsExecuted: stepIndex, pagesVisited: visitedUrls.size, ...(llmError ? { llmError } : {}) };
   }
 
   private extractFindings(
@@ -272,12 +287,12 @@ export class ExplorationAgent {
       raw = await this.provider.complete(prompt);
     } catch (e) {
       stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: `LLM call threw: ${String(e)}`, reason: 'LLM unavailable', toolInput, toolOutput: { error: String(e) }, ...(actionId ? { actionId } : {}) });
-      return { stepIndex, action: 'done', reasoning: 'LLM unavailable' };
+      return { stepIndex, action: 'done', reasoning: 'LLM unavailable', llmError: 'LLM_CALL_FAILED' };
     }
 
     if (!raw || raw.trim() === '') {
       stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: 'LLM returned empty response', reason: 'empty response', toolInput, toolOutput: { status: 'empty' }, ...(actionId ? { actionId } : {}) });
-      return { stepIndex, action: 'done', reasoning: 'LLM returned empty response' };
+      return { stepIndex, action: 'done', reasoning: 'LLM returned empty response', llmError: 'LLM_EMPTY_RESPONSE' };
     }
 
     const parsed = parseJson<{ action?: string; targetUrl?: string; reasoning?: string }>(raw, {});

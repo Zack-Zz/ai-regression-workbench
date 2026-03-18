@@ -13,6 +13,9 @@ import { DiagnosticsService } from './services/diagnostics-service.js';
 import { CodeTaskService } from './services/code-task-service.js';
 import { DoctorService } from './services/doctor-service.js';
 import { buildRouter, handleRequest } from './handlers/index.js';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('Server');
 
 export interface ServerOptions {
   port: number;
@@ -24,8 +27,8 @@ export function createAppServer(opts: ServerOptions) {
   const settingsSvc = new ConfigManager(opts.configPath);
 
   // Derive data root from config file location:
-  // config is at <workspace>/.ai-regression-workbench/config.local.yaml
-  // data root is at <workspace>/.ai-regression-workbench/data/
+  // config is at <workspace>/.zarb/config.local.yaml
+  // data root is at <workspace>/.zarb/data/
   const dataRoot = resolve(dirname(opts.configPath), 'data');
 
   const runner = new TestRunner(opts.db);
@@ -38,11 +41,12 @@ export function createAppServer(opts: ServerOptions) {
   // Hot-swap AI provider when user changes settings
   settingsSvc.registerObserver({
     onConfigUpdated: async (snapshot) => {
+      log.info('config hot-updated, swapping AI provider', { activeProvider: snapshot.values.ai.activeProvider });
       aiEngine.setProvider(createAIProvider(snapshot.values.ai));
     },
   });
 
-  const runSvcOpts: import('./services/run-service.js').RunServiceOptions = { dataRoot, runner, aiEngine, aiProvider, autoApprove: cfg.codeAgent.autoApprove ?? false };
+  const runSvcOpts: import('./services/run-service.js').RunServiceOptions = { dataRoot, runner, aiEngine, autoApprove: cfg.codeAgent.autoApprove ?? false };
   if (cfg.codeAgent.autoApproveMaxRiskLevel) runSvcOpts.autoApproveMaxRiskLevel = cfg.codeAgent.autoApproveMaxRiskLevel;
   if (cfg.workspace.testSuitesRoot) runSvcOpts.testSuitesRoot = cfg.workspace.testSuitesRoot;
   const runSvc = new RunService(opts.db, runSvcOpts);

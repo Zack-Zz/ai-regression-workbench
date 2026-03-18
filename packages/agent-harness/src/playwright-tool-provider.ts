@@ -17,6 +17,9 @@ import type { PageProbe } from './exploration-agent.js';
 import type { SiteCredentialRow } from '@zarb/storage';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('PlaywrightTool');
 
 export interface PlaywrightToolProviderOptions {
   /** Milliseconds to wait after navigation before collecting state. Default 500. */
@@ -100,19 +103,27 @@ export class PlaywrightToolProvider {
     registry.register('playwright.navigate', async (input) => {
       const { url } = input as { url: string };
       const page = this.requirePage();
+      log.debug('navigate', { url });
+      const t0 = Date.now();
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       if (waitMs > 0) await page.waitForTimeout(waitMs);
-      return this.collectState(page, url);
+      const state = await this.collectState(page, url);
+      log.debug('navigate done', { url, title: state.title, formCount: state.formCount, linkCount: state.linkCount, consoleErrors: state.consoleErrors.length, networkErrors: state.networkErrors.length, durationMs: Date.now() - t0 });
+      return state;
     });
 
     registry.register('playwright.click', async (input) => {
       const { selector } = input as { selector: string };
       const page = this.requirePage();
+      log.debug('click', { selector });
+      const t0 = Date.now();
       try {
         await page.click(selector, { timeout: 10_000 });
         await page.waitForTimeout(300);
+        log.debug('click ok', { selector, durationMs: Date.now() - t0 });
         return { ok: true };
       } catch (e) {
+        log.warn('click failed', { selector, error: String(e), durationMs: Date.now() - t0 });
         return { ok: false, error: String(e) };
       }
     });
@@ -120,20 +131,26 @@ export class PlaywrightToolProvider {
     registry.register('playwright.fill', async (input) => {
       const { selector, value } = input as { selector: string; value: string };
       const page = this.requirePage();
+      log.debug('fill', { selector, valueLength: String(value).length });
+      const t0 = Date.now();
       try {
         await page.fill(selector, value, { timeout: 10_000 });
+        log.debug('fill ok', { selector, durationMs: Date.now() - t0 });
         return { ok: true };
       } catch (e) {
+        log.warn('fill failed', { selector, error: String(e), durationMs: Date.now() - t0 });
         return { ok: false, error: String(e) };
       }
     });
 
     registry.register('playwright.getState', async () => {
       const page = this.requirePage();
+      log.debug('getState', { url: page.url() });
       return this.collectState(page, page.url());
     });
 
     registry.register('playwright.close', async () => {
+      log.debug('close');
       await this.close();
     });
   }

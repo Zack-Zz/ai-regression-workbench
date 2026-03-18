@@ -5,16 +5,19 @@
  * Default (no args): check initialization, start API server (UI served separately via dev server).
  */
 import { openDb, runMigrations } from '@zarb/storage';
-import { ConfigManager } from '@zarb/config';
+import { ConfigManager, WORKBENCH_CONFIG_FILE } from '@zarb/config';
 import { DoctorService } from './services/doctor-service.js';
 import { InitService } from './services/init-service.js';
 import { createAppServer } from './server.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('CLI');
 
 const MIGRATIONS_DIR = new URL('../../../scripts/sql', import.meta.url).pathname;
 
-const DEFAULT_CONFIG_PATH = resolve('.ai-regression-workbench/config.local.yaml');
+const DEFAULT_CONFIG_PATH = resolve(WORKBENCH_CONFIG_FILE);
 
 function runInit(): void {
   const svc = new InitService(MIGRATIONS_DIR);
@@ -28,7 +31,7 @@ function runInit(): void {
   }
   console.log('');
   console.log('Next steps:');
-  console.log('  1. Edit .ai-regression-workbench/config.local.yaml');
+  console.log('  1. Edit .zarb/config.local.yaml');
   console.log('  2. Run: zarb doctor');
   console.log('  3. Run: zarb');
 }
@@ -65,16 +68,28 @@ async function runServer(): Promise<void> {
   const config = new ConfigManager(configPath);
   const settings = await config.getSettings();
   const dbPath = resolve(settings.values.storage.sqlitePath);
+
+  // Enable file logging: .zarb/logs/zarb.log
+  const logFile = resolve(DEFAULT_CONFIG_PATH, '../../logs/zarb.log');
+  if (settings.values.log?.level) appLogger.setLevel(settings.values.log.level);
+  if (settings.values.log?.file !== false) appLogger.setFilePath(logFile);
+  log.info('zarb starting', { configPath, dbPath, logFile, logLevel: settings.values.log?.level ?? 'info' });
+
   const db = openDb(dbPath);
   runMigrations(db, MIGRATIONS_DIR);
+  log.info('database ready', { dbPath });
+
   const port = settings.values.report.port;
   const server = createAppServer({ port, db, configPath });
   server.listen(port, '127.0.0.1', () => {
+    log.info('server listening', { url: `http://127.0.0.1:${String(port)}` });
     console.log(`zarb running at http://127.0.0.1:${String(port)}`);
   });
 }
 
 const [,, cmd] = process.argv;
+
+log.info('zarb command', { cmd: cmd ?? '(default)' });
 
 if (cmd === 'init') {
   try { runInit(); } catch (e: unknown) { console.error(e); process.exit(1); }

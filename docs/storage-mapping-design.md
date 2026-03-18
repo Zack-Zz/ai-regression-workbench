@@ -28,13 +28,13 @@
 项目内模式：
 
 ```text
-<repo>/.ai-regression-workbench/data
+<repo>/.zarb/data
 ```
 
 用户目录模式：
 
 ```text
-~/.ai-regression-workbench/data
+~/.zarb/data
 ```
 
 ## 4. 字段级映射矩阵

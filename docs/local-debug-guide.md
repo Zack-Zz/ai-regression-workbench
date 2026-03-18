@@ -86,7 +86,7 @@ node apps/cli/dist/bin.js init
 
 生成：
 ```
-.ai-regression-workbench/
+.zarb/
   config.local.yaml   ← 本地配置（不进 git）
   data/
     sqlite/zarb.db    ← SQLite 数据库（自动执行 migrations）
@@ -252,8 +252,8 @@ node apps/cli/dist/bin.js doctor
 
 ```bash
 # 查看数据库内容
-sqlite3 .ai-regression-workbench/data/sqlite/zarb.db ".tables"
-sqlite3 .ai-regression-workbench/data/sqlite/zarb.db \
+sqlite3 .zarb/data/sqlite/zarb.db ".tables"
+sqlite3 .zarb/data/sqlite/zarb.db \
   "SELECT id, status, run_mode, created_at FROM runs ORDER BY created_at DESC LIMIT 5;"
 
 # 测试 API 是否正常
@@ -301,7 +301,7 @@ pnpm install
 - 检查 `vite.config.ts` 的 proxy 目标端口是否匹配
 
 **Q：`zarb init` 后 doctor 报 `workspace.targetProjectPath` 不存在**
-- 编辑 `.ai-regression-workbench/config.local.yaml`，填入你的 Playwright 项目路径
+- 编辑 `.zarb/config.local.yaml`，填入你的 Playwright 项目路径
 
 **Q：CodeTask 执行失败，报 kiro not found**
 - 安装 kiro CLI：https://kiro.dev/docs/cli/

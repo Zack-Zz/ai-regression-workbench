@@ -82,7 +82,7 @@ AI 生成或 AI 修复产生的候选测试资源。
 testAssets:
   sharedRoot: /absolute/or/relative/path
   sharedRootMode: auto
-  generatedRoot: ./.ai-regression-workbench/data/generated-tests
+  generatedRoot: ./.zarb/data/generated-tests
   includeSharedInRuns: true
   includeGeneratedInRuns: false
   requireGitForSharedRoot: false

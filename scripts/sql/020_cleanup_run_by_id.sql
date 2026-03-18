@@ -3,7 +3,7 @@
 --   :run_id  -> target run id
 --
 -- Example:
---   sqlite3 ./.ai-regression-workbench/data/sqlite/app.db <<'SQL'
+--   sqlite3 ./.zarb/data/sqlite/app.db <<'SQL'
 --   .parameter init
 --   .parameter set :run_id run_20260313_001
 --   .read scripts/sql/020_cleanup_run_by_id.sql

@@ -73,7 +73,7 @@ packages/
   event-store/
   logger/
   test-assets/
-.ai-regression-workbench/
+.zarb/
   config.local.yaml
   data/
     sqlite/

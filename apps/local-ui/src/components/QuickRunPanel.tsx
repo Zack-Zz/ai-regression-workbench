@@ -176,10 +176,10 @@ export function QuickRunPanel(): React.ReactElement {
             <label style={label()}>
               {t('run.selectorType')}
               <select value={selectorType} onChange={e => { setSelectorType(e.target.value as SelectorType); }} style={sel({})}>
-                <option value="suite">suite</option>
-                <option value="scenario">scenario</option>
-                <option value="tag">tag</option>
-                <option value="testcase">testcase</option>
+                <option value="suite">{t('run.selectorType.suite')}</option>
+                <option value="scenario">{t('run.selectorType.scenario')}</option>
+                <option value="tag">{t('run.selectorType.tag')}</option>
+                <option value="testcase">{t('run.selectorType.testcase')}</option>
               </select>
             </label>
             <label style={label({ flex: 1, minWidth: 160 })}>

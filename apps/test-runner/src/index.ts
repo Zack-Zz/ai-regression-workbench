@@ -36,6 +36,9 @@ import {
   correlationContextPath,
 } from '@zarb/storage';
 import type { SaveRunEventInput, UpsertTestResultInput, SaveCorrelationContextInput } from '@zarb/storage';
+import { appLogger } from '@zarb/logger';
+
+const log = appLogger.child('TestRunner');
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -168,6 +171,7 @@ export class TestRunner {
     const { runId, workspacePath, selector, dataRoot } = input;
 
     if (!existsSync(workspacePath)) {
+      log.error('workspacePath not found', { runId, workspacePath });
       this.appendEvent(runId, 'RUN_STEP_DEGRADED', 'run', runId, {
         reason: `workspacePath not found: ${workspacePath}`,
       });
@@ -208,6 +212,8 @@ export class TestRunner {
     // Playwright line reporter: "  1 passed", "  2 failed", "[1/10]" etc.
     // More reliable: match "✓" / "✗" / "-" per-test lines
     const lineRe = /^\s*(\d+)\s+(?:passed|failed|skipped)/;
+    log.info('spawning playwright', { runId, workspacePath, args: args.slice(2) });
+    const t0 = Date.now();
     const rawOutput = await spawnAsync('npx', args, {
       cwd: workspacePath,
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile },
@@ -229,6 +235,7 @@ export class TestRunner {
     this.activeProcs.delete(runId);
 
     if (rawOutput.startupError) {
+      log.error('playwright startup error', { runId, error: rawOutput.startupError });
       this.appendEvent(runId, 'RUN_STEP_DEGRADED', 'run', runId, { reason: rawOutput.startupError });
       return { total: 0, passed: 0, failed: 0, skipped: 0, startupFailure: true, startupError: rawOutput.startupError };
     }
@@ -248,6 +255,7 @@ export class TestRunner {
 
     if (!report) {
       const msg = `Playwright produced no parseable JSON report. stderr: ${rawOutput.stderr.slice(0, 500)}`;
+      log.error('no parseable playwright report', { runId, stderr: rawOutput.stderr.slice(0, 300) });
       this.appendEvent(runId, 'RUN_STEP_DEGRADED', 'run', runId, { reason: msg });
       return { total: 0, passed: 0, failed: 0, skipped: 0, startupFailure: true, startupError: msg };
     }
@@ -365,6 +373,7 @@ export class TestRunner {
 
     const total = passed + failed + skipped;
     this.runs.update(runId, { total, passed, failed, skipped, updatedAt: new Date().toISOString() });
+    log.info('playwright run finished', { runId, total, passed, failed, skipped, durationMs: Date.now() - t0 });
 
     return { total, passed, failed, skipped, startupFailure: false };
   }

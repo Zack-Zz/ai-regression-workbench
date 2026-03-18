@@ -1,4 +1,5 @@
 import type { PersonalSettings } from '@zarb/shared-types';
+import { WORKBENCH_DIR } from './constants.js';
 
 /**
  * Default configuration values.
@@ -7,10 +8,10 @@ import type { PersonalSettings } from '@zarb/shared-types';
  */
 export const DEFAULT_SETTINGS: PersonalSettings = {
   storage: {
-    sqlitePath: './.ai-regression-workbench/data/sqlite/app.db',
-    artifactRoot: './.ai-regression-workbench/data/artifacts',
-    diagnosticRoot: './.ai-regression-workbench/data/diagnostics',
-    codeTaskRoot: './.ai-regression-workbench/data/code-tasks',
+    sqlitePath: `./${WORKBENCH_DIR}/data/sqlite/app.db`,
+    artifactRoot: `./${WORKBENCH_DIR}/data/artifacts`,
+    diagnosticRoot: `./${WORKBENCH_DIR}/data/diagnostics`,
+    codeTaskRoot: `./${WORKBENCH_DIR}/data/code-tasks`,
   },
   workspace: {
     targetProjectPath: '',
@@ -20,7 +21,7 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
   },
   testAssets: {
     sharedRootMode: 'auto',
-    generatedRoot: './.ai-regression-workbench/data/generated-tests',
+    generatedRoot: `./${WORKBENCH_DIR}/data/generated-tests`,
     includeSharedInRuns: true,
     includeGeneratedInRuns: false,
     requireGitForSharedRoot: false,
@@ -74,7 +75,7 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
     allowedWriteScopes: [
       'packages/test-assets',
       'playwright',
-      '.ai-regression-workbench/data/generated-tests',
+      '.zarb/data/generated-tests',
     ],
     defaultVerifyCommands: ['pnpm test'],
     allowReviewOnVerifyFailure: false,
@@ -84,5 +85,9 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
   },
   ui: {
     locale: 'zh-CN',
+  },
+  log: {
+    level: 'info' as const,
+    file: true,
   },
 };

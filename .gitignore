@@ -13,7 +13,7 @@ out/
 coverage/
 
 # Runtime data
-.ai-regression-workbench/data/
+.zarb/data/
 
 # Environment
 .env
@@ -35,4 +35,6 @@ Thumbs.db
 .codex/
 .ai-code.json
 .kiro/
-.ai-regression-workbench/
+.zarb/
+/logs
+*.log

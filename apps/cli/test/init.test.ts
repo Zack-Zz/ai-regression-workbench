@@ -21,17 +21,17 @@ describe('InitService', () => {
     const result = svc.init(dir);
 
     expect(result.alreadyInitialized).toBe(false);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'config.local.yaml'))).toBe(true);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'data', 'sqlite'))).toBe(true);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'data', 'runs'))).toBe(true);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'data', 'artifacts'))).toBe(true);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'data', 'code-tasks'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'config.local.yaml'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'data', 'sqlite'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'data', 'runs'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'data', 'artifacts'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'data', 'code-tasks'))).toBe(true);
   });
 
   it('writes default config with expected keys', () => {
     const svc = new InitService(MIGRATIONS_DIR);
     svc.init(dir);
-    const config = readFileSync(join(dir, '.ai-regression-workbench', 'config.local.yaml'), 'utf8');
+    const config = readFileSync(join(dir, '.zarb', 'config.local.yaml'), 'utf8');
     expect(config).toContain('storage:');
     expect(config).toContain('report:');
     expect(config).toContain('workspace:');
@@ -41,7 +41,7 @@ describe('InitService', () => {
   it('does not overwrite existing config on second init', () => {
     const svc = new InitService(MIGRATIONS_DIR);
     svc.init(dir);
-    const configPath = join(dir, '.ai-regression-workbench', 'config.local.yaml');
+    const configPath = join(dir, '.zarb', 'config.local.yaml');
     // Modify config
     const original = readFileSync(configPath, 'utf8');
     const modified = original + '\n# custom\n';
@@ -62,6 +62,6 @@ describe('InitService', () => {
   it('runs migrations and creates sqlite db', () => {
     const svc = new InitService(MIGRATIONS_DIR);
     svc.init(dir);
-    expect(existsSync(join(dir, '.ai-regression-workbench', 'data', 'sqlite', 'zarb.db'))).toBe(true);
+    expect(existsSync(join(dir, '.zarb', 'data', 'sqlite', 'zarb.db'))).toBe(true);
   });
 });
