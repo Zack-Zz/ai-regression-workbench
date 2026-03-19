@@ -73,12 +73,14 @@ class AppLoggerImpl {
 
     // File: NDJSON
     if (this.filePath) {
-      if (!this.fileReady) {
-        mkdirSync(dirname(this.filePath), { recursive: true });
-        this.fileReady = true;
-      }
-      const record = JSON.stringify({ ts, level, module, msg, ...meta });
-      appendFileSync(this.filePath, record + '\n', 'utf8');
+      try {
+        if (!this.fileReady) {
+          mkdirSync(dirname(this.filePath), { recursive: true });
+          this.fileReady = true;
+        }
+        const record = JSON.stringify({ ts, level, module, msg, ...meta });
+        appendFileSync(this.filePath, record + '\n', 'utf8');
+      } catch { /* file write failure must not crash the main process */ }
     }
   }
 

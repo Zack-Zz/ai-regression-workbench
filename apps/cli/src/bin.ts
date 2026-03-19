@@ -9,7 +9,7 @@ import { ConfigManager, WORKBENCH_CONFIG_FILE } from '@zarb/config';
 import { DoctorService } from './services/doctor-service.js';
 import { InitService } from './services/init-service.js';
 import { createAppServer } from './server.js';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { appLogger } from '@zarb/logger';
 
@@ -70,7 +70,7 @@ async function runServer(): Promise<void> {
   const dbPath = resolve(settings.values.storage.sqlitePath);
 
   // Enable file logging: .zarb/logs/zarb.log
-  const logFile = resolve(DEFAULT_CONFIG_PATH, '../../logs/zarb.log');
+  const logFile = resolve(dirname(DEFAULT_CONFIG_PATH), 'logs/zarb.log');
   if (settings.values.log?.level) appLogger.setLevel(settings.values.log.level);
   if (settings.values.log?.file !== false) appLogger.setFilePath(logFile);
   log.info('zarb starting', { configPath, dbPath, logFile, logLevel: settings.values.log?.level ?? 'info' });

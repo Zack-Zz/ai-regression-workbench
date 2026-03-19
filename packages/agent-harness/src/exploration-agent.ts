@@ -86,6 +86,19 @@ export class ExplorationAgent {
       allowedWriteScopes: [],
     });
 
+    // Create Harness session for audit trail
+    const session = this.sessionManager.startSession({
+      runId,
+      kind: 'exploration',
+      agentName: 'ExplorationAgent',
+      policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 30_000, allowedHosts, allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
+      dataRoot,
+    });
+
+    const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'), onStep);
+    stepLogger.log({ component: 'ExplorationAgent', action: 'explore.start', status: 'ok', detail: `urls=${config.startUrls.join(',')}, maxSteps=${String(config.maxSteps)}`, toolInput: { startUrls: config.startUrls, maxSteps: config.maxSteps, maxPages: config.maxPages } });
+    log.info('exploration started', { runId, startUrls: config.startUrls, maxSteps: config.maxSteps, maxPages: config.maxPages });
+
     // If PlaywrightToolProvider is available, launch it and use its probe
     let activePwProvider: PlaywrightToolProvider | null = null;
     let effectiveProbe = probe;
@@ -97,21 +110,28 @@ export class ExplorationAgent {
           const cred = this.credentials.findById(config.credentialId);
           if (cred) {
             const baseUrl = config.startUrls[0] ?? '';
-            const strategy = config.loginStrategy ?? 'static';
-            const loginStepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'), onStep);
+            const strategy = config.loginStrategy ?? 'ai';
             if (strategy === 'ai') {
-              const loginErr = await this.runAiLogin(baseUrl, cred, loginStepLogger);
+              const loginErr = await this.runAiLogin(baseUrl, cred, stepLogger);
               if (loginErr) {
                 log.warn('AI login failed', { runId, reason: loginErr });
+                stepLogger.log({ component: 'ExplorationAgent', action: 'explore.done', status: 'error', detail: loginErr });
                 return { findingCount: 0, stepsExecuted: 0, pagesVisited: 0, llmError: loginErr };
               }
             } else {
+              const t0 = Date.now();
+              const loginActionId = `login-static-${String(t0)}`;
+              const staticInput = { strategy: 'static', url: baseUrl, authType: cred.auth_type };
+              stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'pending', detail: `strategy=static url=${baseUrl}`, toolInput: staticInput, actionId: loginActionId, tool: 'playwright' });
               try {
                 await this.playwrightProvider.applyCredential(cred, baseUrl);
+                stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: 'static credential applied', durationMs: Date.now() - t0, toolInput: staticInput, toolOutput: { authType: cred.auth_type }, actionId: loginActionId, tool: 'playwright' });
               } catch (credErr) {
                 const isLoginFailed = credErr instanceof LoginFailedError;
                 log.warn('applyCredential failed', { error: String(credErr), loginFailed: isLoginFailed });
                 if (isLoginFailed) {
+                  stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `static credential rejected`, durationMs: Date.now() - t0, toolInput: staticInput, toolOutput: { error: String(credErr) }, actionId: loginActionId, tool: 'playwright' });
+                  stepLogger.log({ component: 'ExplorationAgent', action: 'explore.done', status: 'error', detail: 'LOGIN_FAILED' });
                   return { findingCount: 0, stepsExecuted: 0, pagesVisited: 0, llmError: 'LOGIN_FAILED' };
                 }
                 // Other errors (network etc.) — continue without auth
@@ -128,19 +148,6 @@ export class ExplorationAgent {
         console.warn('[ExplorationAgent] Playwright launch failed, falling back to fetch:', e);
       }
     }
-
-    // Create Harness session for audit trail
-    const session = this.sessionManager.startSession({
-      runId,
-      kind: 'exploration',
-      agentName: 'ExplorationAgent',
-      policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 30_000, allowedHosts, allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
-      dataRoot,
-    });
-
-    const stepLogger = new StepLogger(join(dataRoot, 'runs', runId, 'steps.ndjson'), onStep);
-    stepLogger.log({ component: 'ExplorationAgent', action: 'explore.start', detail: `urls=${config.startUrls.join(',')}, maxSteps=${String(config.maxSteps)}`, status: 'ok' });
-    log.info('exploration started', { runId, startUrls: config.startUrls, maxSteps: config.maxSteps, maxPages: config.maxPages });
 
     const maxSteps = config.maxSteps ?? 20;
     const maxPages = config.maxPages ?? 10;
@@ -206,15 +213,15 @@ export class ExplorationAgent {
           }
           authRetryTimestamps.push(now);
           if (authRetryTimestamps.length > AUTH_RETRY_MAX) {
-            stepLogger.log({ component: 'ExplorationAgent', action: 'login.retry', status: 'error', detail: 'AUTH_RETRY_EXCEEDED' });
+            stepLogger.log({ component: 'ExplorationAgent', action: 'login.retry', status: 'error', detail: 'AUTH_RETRY_EXCEEDED', toolInput: { url: pageState.url, hasAuthError, isOnLoginPage }, toolOutput: { retryCount: authRetryTimestamps.length, maxRetries: AUTH_RETRY_MAX } });
             log.warn('auth retry exceeded', { runId });
             llmError = 'AUTH_RETRY_EXCEEDED';
             break;
           }
-          stepLogger.log({ component: 'ExplorationAgent', action: 'login.retry', status: 'warn', detail: `retry ${String(authRetryTimestamps.length)} of ${String(AUTH_RETRY_MAX)}` });
+          stepLogger.log({ component: 'ExplorationAgent', action: 'login.retry', status: 'warn', detail: `retry ${String(authRetryTimestamps.length)} of ${String(AUTH_RETRY_MAX)}`, toolInput: { url: pageState.url, hasAuthError, isOnLoginPage }, toolOutput: { retryCount: authRetryTimestamps.length } });
           const cred = this.credentials.findById(config.credentialId);
           if (cred) {
-            const strategy = config.loginStrategy ?? 'static';
+            const strategy = config.loginStrategy ?? 'ai';
             if (strategy === 'ai') {
               const loginErr = await this.runAiLogin(pageState.url, cred, stepLogger);
               if (loginErr) { llmError = loginErr; break; }
@@ -376,15 +383,17 @@ export class ExplorationAgent {
 
     const MAX_LOGIN_STEPS = 10;
     const loginUrl = cred.login_url ?? startUrl;
+    const t0 = Date.now();
+    const loginActionId = `login-ai-${String(t0)}`;
+    const aiInput = { strategy: 'ai', url: loginUrl };
 
-    stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'pending', detail: `strategy=ai url=${loginUrl}` });
+    stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'pending', detail: `strategy=ai url=${loginUrl}`, toolInput: aiInput, actionId: loginActionId, tool: 'playwright' });
 
     try {
-      pw.getPage(); // verify launched
       const page = pw.getPage();
       await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     } catch (e) {
-      stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'error', detail: String(e) });
+      stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'error', detail: String(e), durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright' });
       return 'LOGIN_AI_FAILED';
     }
 
@@ -393,8 +402,7 @@ export class ExplorationAgent {
       const hasPasswordInput = snapshot.inputs.some(inp => inp.type === 'password');
 
       if (!hasPasswordInput && i > 0) {
-        // No password field visible after at least one action — assume logged in
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: 'no password input, login assumed successful' });
+        stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: 'no password input, login assumed successful', durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { url: snapshot.url, title: snapshot.title }, actionId: loginActionId, tool: 'playwright' });
         return undefined;
       }
 
@@ -417,14 +425,14 @@ export class ExplorationAgent {
       try {
         raw = await this.provider.complete(prompt);
       } catch (e) {
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `LLM call failed: ${String(e)}` });
+        stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `LLM call failed: ${String(e)}`, durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright' });
         return 'LOGIN_AI_FAILED';
       }
 
       const decision = parseJson<{ isLoginPage?: boolean; action?: string; selector?: string; value?: string; reasoning?: string }>(raw, {});
 
       if (!decision.isLoginPage || decision.action === 'done') {
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: decision.reasoning ?? 'LLM says done' });
+        stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: decision.reasoning ?? 'LLM says done', durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { url: snapshot.url, reasoning: decision.reasoning }, actionId: loginActionId, tool: 'playwright' });
         return undefined;
       }
 
@@ -432,30 +440,32 @@ export class ExplorationAgent {
         const isPassword = decision.value === '__PASSWORD__';
         const actualValue = isPassword ? (cred.password ?? '') : (decision.value ?? '');
         const logValue = isPassword ? '[REDACTED]' : (decision.value ?? '');
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'ok', detail: `selector=${decision.selector} value=${logValue}` });
+        const fillStart = Date.now();
         try {
           const page = pw.getPage();
           await page.fill(decision.selector, actualValue, { timeout: 10_000 });
+          stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'ok', detail: `selector=${decision.selector} value=${logValue}`, durationMs: Date.now() - fillStart, toolInput: { selector: decision.selector, value: logValue }, toolOutput: { ok: true }, tool: 'playwright', ...(decision.reasoning ? { reason: decision.reasoning } : {}) });
         } catch (e) {
-          stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'error', detail: String(e) });
+          stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'error', detail: String(e), durationMs: Date.now() - fillStart, toolInput: { selector: decision.selector, value: logValue }, toolOutput: { error: String(e) }, tool: 'playwright' });
           return 'LOGIN_AI_FAILED';
         }
       } else if (decision.action === 'click' && decision.selector) {
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'ok', detail: `selector=${decision.selector}` });
+        const clickStart = Date.now();
         try {
           const page = pw.getPage();
           await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined),
             page.click(decision.selector, { timeout: 10_000 }),
           ]);
+          stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'ok', detail: `selector=${decision.selector}`, durationMs: Date.now() - clickStart, toolInput: { selector: decision.selector }, toolOutput: { ok: true }, tool: 'playwright', ...(decision.reasoning ? { reason: decision.reasoning } : {}) });
         } catch (e) {
-          stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'error', detail: String(e) });
+          stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'error', detail: String(e), durationMs: Date.now() - clickStart, toolInput: { selector: decision.selector }, toolOutput: { error: String(e) }, tool: 'playwright' });
           return 'LOGIN_AI_FAILED';
         }
       }
     }
 
-    stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: 'exceeded max login steps' });
+    stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: 'exceeded max login steps', durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { maxSteps: MAX_LOGIN_STEPS }, actionId: loginActionId, tool: 'playwright' });
     return 'LOGIN_AI_STEP_EXCEEDED';
   }
 }
