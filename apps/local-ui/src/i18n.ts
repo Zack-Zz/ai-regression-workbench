@@ -96,6 +96,9 @@ const zh: Record<string, string> = {
   'run.events': '事件时间线',
   'run.failureReports': '失败报告',
   'run.executionReport': '执行报告',
+  'run.reportLive': '自动刷新中',
+  'run.reportSnapshot': '快照视图',
+  'run.stageCurrent': '当前阶段',
   'run.selector': '选择器',
   'run.selectorType': '选择器类型',
   'run.selectorType.suite': '按测试套件名',
@@ -281,6 +284,10 @@ const zh: Record<string, string> = {
   'status.COMMIT_PENDING': '待提交',
   'status.COMMITTED': '已提交',
   'status.REJECTED': '已拒绝',
+  'stage.status.success': '已完成',
+  'stage.status.degraded': '进行中',
+  'stage.status.failed': '失败',
+  'stage.status.skipped': '未开始',
 };
 
 const en: Record<string, string> = {
@@ -364,6 +371,9 @@ const en: Record<string, string> = {
   'run.events': 'Event Timeline',
   'run.failureReports': 'Failure Reports',
   'run.executionReport': 'Execution Report',
+  'run.reportLive': 'Live updates',
+  'run.reportSnapshot': 'Snapshot view',
+  'run.stageCurrent': 'Current stage',
   'run.selector': 'Selector',
   'run.selectorType': 'Selector Type',
   'run.selectorType.suite': 'by suite name',
@@ -545,6 +555,10 @@ const en: Record<string, string> = {
   'status.COMMIT_PENDING': 'Commit Pending',
   'status.COMMITTED': 'Committed',
   'status.REJECTED': 'Rejected',
+  'stage.status.success': 'Completed',
+  'stage.status.degraded': 'In Progress',
+  'stage.status.failed': 'Failed',
+  'stage.status.skipped': 'Not Started',
 };
 
 const catalogs: Record<Locale, Record<string, string>> = { 'zh-CN': zh, 'en-US': en };

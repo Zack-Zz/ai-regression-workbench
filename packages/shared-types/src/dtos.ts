@@ -222,6 +222,7 @@ export interface ExecutionReport {
   runId: string;
   status: RunStatus;
   runMode: RunMode;
+  currentStage?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;

@@ -1,9 +1,9 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { useAsync, useServerEvents } from '../hooks.js';
+import { useAsync, usePoll, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, KV, Button, Table } from '../components/ui.js';
+import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, KV, Button, Table, StageResultsList } from '../components/ui.js';
 import { StepLogPanel } from '../components/StepLog.js';
 import { fmtDatetime } from '../utils.js';
 
@@ -14,10 +14,16 @@ export function RunDetailPage(): React.ReactElement {
   const navigate = useNavigate();
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getRun(id), [id]);
-  const { data: taskData } = useAsync(() => api.listCodeTasks(`runId=${id}`), [id]);
-  const { data: report } = useAsync(() => api.getExecutionReport(id), [id]);
-  useServerEvents(['run.updated', 'run.step.updated'], () => reload(), (e) => !e.id || e.id === id, () => { void reload(); });
   const isActive = data ? !TERMINAL.has(data.summary.status) : false;
+  const { data: taskData, reload: reloadTasks } = useAsync(() => api.listCodeTasks(`runId=${id}`), [id]);
+  const { data: report, reload: reloadReport } = useAsync(() => api.getExecutionReport(id), [id]);
+  const refreshAll = React.useCallback(() => {
+    reload();
+    reloadTasks();
+    reloadReport();
+  }, [reload, reloadTasks, reloadReport]);
+  const { connected } = useServerEvents(['run.updated', 'run.step.updated'], () => { refreshAll(); }, (e) => !e.id || e.id === id, () => { refreshAll(); });
+  usePoll(refreshAll, 2500, isActive);
 
   async function doAction(fn: () => Promise<unknown>): Promise<void> {
     try { await fn(); reload(); } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); }
@@ -89,15 +95,7 @@ export function RunDetailPage(): React.ReactElement {
 
           {report.stageResults.length > 0 && (
             <Card title="阶段结果">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {report.stageResults.map((stage, index) => (
-                  <div key={`${stage.stage}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid #f3f4f6' }}>
-                    <span style={{ minWidth: 180, fontWeight: 600 }}>{stage.stage}</span>
-                    <span style={{ color: stage.status === 'success' ? '#2a7' : stage.status === 'failed' ? '#c33' : stage.status === 'degraded' ? '#b45309' : '#6b7280' }}>{stage.status}</span>
-                    <span style={{ color: '#888', fontSize: '0.85em' }}>{stage.message ?? '-'}</span>
-                  </div>
-                ))}
-              </div>
+              <StageResultsList stages={report.stageResults} currentStage={summary.currentStage} live={isActive || connected} />
             </Card>
           )}
         </>

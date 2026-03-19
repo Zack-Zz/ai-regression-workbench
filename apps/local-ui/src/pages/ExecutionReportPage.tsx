@@ -1,15 +1,20 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { useAsync } from '../hooks.js';
+import { useAsync, usePoll, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, Card, KV, Button, Table } from '../components/ui.js';
+import { Loading, ErrorBanner, Card, KV, Button, Table, StageResultsList } from '../components/ui.js';
+
+const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
 export function ExecutionReportPage(): React.ReactElement {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getExecutionReport(id), [id]);
+  const isActive = data ? !TERMINAL.has(data.status) : false;
+  const { connected } = useServerEvents(['run.updated', 'run.step.updated'], () => { reload(); }, (e) => !e.id || e.id === id, () => { reload(); });
+  usePoll(reload, 2500, isActive);
 
   if (loading) return <Loading />;
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
@@ -25,6 +30,7 @@ export function ExecutionReportPage(): React.ReactElement {
       <Card title="概览">
         <KV label={t('run.mode')} value={data.runMode} />
         <KV label={t('common.status')} value={data.status} />
+        {data.currentStage && <KV label={t('run.stage')} value={data.currentStage} />}
         <KV label={t('run.startedAt')} value={data.startedAt} />
         {data.endedAt && <KV label={t('run.endedAt')} value={data.endedAt} />}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '0.75rem' }}>
@@ -46,14 +52,7 @@ export function ExecutionReportPage(): React.ReactElement {
 
       {data.stageResults.length > 0 && (
         <Card title="阶段结果">
-          <Table
-            headers={['Stage', '状态', '说明']}
-            rows={data.stageResults.map((stage) => [
-              stage.stage,
-              <span key="status" style={{ color: stage.status === 'success' ? '#2a7' : stage.status === 'failed' ? '#c33' : '#6b7280' }}>{stage.status}</span>,
-              stage.message ?? '-',
-            ])}
-          />
+          <StageResultsList stages={data.stageResults} currentStage={data.currentStage} live={isActive || connected} />
         </Card>
       )}
 

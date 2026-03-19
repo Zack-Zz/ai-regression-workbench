@@ -411,7 +411,16 @@ export class RunService {
             : exploreResult.llmError === 'AUTH_RETRY_EXCEEDED' ? 'AUTH_RETRY_EXCEEDED'
             : 'EXPLORATION_LLM_ERROR';
           log.warn('exploration ended early', { runId, reason: exploreResult.llmError });
-          this.runs.update(runId, { summary: summaryCode, updatedAt: new Date().toISOString() });
+          const nowErr = new Date().toISOString();
+          this.runs.update(runId, {
+            status: 'FAILED',
+            currentStage: 'FAILED',
+            endedAt: nowErr,
+            updatedAt: nowErr,
+            summary: summaryCode,
+          });
+          this.emitRun(runId);
+          return;
         }
       } catch { /* degrade gracefully */ }
     } else {
@@ -769,6 +778,7 @@ export class RunService {
       runId,
       status: row.status,
       runMode: row.run_mode,
+      ...(row.current_stage ? { currentStage: row.current_stage } : {}),
       startedAt: row.started_at,
       ...(row.ended_at ? { endedAt: row.ended_at } : {}),
       ...(row.ended_at ? { durationMs: Math.max(0, new Date(row.ended_at).getTime() - new Date(row.started_at).getTime()) } : {}),

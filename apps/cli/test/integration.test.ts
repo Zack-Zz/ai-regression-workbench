@@ -3,7 +3,7 @@
  * Covers: run lifecycle, code task lifecycle, settings flow,
  * and API contract consistency (all documented endpoints respond correctly).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,28 @@ import { buildRouter } from '../src/handlers/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const MIGRATIONS_DIR = join(new URL('.', import.meta.url).pathname, '../../../scripts/sql');
+
+vi.mock('@zarb/agent-harness', async () => {
+  const actual = await vi.importActual<typeof import('@zarb/agent-harness')>('@zarb/agent-harness');
+
+  class MockExplorationAgent {
+    async explore(_runId: string, config: { startUrls?: string[] }): Promise<{ findingCount: number; stepsExecuted: number; pagesVisited: number; llmError?: string }> {
+      const firstUrl = config.startUrls?.[0] ?? '';
+      if (firstUrl.includes('mock-login-fail')) {
+        return { findingCount: 0, stepsExecuted: 0, pagesVisited: 0, llmError: 'LOGIN_FAILED' };
+      }
+      return { findingCount: 0, stepsExecuted: 1, pagesVisited: 1 };
+    }
+  }
+
+  class MockPlaywrightToolProvider {}
+
+  return {
+    ...actual,
+    ExplorationAgent: MockExplorationAgent,
+    PlaywrightToolProvider: MockPlaywrightToolProvider,
+  };
+});
 
 let dir: string;
 let db: ReturnType<typeof openDb>;
@@ -194,6 +216,31 @@ describe('Run lifecycle flow', () => {
     }), r.res);
     expect(r.status()).toBe(200);
     expect(r.body().success).toBe(true);
+  });
+
+  it('exploration login failure marks the run failed instead of completed', async () => {
+    const aiEngine = {
+      getProvider: () => ({
+        isConfigured: () => true,
+        complete: async () => '',
+        model: 'mock-model',
+      }),
+    } as const;
+    const svc = new RunService(db, { dataRoot: dir, aiEngine: aiEngine as never });
+
+    const started = svc.startRun({
+      runMode: 'exploration',
+      exploration: { startUrls: ['https://mock-login-fail.local/login'], maxSteps: 10, maxPages: 5 },
+    });
+    expect(started.success).toBe(true);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const runId = started.run?.runId as string;
+    const detail = svc.getRun(runId);
+    expect(detail?.summary.status).toBe('FAILED');
+    expect(detail?.summary.summary).toBe('LOGIN_FAILED');
+    expect(detail?.summary.currentStage).toBe('FAILED');
   });
 
   it('start run rejects project-scoped execution without explicit repo selection', async () => {

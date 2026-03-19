@@ -56,13 +56,14 @@ export interface RunEventPage { items: RunEventItem[]; nextCursor?: string; }
 
 export interface ExecutionReport {
   runId: string; status: RunStatus; runMode: RunMode;
+  currentStage?: string;
   startedAt: string; endedAt?: string; durationMs?: number;
   scopeType?: string; scopeValue?: string;
   selector?: { suite?: string; scenarioId?: string; tag?: string; testcaseId?: string };
   exploration?: ExplorationConfig;
   summary: { total: number; passed: number; failed: number; skipped: number };
   totals: { flowStepCount: number; uiActionCount: number; apiCallCount: number; failedApiCount: number };
-  stageResults: Array<{ stage: string; status: string; message?: string }>;
+  stageResults: Array<{ stage: string; status: 'success' | 'degraded' | 'failed' | 'skipped'; message?: string }>;
   degradedSteps: string[]; fatalReason?: string;
   failureReports: Array<{ testcaseId: string; errorMessage?: string; reportPath?: string }>;
   codeTaskSummaries: Array<{ taskId: string; testcaseId?: string; status: CodeTaskStatus; updatedAt: string }>;

@@ -2,6 +2,8 @@ import React from 'react';
 import { t } from '../i18n.js';
 import type { RunStatus, CodeTaskStatus } from '../types.js';
 
+type StageResultStatus = 'success' | 'degraded' | 'failed' | 'skipped';
+
 export function Loading(): React.ReactElement {
   return <div style={{ padding: '1rem', color: '#888' }}>{t('common.loading')}</div>;
 }
@@ -115,6 +117,147 @@ export function Table({ headers, rows }: { headers: string[]; rows: React.ReactN
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+export function StageResultsList({
+  stages,
+  currentStage,
+  live = false,
+}: {
+  stages: Array<{ stage: string; status: StageResultStatus; message?: string }>;
+  currentStage?: string | undefined;
+  live?: boolean;
+}): React.ReactElement {
+  const doneCount = stages.filter((stage) => stage.status === 'success').length;
+  const progress = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 160, fontSize: '0.85em', color: '#4b5563' }}>
+          {doneCount}/{stages.length} {t('stage.status.success')}
+        </div>
+        <div style={{ flex: 1, minWidth: 180, height: 8, borderRadius: 999, background: '#e5e7eb', overflow: 'hidden' }}>
+          <div
+            style={{
+              width: `${String(progress)}%`,
+              height: '100%',
+              background: live ? 'linear-gradient(90deg, #2563eb, #0f766e)' : '#9ca3af',
+              transition: 'width 180ms ease-out',
+            }}
+          />
+        </div>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            borderRadius: 999,
+            padding: '0.25rem 0.65rem',
+            background: live ? '#eff6ff' : '#f3f4f6',
+            color: live ? '#1d4ed8' : '#6b7280',
+            fontSize: '0.8em',
+            fontWeight: 600,
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: live ? '#2563eb' : '#9ca3af',
+              boxShadow: live ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none',
+            }}
+          />
+          {live ? t('run.reportLive') : t('run.reportSnapshot')}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {stages.map((stage, index) => {
+          const isCurrent = currentStage === stage.stage;
+          const tone = stage.status === 'success'
+            ? { border: '#86efac', bg: '#f0fdf4', fg: '#166534', accent: '#16a34a', marker: '✓' }
+            : stage.status === 'failed'
+              ? { border: '#fca5a5', bg: '#fef2f2', fg: '#b91c1c', accent: '#dc2626', marker: '×' }
+              : stage.status === 'degraded'
+                ? { border: '#bfdbfe', bg: '#eff6ff', fg: '#1d4ed8', accent: '#2563eb', marker: String(index + 1) }
+                : { border: '#e5e7eb', bg: '#f9fafb', fg: '#6b7280', accent: '#9ca3af', marker: String(index + 1) };
+          return (
+            <div
+              key={`${stage.stage}-${index}`}
+              style={{
+                border: `1px solid ${tone.border}`,
+                background: tone.bg,
+                borderRadius: 10,
+                padding: '0.8rem 0.9rem',
+                display: 'grid',
+                gridTemplateColumns: '40px minmax(0, 1fr)',
+                gap: '0.85rem',
+                alignItems: 'start',
+                boxShadow: isCurrent ? '0 0 0 3px rgba(37, 99, 235, 0.08)' : 'none',
+              }}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 999,
+                  background: tone.accent,
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                }}
+              >
+                {tone.marker}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, color: '#111827' }}>{t(`status.${stage.stage}`)}</span>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: 999,
+                      background: '#fff',
+                      color: tone.fg,
+                      fontSize: '0.78em',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {t(`stage.status.${stage.status}`)}
+                  </span>
+                  {isCurrent && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: 999,
+                        background: '#111827',
+                        color: '#fff',
+                        fontSize: '0.78em',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {t('run.stageCurrent')}
+                    </span>
+                  )}
+                </div>
+                <div style={{ marginTop: 2, fontFamily: 'monospace', fontSize: '0.78em', color: '#6b7280' }}>{stage.stage}</div>
+                {stage.message && (
+                  <div style={{ marginTop: '0.45rem', color: '#374151', fontSize: '0.9em', lineHeight: 1.5 }}>
+                    {stage.message}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
