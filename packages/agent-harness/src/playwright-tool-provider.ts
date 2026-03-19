@@ -245,12 +245,62 @@ export class PlaywrightToolProvider {
     const raw = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
+      const escAttr = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const unique = (selector: string): boolean => {
+        try { return doc.querySelectorAll(selector).length === 1; } catch { return false; }
+      };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const getLabelText = (el: any): string => {
         const id = el.getAttribute('id');
         if (id) { const lbl = doc.querySelector(`label[for="${id as string}"]`); if (lbl) return (lbl.textContent ?? '').trim(); }
         const parent = el.closest('label');
         return parent ? (parent.textContent ?? '').trim().replace(el.value ?? '', '').trim() : '';
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const buildInputSelector = (el: any, index: number): string => {
+        const id = el.getAttribute('id') as string | null;
+        if (id) return `#${id}`;
+        const name = el.getAttribute('name') as string | null;
+        if (name) {
+          const byName = `input[name="${escAttr(name)}"]`;
+          if (unique(byName)) return byName;
+        }
+        const placeholder = el.getAttribute('placeholder') as string | null;
+        if (placeholder) {
+          const byPlaceholder = `input[placeholder="${escAttr(placeholder)}"]`;
+          if (unique(byPlaceholder)) return byPlaceholder;
+        }
+        const type = (el.getAttribute('type') ?? 'text') as string;
+        const byType = `input[type="${escAttr(type)}"]`;
+        if (unique(byType)) return byType;
+
+        const form = el.closest('form');
+        if (form) {
+          const forms = Array.from(doc.querySelectorAll('form'));
+          const formIdx = forms.indexOf(form);
+          if (formIdx >= 0) {
+            const scoped = Array.from(form.querySelectorAll('input:not([type=hidden]):not([type=submit])'));
+            const localIdx = scoped.indexOf(el);
+            if (localIdx >= 0) return `form:nth-of-type(${formIdx + 1}) input:nth-of-type(${localIdx + 1})`;
+          }
+        }
+        return `xpath=(//input[not(@type='hidden') and not(@type='submit')])[${index + 1}]`;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const buildButtonSelector = (el: any, index: number): string => {
+        const id = el.getAttribute('id') as string | null;
+        if (id) return `#${id}`;
+        const type = (el.getAttribute('type') as string | null) ?? undefined;
+        if (type) {
+          const byType = `button[type="${escAttr(type)}"], input[type="${escAttr(type)}"]`;
+          if (unique(byType)) return byType;
+        }
+        const text = ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim();
+        if (text) {
+          const byValue = `input[type="submit"][value="${escAttr(text)}"]`;
+          if (unique(byValue)) return byValue;
+        }
+        return `xpath=((//button)|(//input[@type='submit']))[${index + 1}]`;
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inputs = Array.from(doc.querySelectorAll('input:not([type=hidden]):not([type=submit])')).slice(0, 20).map((el: any, i: number) => {
@@ -263,14 +313,17 @@ export class PlaywrightToolProvider {
           id: id ?? undefined,
           placeholder: (el.getAttribute('placeholder') as string | null) ?? undefined,
           label: getLabelText(el) || undefined,
-          selector: id ? `#${id}` : name ? `input[name="${name}"]` : `input:nth-of-type(${i + 1})`,
+          selector: buildInputSelector(el, i),
           filled: value.length > 0,
         };
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const buttons = Array.from(doc.querySelectorAll('button, input[type=submit]')).slice(0, 10).map((el: any, i: number) => {
-        const id = el.getAttribute('id') as string | null;
-        return { text: ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim(), type: (el.getAttribute('type') as string | null) ?? undefined, selector: id ? `#${id}` : `button:nth-of-type(${i + 1})` };
+        return {
+          text: ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim(),
+          type: (el.getAttribute('type') as string | null) ?? undefined,
+          selector: buildButtonSelector(el, i),
+        };
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const forms = Array.from(doc.querySelectorAll('form')).slice(0, 5).map((f: any) => ({ action: (f.getAttribute('action') as string | null) ?? undefined, method: (f.getAttribute('method') as string | null) ?? undefined, inputCount: f.querySelectorAll('input').length as number }));

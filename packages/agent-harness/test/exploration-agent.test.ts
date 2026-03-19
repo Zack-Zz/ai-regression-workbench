@@ -170,6 +170,7 @@ describe('ExplorationAgent.decideNextStep', () => {
       const agent = new ExplorationAgent(db, {
         complete: async () => '{"action":"click","selector":"button.primary","reasoning":"best next action"}',
         isConfigured: () => true,
+        model: undefined,
       });
 
       const step = await (agent as unknown as {

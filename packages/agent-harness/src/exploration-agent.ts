@@ -15,7 +15,7 @@ const log = appLogger.child('ExplorationAgent');
 export interface AIProvider {
   complete(prompt: string, options?: AICompletionOptions): Promise<string>;
   isConfigured(): boolean;
-  readonly model?: string;
+  readonly model: string | undefined;
 }
 
 interface AICompletionOptions {
@@ -192,7 +192,7 @@ function pushRecent(list: string[], value: string, limit = 8): void {
 function getPromptSampleReason(stepIndex: number, force = false): 'first-step' | 'interval' | 'forced' | null {
   if (force) return 'forced';
   if (stepIndex === 0) return 'first-step';
-  if (stepIndex > 0 && stepIndex % 5 === 0) return 'interval';
+  if (stepIndex > 0) return 'interval';
   return null;
 }
 

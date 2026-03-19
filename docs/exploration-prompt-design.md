@@ -226,7 +226,7 @@ category + severity + pageUrl + summary
 建议策略：
 
 - 第 0 步必采样
-- 每 5 步采样一次
+- 默认每一步都采样（100%）
 - LLM 调用失败时强制采样
 
 单条样本建议字段：
