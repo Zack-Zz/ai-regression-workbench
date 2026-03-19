@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdirSync, rmSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository } from '@zarb/storage';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { openDb, runMigrations, RunRepository, CodeTaskRepository, TestResultRepository, AnalysisRepository, CodeTaskDraftRepository } from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -25,17 +25,19 @@ beforeEach(() => {
   runMigrations(db, MIGRATIONS_DIR);
   router = buildRouter(
     new RunService(db),
-    new DiagnosticsService(db),
+    new DiagnosticsService(db, dir),
     new CodeTaskService(db, dir),
     new SettingsService(join(dir, 'config.json')),
+    undefined,
+    db,
   );
 });
 
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 function mockReq(method: string, url: string, body?: unknown): IncomingMessage {
-  const bodyStr = body ? JSON.stringify(body) : '';
-  const stream = Readable.from([bodyStr]) as unknown as IncomingMessage;
+  const bodyBuf = body ? Buffer.from(JSON.stringify(body), 'utf8') : Buffer.alloc(0);
+  const stream = Readable.from([bodyBuf]) as unknown as IncomingMessage;
   stream.method = method;
   stream.url = url;
   return stream;
@@ -49,6 +51,17 @@ function mockRes(): { res: ServerResponse; body: () => unknown; status: () => nu
     end: (data: string) => { rawBody = data; },
   } as unknown as ServerResponse;
   return { res, body: () => JSON.parse(rawBody) as unknown, status: () => statusCode };
+}
+
+function mockBinaryRes(): { res: ServerResponse; body: () => Buffer; status: () => number; headers: () => Record<string, string> } {
+  let statusCode = 200;
+  let rawBody = Buffer.alloc(0);
+  let headerMap: Record<string, string> = {};
+  const res = {
+    writeHead: (code: number, headers?: Record<string, string>) => { statusCode = code; headerMap = headers ?? {}; },
+    end: (data: string | Buffer) => { rawBody = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8'); },
+  } as unknown as ServerResponse;
+  return { res, body: () => rawBody, status: () => statusCode, headers: () => headerMap };
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +157,24 @@ describe('CodeTaskService', () => {
     expect(detail?.reviews).toHaveLength(1);
     expect(detail?.summary.status).toBe('COMMIT_PENDING');
   });
+
+  it('rejectCodeTask enforces the shared transition table', () => {
+    seedRun();
+    new CodeTaskRepository(db).create({ taskId: 't-reject', runId: 'r1', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET status='APPROVED' WHERE task_id='t-reject'").run();
+    const result = new CodeTaskService(db, dir).rejectCodeTask('t-reject');
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('CODE_TASK_STATE_INVALID');
+  });
+
+  it('cancelCodeTask rejects terminal FAILED tasks', () => {
+    seedRun();
+    new CodeTaskRepository(db).create({ taskId: 't-cancel', runId: 'r1', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET status='FAILED' WHERE task_id='t-cancel'").run();
+    const result = new CodeTaskService(db, dir).cancelCodeTask('t-cancel');
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('CODE_TASK_STATE_INVALID');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -207,10 +238,249 @@ describe('GET /settings', () => {
   });
 });
 
+describe('GET /runs/:runId/testcases/:testcaseId/artifacts/:kind', () => {
+  it('serves the persisted screenshot artifact', async () => {
+    new RunRepository(db).create({ runId: 'r-art', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const artifactDir = join(dir, 'artifacts', 'r-art', 'tc-art');
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, 'shot.png'), 'png-binary');
+    new TestResultRepository(db).upsert({
+      id: 'tr-art',
+      runId: 'r-art',
+      testcaseId: 'tc-art',
+      status: 'failed',
+      screenshotPath: 'artifacts/r-art/tc-art/shot.png',
+      startedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    const { res, status, body, headers } = mockBinaryRes();
+    await router.handle(mockReq('GET', '/runs/r-art/testcases/tc-art/artifacts/screenshot'), res);
+    expect(status()).toBe(200);
+    expect(headers()['Content-Type']).toBe('image/png');
+    expect(body().toString('utf8')).toBe('png-binary');
+  });
+
+  it('rejects artifact paths that escape the configured artifact root', async () => {
+    new RunRepository(db).create({ runId: 'r-art-escape', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const escapedPath = join(dir, 'escape.png');
+    writeFileSync(escapedPath, 'escape-binary');
+    new TestResultRepository(db).upsert({
+      id: 'tr-art-escape',
+      runId: 'r-art-escape',
+      testcaseId: 'tc-art-escape',
+      status: 'failed',
+      screenshotPath: '../escape.png',
+      startedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    const { res, status } = mockBinaryRes();
+    await router.handle(mockReq('GET', '/runs/r-art-escape/testcases/tc-art-escape/artifacts/screenshot'), res);
+    expect(status()).toBe(404);
+  });
+
+  it('serves artifact paths persisted under a custom artifact root basename', async () => {
+    const customArtifactRoot = join(dir, 'custom-shots');
+    const customRouter = buildRouter(
+      new RunService(db),
+      new DiagnosticsService(db, dir, customArtifactRoot),
+      new CodeTaskService(db, dir),
+      new SettingsService(join(dir, 'config.json')),
+      undefined,
+      db,
+    );
+    new RunRepository(db).create({ runId: 'r-art-custom', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const artifactDir = join(customArtifactRoot, 'r-art-custom', 'tc-art-custom');
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, 'shot.png'), 'png-custom');
+    new TestResultRepository(db).upsert({
+      id: 'tr-art-custom',
+      runId: 'r-art-custom',
+      testcaseId: 'tc-art-custom',
+      status: 'failed',
+      screenshotPath: 'custom-shots/r-art-custom/tc-art-custom/shot.png',
+      startedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    const { res, status, body } = mockBinaryRes();
+    await customRouter.handle(mockReq('GET', '/runs/r-art-custom/testcases/tc-art-custom/artifacts/screenshot'), res);
+    expect(status()).toBe(200);
+    expect(body().toString('utf8')).toBe('png-custom');
+  });
+});
+
+describe('GET /code-tasks/:taskId/artifacts/:kind', () => {
+  it('serves the persisted diff artifact', async () => {
+    new RunRepository(db).create({ runId: 'r-task-art', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const codeTaskDir = join(dir, 'code-tasks', 't-art');
+    mkdirSync(codeTaskDir, { recursive: true });
+    writeFileSync(join(codeTaskDir, 'changes.diff'), 'diff --git');
+    new CodeTaskRepository(db).create({ taskId: 't-art', runId: 'r-task-art', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET diff_path = 'code-tasks/t-art/changes.diff', updated_at = ? WHERE task_id = 't-art'").run(new Date().toISOString());
+
+    const { res, status, body, headers } = mockBinaryRes();
+    await router.handle(mockReq('GET', '/code-tasks/t-art/artifacts/diff'), res);
+    expect(status()).toBe(200);
+    expect(headers()['Content-Type']).toContain('text/plain');
+    expect(body().toString('utf8')).toBe('diff --git');
+  });
+
+  it('rejects code-task artifact paths that escape the configured root', async () => {
+    new RunRepository(db).create({ runId: 'r-task-art-escape', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    writeFileSync(join(dir, 'outside.diff'), 'outside diff');
+    new CodeTaskRepository(db).create({ taskId: 't-art-escape', runId: 'r-task-art-escape', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET diff_path = '../outside.diff', updated_at = ? WHERE task_id = 't-art-escape'").run(new Date().toISOString());
+
+    const { res, status } = mockBinaryRes();
+    await router.handle(mockReq('GET', '/code-tasks/t-art-escape/artifacts/diff'), res);
+    expect(status()).toBe(404);
+  });
+
+  it('serves code-task artifacts persisted under a custom code-task root basename', async () => {
+    const customCodeTaskRoot = join(dir, 'custom-code-tasks');
+    const customRouter = buildRouter(
+      new RunService(db),
+      new DiagnosticsService(db, dir),
+      new CodeTaskService(db, dir, undefined, undefined, customCodeTaskRoot),
+      new SettingsService(join(dir, 'config.json')),
+      undefined,
+      db,
+    );
+    new RunRepository(db).create({ runId: 'r-task-art-custom', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const codeTaskDir = join(customCodeTaskRoot, 't-art-custom');
+    mkdirSync(codeTaskDir, { recursive: true });
+    writeFileSync(join(codeTaskDir, 'changes.diff'), 'custom diff --git');
+    new CodeTaskRepository(db).create({ taskId: 't-art-custom', runId: 'r-task-art-custom', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET diff_path = 'custom-code-tasks/t-art-custom/changes.diff', updated_at = ? WHERE task_id = 't-art-custom'").run(new Date().toISOString());
+
+    const { res, status, body } = mockBinaryRes();
+    await customRouter.handle(mockReq('GET', '/code-tasks/t-art-custom/artifacts/diff'), res);
+    expect(status()).toBe(200);
+    expect(body().toString('utf8')).toBe('custom diff --git');
+  });
+});
+
 describe('GET /runs/:runId (not found)', () => {
   it('returns 404', async () => {
     const { res, status } = mockRes();
     await router.handle(mockReq('GET', '/runs/nope'), res);
+    expect(status()).toBe(404);
+  });
+});
+
+describe('Project route boundaries', () => {
+  async function createProject(name: string): Promise<string> {
+    const { res, body, status } = mockRes();
+    await router.handle(mockReq('POST', '/projects', { name }), res);
+    expect(status()).toBe(200);
+    return (body() as { data: { id: string } }).data.id;
+  }
+
+  async function createSite(projectId: string, name: string, baseUrl: string): Promise<string> {
+    const { res, body, status } = mockRes();
+    await router.handle(mockReq('POST', `/projects/${projectId}/sites`, { name, baseUrl }), res);
+    expect(status()).toBe(200);
+    return (body() as { data: { id: string } }).data.id;
+  }
+
+  async function createRepo(projectId: string, name: string, path: string): Promise<string> {
+    const { res, body, status } = mockRes();
+    await router.handle(mockReq('POST', `/projects/${projectId}/repos`, { name, path }), res);
+    expect(status()).toBe(200);
+    return (body() as { data: { id: string } }).data.id;
+  }
+
+  it('rejects updating a site through the wrong project', async () => {
+    const projectA = await createProject('A');
+    const projectB = await createProject('B');
+    const siteId = await createSite(projectA, 'Site A', 'https://a.example.com');
+
+    const { res, status } = mockRes();
+    await router.handle(mockReq('PUT', `/projects/${projectB}/sites/${siteId}`, { name: 'Hacked' }), res);
+    expect(status()).toBe(404);
+  });
+
+  it('rejects accessing repo git-info through the wrong project', async () => {
+    const projectA = await createProject('A');
+    const projectB = await createProject('B');
+    const repoId = await createRepo(projectA, 'Repo A', dir);
+
+    const { res, status } = mockRes();
+    await router.handle(mockReq('GET', `/projects/${projectB}/repos/${repoId}/git-info`), res);
+    expect(status()).toBe(404);
+  });
+
+  it('scopes project selectors to repos in that project only', async () => {
+    const projectA = await createProject('A');
+    const projectB = await createProject('B');
+    const siteA = await createSite(projectA, 'Site A', 'https://a.example.com');
+    const siteB = await createSite(projectB, 'Site B', 'https://b.example.com');
+    const repoA = await createRepo(projectA, 'Repo A', dir);
+    const repoB = await createRepo(projectB, 'Repo B', dir);
+
+    db.prepare(`
+      INSERT INTO test_selector_cache (id, site_id, repo_id, type, value, source, last_seen, updated_at)
+      VALUES (?, ?, ?, 'suite', ?, 'scan', ?, ?)
+    `).run('sel-a', siteA, repoA, 'suite-a', '2026-03-19T00:00:00.000Z', '2026-03-19T00:00:00.000Z');
+    db.prepare(`
+      INSERT INTO test_selector_cache (id, site_id, repo_id, type, value, source, last_seen, updated_at)
+      VALUES (?, ?, ?, 'suite', ?, 'scan', ?, ?)
+    `).run('sel-b', siteB, repoB, 'suite-b', '2026-03-19T00:00:00.000Z', '2026-03-19T00:00:00.000Z');
+
+    const { res, body, status } = mockRes();
+    await router.handle(mockReq('GET', `/projects/${projectA}/selectors?type=suite`), res);
+    expect(status()).toBe(200);
+    const rows = (body() as { data: Array<{ value: string }> }).data;
+    expect(rows.map((row) => row.value)).toEqual(['suite-a']);
+  });
+
+  it('legacy workspace fallback does not bypass explicit repo selection for managed projects', async () => {
+    const projectId = await createProject('Managed Project');
+    const siteId = await createSite(projectId, 'Managed Site', 'https://managed.example.com');
+
+    const settingsRes = mockRes();
+    await router.handle(mockReq('PUT', '/settings', {
+      patch: { workspace: { targetProjectPath: '/legacy/workspace/path' } },
+    }), settingsRes.res);
+    expect(settingsRes.status()).toBe(200);
+
+    await createRepo(projectId, 'Repo A', dir);
+
+    const { res, body, status } = mockRes();
+    await router.handle(mockReq('POST', '/runs', {
+      runMode: 'regression',
+      projectId,
+      siteId,
+      selector: { suite: 'smoke' },
+    }), res);
+
+    expect(status()).toBe(400);
+    expect((body() as { errorCode?: string }).errorCode).toBe('RUN_REPO_REQUIRED');
+  });
+
+  it('rejects promoting a draft through a different testcase route', async () => {
+    new RunRepository(db).create({ runId: 'r-draft', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    new AnalysisRepository(db).save({
+      id: 'analysis-tc-1',
+      runId: 'r-draft',
+      testcaseId: 'tc-1',
+      createdAt: new Date().toISOString(),
+    });
+    new CodeTaskDraftRepository(db).save({
+      id: 'draft-tc-1',
+      runId: 'r-draft',
+      analysisId: 'analysis-tc-1',
+      goal: 'fix testcase',
+      target: 'testcase',
+      workspacePath: '/ws',
+      promptTemplateVersion: 'v1',
+      createdAt: new Date().toISOString(),
+    });
+
+    const { res, status } = mockRes();
+    await router.handle(mockReq('POST', '/runs/r-draft/testcases/tc-2/drafts/draft-tc-1/promote'), res);
     expect(status()).toBe(404);
   });
 });

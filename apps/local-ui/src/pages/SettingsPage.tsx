@@ -93,13 +93,19 @@ export function SettingsPage(): React.ReactElement {
       )}
 
       <SettingsSection title={t('settings.storage')}>
-        <SettingRow label={t('settings.field.sqlitePath')} value={String(val('storage', 'sqlitePath'))} onChange={v => { set('storage', 'sqlitePath', v); }} description={t('settings.field.sqlitePath.desc')} />
-        <SettingRow label={t('settings.field.artifactRoot')} value={String(val('storage', 'artifactRoot'))} onChange={v => { set('storage', 'artifactRoot', v); }} description={t('settings.field.artifactRoot.desc')} />
-        <SettingRow label={t('settings.field.diagnosticRoot')} value={String(val('storage', 'diagnosticRoot'))} onChange={v => { set('storage', 'diagnosticRoot', v); }} description={t('settings.field.diagnosticRoot.desc')} />
-        <SettingRow label={t('settings.field.codeTaskRoot')} value={String(val('storage', 'codeTaskRoot'))} onChange={v => { set('storage', 'codeTaskRoot', v); }} description={t('settings.field.codeTaskRoot.desc')} />
+        <SettingRow label={t('settings.field.sqlitePath')} value={String(val('storage', 'sqlitePath'))} onChange={v => { set('storage', 'sqlitePath', v); }} description={t('settings.field.sqlitePath.desc')} {...(data.resolvedPaths?.sqlitePath ? { resolvedPath: data.resolvedPaths.sqlitePath } : {})} />
+        <SettingRow label={t('settings.field.artifactRoot')} value={String(val('storage', 'artifactRoot'))} onChange={v => { set('storage', 'artifactRoot', v); }} description={t('settings.field.artifactRoot.desc')} {...(data.resolvedPaths?.artifactRoot ? { resolvedPath: data.resolvedPaths.artifactRoot } : {})} />
+        <SettingRow label={t('settings.field.diagnosticRoot')} value={String(val('storage', 'diagnosticRoot'))} onChange={v => { set('storage', 'diagnosticRoot', v); }} description={t('settings.field.diagnosticRoot.desc')} {...(data.resolvedPaths?.diagnosticRoot ? { resolvedPath: data.resolvedPaths.diagnosticRoot } : {})} />
+        <SettingRow label={t('settings.field.codeTaskRoot')} value={String(val('storage', 'codeTaskRoot'))} onChange={v => { set('storage', 'codeTaskRoot', v); }} description={t('settings.field.codeTaskRoot.desc')} {...(data.resolvedPaths?.codeTaskRoot ? { resolvedPath: data.resolvedPaths.codeTaskRoot } : {})} />
       </SettingsSection>
 
       <SettingsSection title={t('settings.workspace')}>
+        <div style={{ padding: '0.75rem 1rem', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6, fontSize: '0.9em', color: '#9a3412' }}>
+          项目管理模式下，目标代码目录由“项目 / 仓库”决定。这里的 workspace 字段仅保留给旧运行路径和兼容场景使用，不再是主执行入口。
+        </div>
+        <SettingDisplayRow label={t('settings.field.targetProjectPath')} value={String(val('workspace', 'targetProjectPath') ?? '') || '—'} description="兼容字段：仅在未指定 project/repo 的旧运行路径下作为 fallback 使用" />
+        <SettingDisplayRow label={t('settings.field.gitRootStrategy')} value={String(val('workspace', 'gitRootStrategy') ?? '') || '—'} description="兼容字段：用于 legacy workspace 根目录识别" />
+        <SettingDisplayRow label={t('settings.field.allowOutsideToolWorkspace')} value={String(val('workspace', 'allowOutsideToolWorkspace') ?? '') || 'false'} description="兼容字段：项目管理模式下不再作为主控制项" />
         <SettingRow label="Playwright 测试集根目录" value={String(val('workspace', 'testSuitesRoot') ?? '')} onChange={v => { set('workspace', 'testSuitesRoot', v); }} description="存放所有项目 Playwright 测试集的根目录" />
       </SettingsSection>
 
@@ -185,14 +191,35 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
-function SettingRow({ label, value, onChange, description, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; description?: string; type?: string }): React.ReactElement {
+function SettingRow({ label, value, onChange, description, type = 'text', resolvedPath }: { label: string; value: string; onChange: (v: string) => void; description?: string; type?: string; resolvedPath?: string }): React.ReactElement {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9em' }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', fontSize: '0.9em' }}>
       <div style={{ minWidth: 220 }}>
         <div style={{ fontWeight: 500 }}>{label}</div>
         {description && <div style={{ color: '#888', fontSize: '0.8em' }}>{description}</div>}
       </div>
-      <input type={type} value={value} onChange={e => { onChange(e.target.value); }} style={{ flex: 1, padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        <input type={type} value={value} onChange={e => { onChange(e.target.value); }} style={{ width: '100%', padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
+        {resolvedPath && (
+          <div style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 4, background: '#f9fafb', color: '#555', wordBreak: 'break-all', fontSize: '0.82em' }}>
+            <strong>{t('settings.field.resolvedPath')}：</strong>{resolvedPath}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SettingDisplayRow({ label, value, description }: { label: string; value: string; description?: string }): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', fontSize: '0.9em' }}>
+      <div style={{ minWidth: 220 }}>
+        <div style={{ fontWeight: 500 }}>{label}</div>
+        {description && <div style={{ color: '#888', fontSize: '0.8em' }}>{description}</div>}
+      </div>
+      <div style={{ flex: 1, padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 4, background: '#f9fafb', color: '#555', wordBreak: 'break-all' }}>
+        {value}
+      </div>
     </div>
   );
 }

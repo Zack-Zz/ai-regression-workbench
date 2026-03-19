@@ -88,6 +88,10 @@ export class SiteCredentialRepository {
     return this.db.prepare('SELECT * FROM site_credentials WHERE id = ?').get(id) as SiteCredentialRow | undefined;
   }
 
+  findByIdAndSiteId(id: string, siteId: string): SiteCredentialRow | undefined {
+    return this.db.prepare('SELECT * FROM site_credentials WHERE id = ? AND site_id = ?').get(id, siteId) as SiteCredentialRow | undefined;
+  }
+
   findBySiteId(siteId: string): SiteCredentialRow[] {
     return this.db.prepare('SELECT * FROM site_credentials WHERE site_id = ? ORDER BY sort_order ASC').all(siteId) as SiteCredentialRow[];
   }

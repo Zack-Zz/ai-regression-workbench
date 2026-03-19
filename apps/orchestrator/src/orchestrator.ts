@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { deriveRunStatusFromCodeTasks, isRunInCodeTaskCoordinationStage } from '@zarb/shared-types';
 import type { RunStatus, CodeTaskStatus, RunMode, RunScopeType } from '@zarb/shared-types';
 import type { Db, RunRow, CodeTaskRow } from '@zarb/storage';
 import { RunRepository, CodeTaskRepository } from '@zarb/storage';
@@ -261,32 +262,11 @@ export class Orchestrator {
    */
   recomputeRunStatus(runId: string): void {
     const run = this.requireRun(runId);
-    const CODE_TASK_STAGES: ReadonlySet<RunStatus> = new Set([
-      'AWAITING_CODE_ACTION', 'RUNNING_CODE_TASK', 'AWAITING_REVIEW', 'READY_TO_COMMIT', 'COMPLETED',
-    ]);
-    // Only recompute when run is in a code-task coordination stage
-    if (!CODE_TASK_STAGES.has(run.status) && run.status !== 'ANALYZING_FAILURES') return;
+    if (!isRunInCodeTaskCoordinationStage(run.status)) return;
 
     const allTasks = this.tasks.list({ runId }).items;
-    if (allTasks.length === 0) return;
-
-    const statuses = allTasks.map((t) => t.status);
-    const has = (s: CodeTaskStatus) => statuses.includes(s);
-
-    let newStatus: RunStatus;
-
-    if (has('RUNNING') || has('VERIFYING')) {
-      newStatus = 'RUNNING_CODE_TASK';
-    } else if (has('COMMIT_PENDING')) {
-      newStatus = 'READY_TO_COMMIT';
-    } else if (has('SUCCEEDED')) {
-      newStatus = 'AWAITING_REVIEW';
-    } else if (has('DRAFT') || has('PENDING_APPROVAL') || has('APPROVED')) {
-      newStatus = 'AWAITING_CODE_ACTION';
-    } else {
-      // All tasks are terminal (COMMITTED / REJECTED / CANCELLED / FAILED)
-      newStatus = 'COMPLETED';
-    }
+    const newStatus = deriveRunStatusFromCodeTasks(allTasks.map((t) => t.status));
+    if (!newStatus) return;
 
     if (newStatus !== run.status) {
       const now = new Date().toISOString();

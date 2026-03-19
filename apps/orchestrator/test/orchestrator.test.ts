@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync } from 'node:fs';
 import { openDb, runMigrations } from '@zarb/storage';
+import { deriveRunStatusFromCodeTasks, isRunInCodeTaskCoordinationStage } from '@zarb/shared-types';
 import { Orchestrator } from '../src/orchestrator.js';
 import { isRunTransitionAllowed, PAUSABLE_RUN_STATUSES, CANCELLABLE_RUN_STATUSES } from '../src/run-transitions.js';
 import { isCodeTaskTransitionAllowed } from '../src/code-task-transitions.js';
@@ -61,6 +62,9 @@ describe('isCodeTaskTransitionAllowed', () => {
   it('allows DRAFT -> PENDING_APPROVAL', () => {
     expect(isCodeTaskTransitionAllowed('DRAFT', 'PENDING_APPROVAL')).toBe(true);
   });
+  it('allows DRAFT -> APPROVED for direct approval flows', () => {
+    expect(isCodeTaskTransitionAllowed('DRAFT', 'APPROVED')).toBe(true);
+  });
   it('allows SUCCEEDED -> COMMIT_PENDING (review accept)', () => {
     expect(isCodeTaskTransitionAllowed('SUCCEEDED', 'COMMIT_PENDING')).toBe(true);
   });
@@ -69,6 +73,16 @@ describe('isCodeTaskTransitionAllowed', () => {
   });
   it('rejects COMMITTED -> RUNNING', () => {
     expect(isCodeTaskTransitionAllowed('COMMITTED', 'RUNNING')).toBe(false);
+  });
+});
+
+describe('shared lifecycle helpers', () => {
+  it('derives READY_TO_COMMIT before AWAITING_REVIEW when commit-pending tasks exist', () => {
+    expect(deriveRunStatusFromCodeTasks(['SUCCEEDED', 'COMMIT_PENDING'])).toBe('READY_TO_COMMIT');
+  });
+
+  it('treats ANALYZING_FAILURES as a code-task coordination stage', () => {
+    expect(isRunInCodeTaskCoordinationStage('ANALYZING_FAILURES')).toBe(true);
   });
 });
 

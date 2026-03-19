@@ -61,6 +61,10 @@ export class LocalRepoRepository {
     return this.db.prepare('SELECT * FROM local_repos WHERE id = ?').get(id) as LocalRepoRow | undefined;
   }
 
+  findByIdAndProjectId(id: string, projectId: string): LocalRepoRow | undefined {
+    return this.db.prepare('SELECT * FROM local_repos WHERE id = ? AND project_id = ?').get(id, projectId) as LocalRepoRow | undefined;
+  }
+
   findByProjectId(projectId: string): LocalRepoRow[] {
     return this.db.prepare('SELECT * FROM local_repos WHERE project_id = ? ORDER BY created_at ASC').all(projectId) as LocalRepoRow[];
   }

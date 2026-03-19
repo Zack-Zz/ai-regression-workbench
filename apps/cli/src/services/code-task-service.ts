@@ -7,8 +7,15 @@ import type {
   CodeTaskSummary, CodeTaskDetail, CodeTaskSummaryPage, ActionResult,
   ListCodeTasksQuery, SubmitReviewInput, CreateCommitInput,
 } from '@zarb/shared-types';
+import {
+  deriveRunStatusFromCodeTasks,
+  isCodeTaskTransitionAllowed,
+  isRunInCodeTaskCoordinationStage,
+} from '@zarb/shared-types';
+import type { RunStatus } from '@zarb/shared-types';
 import { emitEvent } from '../event-bus.js';
 import { appLogger } from '@zarb/logger';
+import { resolveConfiguredRelativePath } from '../storage-paths.js';
 
 const log = appLogger.child('CodeTaskService');
 
@@ -41,21 +48,50 @@ export class CodeTaskService {
   private readonly artifactWriter: ArtifactWriter;
   private readonly agent: CodexCliAgent | KiroCliAgent;
   private readonly commitManager: CommitManager;
+  private readonly codeTaskRoot: string;
 
-  constructor(private readonly db: Db, private readonly dataRoot: string, agent?: CodexCliAgent | KiroCliAgent, commitManager?: CommitManager) {
+  constructor(
+    private readonly db: Db,
+    private readonly dataRoot: string,
+    agent?: CodexCliAgent | KiroCliAgent,
+    commitManager?: CommitManager,
+    codeTaskRoot?: string,
+  ) {
     this.tasks = new CodeTaskRepository(db);
     this.reviews = new ReviewRepository(db);
     this.commits = new CommitRepository(db);
     this.drafts = new CodeTaskDraftRepository(db);
     this.analyses = new AnalysisRepository(db);
     this.sessionManager = new HarnessSessionManager(db);
-    this.artifactWriter = new ArtifactWriter(dataRoot, db);
+    this.artifactWriter = new ArtifactWriter(dataRoot, db, codeTaskRoot);
     this.agent = agent ?? new CodexCliAgent();
     this.commitManager = commitManager ?? new CommitManager(db);
+    this.codeTaskRoot = codeTaskRoot ?? `${dataRoot}/code-tasks`;
   }
 
   private emitTask(taskId: string, type: 'code-task.created' | 'code-task.updated' = 'code-task.updated'): void {
     emitEvent({ type, id: taskId });
+  }
+
+  private syncRunForTask(taskId: string): void {
+    const row = this.tasks.findById(taskId);
+    if (!row) return;
+    this.syncRunForRun(row.run_id);
+  }
+
+  private syncRunForRun(runId: string): void {
+    const run = this.db.prepare('SELECT status FROM test_runs WHERE run_id = ?').get(runId) as { status: RunStatus } | undefined;
+    if (!run) return;
+    if (!isRunInCodeTaskCoordinationStage(run.status)) return;
+
+    const allTasks = this.tasks.list({ runId, limit: 1000 }).items;
+    const newStatus = deriveRunStatusFromCodeTasks(allTasks.map((task) => task.status));
+    if (!newStatus) return;
+
+    if (newStatus !== run.status) {
+      this.db.prepare('UPDATE test_runs SET status = ?, current_stage = ?, updated_at = ? WHERE run_id = ?')
+        .run(newStatus, newStatus, new Date().toISOString(), runId);
+    }
   }
 
   listCodeTasks(query: ListCodeTasksQuery = {}): CodeTaskSummaryPage {
@@ -76,14 +112,27 @@ export class CodeTaskService {
     return all.filter(d => d.analysis_id === analysis.id);
   }
 
-  promoteToCodeTask(draftId: string): ActionResult & { taskId?: string } {
+  promoteToCodeTask(draftId: string, runId?: string, testcaseId?: string): ActionResult & { taskId?: string } {
     const draft = this.drafts.findById(draftId);
     if (!draft) return { success: false, message: 'Draft not found', errorCode: 'DRAFT_NOT_FOUND' };
+    if (runId && draft.run_id !== runId) {
+      return { success: false, message: 'Draft not found', errorCode: 'DRAFT_NOT_FOUND' };
+    }
+    const linkedAnalysis = draft.analysis_id
+      ? this.db.prepare('SELECT testcase_id FROM failure_analysis WHERE id = ? LIMIT 1').get(draft.analysis_id) as { testcase_id: string | null } | undefined
+      : undefined;
+    if (testcaseId) {
+      const analysis = this.analyses.findByTestcase(runId ?? draft.run_id, testcaseId);
+      if (!analysis || draft.analysis_id !== analysis.id) {
+        return { success: false, message: 'Draft not found', errorCode: 'DRAFT_NOT_FOUND' };
+      }
+    }
     const taskId = `task-${randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
     this.tasks.create({
       taskId,
       runId: draft.run_id,
+      ...(linkedAnalysis?.testcase_id ? { testcaseId: linkedAnalysis.testcase_id } : {}),
       workspacePath: draft.workspace_path,
       goal: draft.goal,
       ...(draft.scope_paths_json ? { scopePathsJson: draft.scope_paths_json } : {}),
@@ -94,6 +143,7 @@ export class CodeTaskService {
     // Set status to PENDING_APPROVAL after creation
     this.tasks.update(taskId, { status: 'PENDING_APPROVAL', updatedAt: now });
     this.emitTask(taskId, 'code-task.created');
+    this.syncRunForRun(draft.run_id);
     return { success: true, message: 'Promoted to CodeTask', taskId };
   }
 
@@ -135,24 +185,44 @@ export class CodeTaskService {
     };
   }
 
+  getCodeTaskArtifactPath(
+    taskId: string,
+    kind: 'diff' | 'patch' | 'raw-output' | 'verify-output',
+  ): string | null {
+    const row = this.tasks.findById(taskId);
+    if (!row) return null;
+    const relativePath = kind === 'diff'
+      ? row.diff_path
+      : kind === 'patch'
+        ? row.patch_path
+        : kind === 'raw-output'
+          ? row.raw_output_path
+          : row.verify_output_path;
+    if (!relativePath) return null;
+    return resolveConfiguredRelativePath(this.codeTaskRoot, 'code-tasks', relativePath);
+  }
+
   approveCodeTask(taskId: string): ActionResult {
     const row = this.tasks.findById(taskId);
     if (!row) return { success: false, message: 'CodeTask not found', errorCode: 'CODE_TASK_NOT_FOUND' };
-    if (row.status !== 'PENDING_APPROVAL' && row.status !== 'DRAFT') {
+    if (!isCodeTaskTransitionAllowed(row.status, 'APPROVED')) {
       return { success: false, message: `CodeTask cannot be approved in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
-    this.tasks.update(taskId, { status: 'APPROVED', updatedAt: new Date().toISOString() }); this.emitTask(taskId);
+    this.tasks.update(taskId, { status: 'APPROVED', updatedAt: new Date().toISOString() });
+    this.emitTask(taskId);
+    this.syncRunForTask(taskId);
     return { success: true, message: 'CodeTask approved' };
   }
 
   rejectCodeTask(taskId: string): ActionResult {
     const row = this.tasks.findById(taskId);
     if (!row) return { success: false, message: 'CodeTask not found', errorCode: 'CODE_TASK_NOT_FOUND' };
-    if (row.status === 'COMMITTED' || row.status === 'CANCELLED') {
+    if (!isCodeTaskTransitionAllowed(row.status, 'REJECTED')) {
       return { success: false, message: `CodeTask cannot be rejected in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
     this.tasks.update(taskId, { status: 'REJECTED', updatedAt: new Date().toISOString() });
     this.emitTask(taskId);
+    this.syncRunForTask(taskId);
     return { success: true, message: 'CodeTask rejected' };
   }
 
@@ -166,6 +236,7 @@ export class CodeTaskService {
     const now = new Date().toISOString();
     this.tasks.update(taskId, { status: 'RUNNING', updatedAt: now });
     this.emitTask(taskId);
+    this.syncRunForTask(taskId);
 
     // Fire-and-forget: return immediately, run agent in background
     void this.runExecution(taskId, row);
@@ -204,9 +275,10 @@ export class CodeTaskService {
 
       if (agentResult.exitCode !== 0) {
         log.warn('agent run failed', { taskId, exitCode: agentResult.exitCode });
-        this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
-        this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath: `code-tasks/${taskId}/raw-output.txt`, updatedAt: new Date().toISOString() });
+        const rawOutputPath = this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
+        this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath, updatedAt: new Date().toISOString() });
         this.emitTask(taskId);
+        this.syncRunForTask(taskId);
         this.sessionManager.completeSession(session.session_id);
         return;
       }
@@ -215,6 +287,7 @@ export class CodeTaskService {
       log.info('code task verifying', { taskId, verificationCommands });
       this.tasks.update(taskId, { status: 'VERIFYING', updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
+      this.syncRunForTask(taskId);
 
       const artifacts = this.artifactWriter.generateArtifacts({
         taskId,
@@ -228,11 +301,13 @@ export class CodeTaskService {
       log.info('code task verify done', { taskId, verifyPassed: artifacts.verifyPassed, finalStatus });
       this.tasks.update(taskId, { status: finalStatus, updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
+      this.syncRunForTask(taskId);
       this.sessionManager.completeSession(session.session_id);
     } catch (err) {
       log.error('code task execution threw', { taskId, error: String(err) });
       this.tasks.update(taskId, { status: 'FAILED', updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
+      this.syncRunForTask(taskId);
       this.sessionManager.completeSession(session.session_id);
     }
   }
@@ -261,17 +336,19 @@ export class CodeTaskService {
       attempt: row.attempt + 1,
       createdAt: now,
     });
+    this.syncRunForRun(row.run_id);
     return { success: true, message: 'CodeTask retry created', nextSuggestedAction: 'refresh-code-task' };
   }
 
   cancelCodeTask(taskId: string): ActionResult {
     const row = this.tasks.findById(taskId);
     if (!row) return { success: false, message: 'CodeTask not found', errorCode: 'CODE_TASK_NOT_FOUND' };
-    if (row.status === 'COMMITTED' || row.status === 'CANCELLED') {
+    if (!isCodeTaskTransitionAllowed(row.status, 'CANCELLED')) {
       return { success: false, message: `CodeTask cannot be cancelled in status ${row.status}`, errorCode: 'CODE_TASK_STATE_INVALID' };
     }
     this.tasks.update(taskId, { status: 'CANCELLED', updatedAt: new Date().toISOString() });
     this.emitTask(taskId);
+    this.syncRunForTask(taskId);
     return { success: true, message: 'CodeTask cancelled' };
   }
 
@@ -313,12 +390,15 @@ export class CodeTaskService {
     if (input.decision === 'accept') {
       this.tasks.update(input.taskId, { status: 'COMMIT_PENDING', updatedAt: now });
       this.emitTask(input.taskId);
+      this.syncRunForTask(input.taskId);
     } else if (input.decision === 'reject') {
       this.tasks.update(input.taskId, { status: 'REJECTED', updatedAt: now });
       this.emitTask(input.taskId);
+      this.syncRunForTask(input.taskId);
     } else {
-      // retry: mark original as superseded and immediately create new attempt
-      this.tasks.update(input.taskId, { status: 'FAILED', updatedAt: now });
+      // retry: align with the orchestrator flow by rejecting the reviewed attempt
+      // and creating a follow-up draft task as the next attempt.
+      this.tasks.update(input.taskId, { status: 'REJECTED', updatedAt: now });
       this.emitTask(input.taskId);
       const newTaskId = `task-${String(Date.now())}`;
       this.tasks.create({
@@ -337,6 +417,7 @@ export class CodeTaskService {
         attempt: row.attempt + 1,
         createdAt: now,
       });
+      this.syncRunForRun(row.run_id);
     }
     return { success: true, message: `Review submitted: ${input.decision}` };
   }
@@ -376,6 +457,18 @@ export class CodeTaskService {
       return { success: false, message: result.errorMessage ?? 'Commit failed', errorCode: 'COMMIT_FAILED' };
     }
 
+    const now = new Date().toISOString();
+    if (commitRow) {
+      this.commits.update(commitRow.id, {
+        status: 'committed',
+        ...(result.commitSha ? { commitSha: result.commitSha } : {}),
+        ...(result.branchName ? { branchName: result.branchName } : {}),
+        updatedAt: now,
+      });
+    }
+    this.tasks.update(input.taskId, { status: 'COMMITTED', updatedAt: now });
+    this.emitTask(input.taskId);
+    this.syncRunForTask(input.taskId);
     return { success: true, message: `Committed: ${result.commitSha ?? ''}` };
   }
 }

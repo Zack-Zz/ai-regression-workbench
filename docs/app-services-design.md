@@ -108,6 +108,7 @@
 - 获取 testcase 执行明细（流程/点击/接口）
 - 获取 trace / logs / analysis
 - 重新触发 analysis
+- 读写 `storage.diagnosticRoot` 下的 diagnostics summary 文件，并兼容旧 `data/diagnostics` 布局读取
 
 ### 4.5 CodeTaskService
 
@@ -116,6 +117,7 @@
 - 查询 code tasks
 - approve / reject / execute / retry / cancel
 - 获取 code task detail
+- 将 diff / patch / verify / raw-output 等产物写入 `storage.codeTaskRoot`
 
 ### 4.6 ReviewService
 
@@ -140,6 +142,13 @@
 - 校验配置 patch 是否可应用
 - 保存配置到 `config.local.yaml`
 - 将配置变更即时应用到运行时模块
+
+存储相关即时生效约束：
+
+- `storage.artifactRoot` 影响后续新 run 的 screenshot / video / trace / network artifact 写入目录
+- `storage.diagnosticRoot` 影响后续 diagnostics summary 文件写入目录
+- `storage.codeTaskRoot` 影响后续 code task diff / patch / verify / raw-output 写入目录
+- 历史数据不自动迁移；读取侧应尽量兼容旧默认布局
 
 ## 5. 方法清单
 

@@ -16,14 +16,36 @@ export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: (
 }
 
 const RUN_STATUS_COLOR: Record<string, string> = {
-  COMPLETED: '#2a7', FAILED: '#c33', CANCELLED: '#888', PAUSED: '#f90',
-  RUNNING_TESTS: '#36c', RUNNING_EXPLORATION: '#36c', AWAITING_REVIEW: '#a60',
+  COMPLETED: '#2a7',
+  FAILED: '#c33',
+  CANCELLED: '#888',
+  PAUSED: '#f59e0b',
+  CREATED: '#6b7280',
+  RUNNING_TESTS: '#2563eb',
+  PLANNING_EXPLORATION: '#2563eb',
+  RUNNING_EXPLORATION: '#2563eb',
+  COLLECTING_ARTIFACTS: '#0f766e',
+  FETCHING_TRACES: '#0f766e',
+  FETCHING_LOGS: '#0f766e',
+  ANALYZING_FAILURES: '#7c3aed',
+  AWAITING_CODE_ACTION: '#ea580c',
+  RUNNING_CODE_TASK: '#2563eb',
+  AWAITING_REVIEW: '#a16207',
+  READY_TO_COMMIT: '#047857',
 };
 
 const TASK_STATUS_COLOR: Record<string, string> = {
-  SUCCEEDED: '#2a7', COMMITTED: '#2a7', FAILED: '#c33', REJECTED: '#c33',
-  CANCELLED: '#888', RUNNING: '#36c', VERIFYING: '#36c',
-  APPROVED: '#0a0', PENDING_APPROVAL: '#f90', COMMIT_PENDING: '#a60',
+  DRAFT: '#6b7280',
+  SUCCEEDED: '#2a7',
+  COMMITTED: '#2a7',
+  FAILED: '#c33',
+  REJECTED: '#c33',
+  CANCELLED: '#888',
+  RUNNING: '#36c',
+  VERIFYING: '#36c',
+  APPROVED: '#0a0',
+  PENDING_APPROVAL: '#f90',
+  COMMIT_PENDING: '#a60',
 };
 
 export function StatusBadge({ status, type = 'run' }: { status: string; type?: 'run' | 'task' }): React.ReactElement {
@@ -93,6 +115,44 @@ export function Table({ headers, rows }: { headers: string[]; rows: React.ReactN
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+export function ImagePreviewModal({ src, title, onClose }: { src: string; title?: string; onClose: () => void }): React.ReactElement {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 42, 0.78)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => { e.stopPropagation(); }}
+        style={{
+          maxWidth: 'min(1100px, 92vw)',
+          maxHeight: '92vh',
+          background: '#fff',
+          borderRadius: 10,
+          overflow: 'hidden',
+          boxShadow: '0 24px 80px rgba(15, 23, 42, 0.35)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', borderBottom: '1px solid #e5e7eb', background: '#f8fafc' }}>
+          <div style={{ fontWeight: 600 }}>{title ?? 'Image Preview'}</div>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1.25rem', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ padding: '1rem', background: '#0f172a' }}>
+          <img src={src} alt={title ?? 'preview'} style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(92vh - 110px)', margin: '0 auto', objectFit: 'contain' }} />
+        </div>
+      </div>
     </div>
   );
 }

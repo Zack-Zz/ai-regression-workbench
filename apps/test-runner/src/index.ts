@@ -32,7 +32,6 @@ import {
   TestResultRepository,
   CorrelationContextRepository,
   RunEventRepository,
-  artifactsDir,
   correlationContextPath,
 } from '@zarb/storage';
 import type { SaveRunEventInput, UpsertTestResultInput, SaveCorrelationContextInput } from '@zarb/storage';
@@ -57,6 +56,8 @@ export interface RunnerInput {
   };
   /** Absolute path to the workbench data root (for artifact storage) */
   dataRoot: string;
+  /** Absolute root directory for persisted screenshots/traces/videos/network artifacts. */
+  artifactRoot?: string;
   /** Correlation header names to extract from HAR network logs */
   correlationHeaders?: string[];
   /** Called with running totals as each test completes (optional) */
@@ -123,6 +124,11 @@ interface FlatTest {
   lastResult?: PWTestResult;
 }
 
+function resolveArtifactLayout(artifactRoot: string, runId: string, testcaseId: string): { relDir: string; absDir: string } {
+  const relDir = join(basename(artifactRoot), runId, testcaseId);
+  return { relDir, absDir: join(dirname(artifactRoot), relDir) };
+}
+
 // ---------------------------------------------------------------------------
 // Main runner
 // ---------------------------------------------------------------------------
@@ -169,6 +175,7 @@ export class TestRunner {
    */
   async execute(input: RunnerInput): Promise<RunnerResult> {
     const { runId, workspacePath, selector, dataRoot } = input;
+    const artifactRoot = input.artifactRoot ?? join(dataRoot, 'artifacts');
 
     if (!existsSync(workspacePath)) {
       log.error('workspacePath not found', { runId, workspacePath });
@@ -276,8 +283,7 @@ export class TestRunner {
       else skipped++;
 
       // Copy artifacts into workbench storage layout
-      const artifactRelDir = artifactsDir(runId, testcaseId);
-      const artifactAbsDir = join(dataRoot, artifactRelDir);
+      const { relDir: artifactRelDir, absDir: artifactAbsDir } = resolveArtifactLayout(artifactRoot, runId, testcaseId);
       mkdirSync(artifactAbsDir, { recursive: true });
 
       let screenshotPath: string | undefined;
@@ -344,7 +350,7 @@ export class TestRunner {
 
       // Extract correlation context from HAR network log
       if (networkLogPath) {
-        const harAbsPath = join(dataRoot, networkLogPath);
+        const harAbsPath = join(dirname(artifactRoot), networkLogPath);
         const ctx = extractCorrelationContext(harAbsPath, input.correlationHeaders ?? DEFAULT_CORRELATION_HEADERS);
         if (ctx.traceIds.length > 0 || ctx.requestIds.length > 0) {
           const ctxRelPath = correlationContextPath(runId, testcaseId);

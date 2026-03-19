@@ -1,5 +1,5 @@
 export { HarnessSessionManager } from './session-manager.js';
-export type { StartSessionInput, StepRecord, CheckpointData, ApprovalRecord, StopConditionResult } from './session-manager.js';
+export type { StartSessionInput, StepRecord, CheckpointData, ApprovalRecord, PromptSampleRecord, StopConditionResult } from './session-manager.js';
 
 export { ToolRegistry } from './tool-registry.js';
 export type { ToolCallRecord, ToolCallResult, ToolHandler } from './tool-registry.js';
@@ -22,6 +22,7 @@ export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
 
 export { ExplorationAgent } from './exploration-agent.js';
 export type { AIProvider as ExplorationAIProvider, PageProbe, ExplorationStep, ExplorationResult } from './exploration-agent.js';
+export { HARNESS_TEMPLATE_VERSIONS, loadHarnessTemplate, renderHarnessTemplate, resetHarnessPromptsDir, setHarnessPromptsDir } from './prompt-loader.js';
 
 export { PlaywrightToolProvider } from './playwright-tool-provider.js';
 export type { PlaywrightToolProviderOptions } from './playwright-tool-provider.js';

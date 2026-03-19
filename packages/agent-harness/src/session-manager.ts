@@ -3,7 +3,7 @@ import { writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import type { AgentSessionKind } from '@zarb/shared-types';
 import type { Db, AgentSessionRow } from '@zarb/storage';
-import { AgentSessionRepository, agentContextSummaryPath, agentStepsPath, agentToolCallsPath } from '@zarb/storage';
+import { AgentSessionRepository, agentContextSummaryPath, agentPromptSamplesPath, agentStepsPath, agentToolCallsPath } from '@zarb/storage';
 import type { HarnessPolicy, StopConditions } from './harness-policy.js';
 import type { ToolCallRecord } from './tool-registry.js';
 
@@ -40,6 +40,19 @@ export interface ApprovalRecord {
   requestedAt: string;
   grantedAt?: string;
   status: 'pending' | 'granted' | 'denied';
+}
+
+export interface PromptSampleRecord {
+  sessionId: string;
+  stepIndex: number;
+  timestamp: string;
+  phase: string;
+  templateVersion: string;
+  prompt: string;
+  response?: string;
+  promptContextSummary?: string;
+  sampledBy: 'first-step' | 'interval' | 'forced';
+  metadata?: Record<string, unknown>;
 }
 
 export interface StopConditionResult {
@@ -231,6 +244,12 @@ export class HarnessSessionManager {
   /** Append a tool call record to the session's tool-calls.jsonl trace file. */
   appendToolCall(sessionId: string, record: ToolCallRecord, dataRoot: string): void {
     const absPath = join(dataRoot, agentToolCallsPath(sessionId));
+    mkdirSync(dirname(absPath), { recursive: true });
+    appendFileSync(absPath, `${JSON.stringify(record)}\n`, 'utf8');
+  }
+
+  appendPromptSample(sessionId: string, record: PromptSampleRecord, dataRoot: string): void {
+    const absPath = join(dataRoot, agentPromptSamplesPath(sessionId));
     mkdirSync(dirname(absPath), { recursive: true });
     appendFileSync(absPath, `${JSON.stringify(record)}\n`, 'utf8');
   }

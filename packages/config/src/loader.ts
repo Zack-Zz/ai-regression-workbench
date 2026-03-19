@@ -1,7 +1,9 @@
+import { dirname, resolve } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { load as parseYaml } from 'js-yaml';
 import type { PersonalSettings, SettingsSnapshot } from '@zarb/shared-types';
 import { DEFAULT_SETTINGS } from './defaults.js';
+import { WORKBENCH_DIR } from './constants.js';
 
 /**
  * Deep-merge `overrides` onto `base`. Arrays are replaced, not concatenated.
@@ -61,11 +63,30 @@ export function buildSnapshot(
   version: number,
   updatedAt: string,
 ): SettingsSnapshot {
+  const values = loadSettingsFromFile(filePath);
   return {
     version,
     sourcePath: filePath,
     updatedAt,
-    values: loadSettingsFromFile(filePath),
+    values,
+    resolvedPaths: resolveSettingsPaths(filePath, values),
+  };
+}
+
+function resolveSettingsPath(configPath: string, configuredPath: string | undefined, fallbackSegments: string[]): string {
+  const workspaceRoot = resolve(dirname(configPath), '..');
+  if (!configuredPath || configuredPath.trim() === '') {
+    return resolve(workspaceRoot, WORKBENCH_DIR, ...fallbackSegments);
+  }
+  return resolve(workspaceRoot, configuredPath);
+}
+
+function resolveSettingsPaths(configPath: string, values: PersonalSettings): NonNullable<SettingsSnapshot['resolvedPaths']> {
+  return {
+    sqlitePath: resolveSettingsPath(configPath, values.storage.sqlitePath, ['data', 'sqlite', 'app.db']),
+    artifactRoot: resolveSettingsPath(configPath, values.storage.artifactRoot, ['data', 'artifacts']),
+    diagnosticRoot: resolveSettingsPath(configPath, values.storage.diagnosticRoot, ['data', 'diagnostics']),
+    codeTaskRoot: resolveSettingsPath(configPath, values.storage.codeTaskRoot, ['data', 'code-tasks']),
   };
 }
 

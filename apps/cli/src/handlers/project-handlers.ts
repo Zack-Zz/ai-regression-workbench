@@ -18,6 +18,20 @@ function toProject(r: PR) { return { id: r.id, name: r.name, description: r.desc
 function toSite(r: SR) { return { id: r.id, projectId: r.project_id, name: r.name, baseUrl: r.base_url, createdAt: r.created_at, updatedAt: r.updated_at }; }
 function toCred(r: CR) { return { id: r.id, siteId: r.site_id, label: r.label, authType: r.auth_type, loginUrl: r.login_url ?? undefined, username: r.username ?? undefined, isDefault: false, createdAt: r.created_at }; }
 function toRepo(r: RR) { return { id: r.id, projectId: r.project_id, name: r.name, path: r.path, description: r.description ?? undefined, testOutputDir: r.test_output_dir ?? undefined, baseBranch: r.base_branch ?? undefined, createdAt: r.created_at, updatedAt: r.updated_at }; }
+function hasSiteInProject(siteRepo: SiteRepository, siteId: string, projectId: string): boolean {
+  const row = siteRepo.findById(siteId);
+  return row?.project_id === projectId;
+}
+
+function hasRepoInProject(repoRepo: LocalRepoRepository, repoId: string, projectId: string): boolean {
+  const row = repoRepo.findById(repoId);
+  return row?.project_id === projectId;
+}
+
+function hasCredentialInSite(credRepo: SiteCredentialRepository, credId: string, siteId: string): boolean {
+  const row = credRepo.findById(credId);
+  return row?.site_id === siteId;
+}
 
 export function registerProjectRoutes(router: Router, db: Db): void {
   const projects = new ProjectRepository(db);
@@ -72,7 +86,9 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   // --- Sites ---
   router.get('/projects/:projectId/sites', (_req, res, params) => {
-    ok(res, sites.findByProjectId(params['projectId'] ?? '').map(toSite));
+    const projectId = params['projectId'] ?? '';
+    if (!projects.findById(projectId)) { notFound(res, 'PROJECT_NOT_FOUND', 'Project not found'); return; }
+    ok(res, sites.findByProjectId(projectId).map(toSite));
   });
 
   router.post('/projects/:projectId/sites', async (req, res, params) => {
@@ -88,8 +104,9 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   router.put('/projects/:projectId/sites/:siteId', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
       const id = params['siteId'] ?? '';
-      if (!sites.findById(id)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
+      if (!hasSiteInProject(sites, id, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
       const body = await readBody<{ name?: string; baseUrl?: string; description?: string }>(req);
       sites.update(id, body);
       ok(res, toSite(sites.findById(id)!));
@@ -97,8 +114,9 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   });
 
   router.delete('/projects/:projectId/sites/:siteId', (_req, res, params) => {
+    const projectId = params['projectId'] ?? '';
     const id = params['siteId'] ?? '';
-    if (!sites.findById(id)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
+    if (!hasSiteInProject(sites, id, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
     for (const cred of creds.findBySiteId(id)) creds.delete(cred.id);
     sites.delete(id);
     ok(res, { deleted: true });
@@ -106,13 +124,17 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   // --- Credentials ---
   router.get('/projects/:projectId/sites/:siteId/credentials', (_req, res, params) => {
-    ok(res, creds.findBySiteId(params['siteId'] ?? '').map(toCred));
+    const projectId = params['projectId'] ?? '';
+    const siteId = params['siteId'] ?? '';
+    if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
+    ok(res, creds.findBySiteId(siteId).map(toCred));
   });
 
   router.post('/projects/:projectId/sites/:siteId/credentials', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
       const siteId = params['siteId'] ?? '';
-      if (!sites.findById(siteId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
+      if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
       const body = await readBody<import('@zarb/storage').SaveCredentialInput>(req);
       if (!body.label?.trim()) { badRequest(res, 'INVALID_INPUT', 'label is required'); return; }
       ok(res, toCred(creds.create({ ...body, siteId })));
@@ -121,8 +143,11 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   router.put('/projects/:projectId/sites/:siteId/credentials/:credId', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
+      const siteId = params['siteId'] ?? '';
+      if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
       const id = params['credId'] ?? '';
-      if (!creds.findById(id)) { notFound(res, 'CREDENTIAL_NOT_FOUND', 'Credential not found'); return; }
+      if (!hasCredentialInSite(creds, id, siteId)) { notFound(res, 'CREDENTIAL_NOT_FOUND', 'Credential not found'); return; }
       const body = await readBody<Partial<import('@zarb/storage').SaveCredentialInput>>(req);
       creds.update(id, body);
       ok(res, toCred(creds.findById(id)!));
@@ -130,15 +155,20 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   });
 
   router.delete('/projects/:projectId/sites/:siteId/credentials/:credId', (_req, res, params) => {
+    const projectId = params['projectId'] ?? '';
+    const siteId = params['siteId'] ?? '';
+    if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
     const id = params['credId'] ?? '';
-    if (!creds.findById(id)) { notFound(res, 'CREDENTIAL_NOT_FOUND', 'Credential not found'); return; }
+    if (!hasCredentialInSite(creds, id, siteId)) { notFound(res, 'CREDENTIAL_NOT_FOUND', 'Credential not found'); return; }
     creds.delete(id);
     ok(res, { deleted: true });
   });
 
   // --- Local Repos ---
   router.get('/projects/:projectId/repos', (_req, res, params) => {
-    ok(res, repos.findByProjectId(params['projectId'] ?? '').map(toRepo));
+    const projectId = params['projectId'] ?? '';
+    if (!projects.findById(projectId)) { notFound(res, 'PROJECT_NOT_FOUND', 'Project not found'); return; }
+    ok(res, repos.findByProjectId(projectId).map(toRepo));
   });
 
   router.post('/projects/:projectId/repos', async (req, res, params) => {
@@ -157,8 +187,9 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   router.put('/projects/:projectId/repos/:repoId', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
       const id = params['repoId'] ?? '';
-      if (!repos.findById(id)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
+      if (!hasRepoInProject(repos, id, projectId)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
       const body = await readBody<{ name?: string; path?: string; description?: string; testOutputDir?: string; baseBranch?: string }>(req);
       repos.update(id, body);
       ok(res, toRepo(repos.findById(id)!));
@@ -166,8 +197,9 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   });
 
   router.delete('/projects/:projectId/repos/:repoId', (_req, res, params) => {
+    const projectId = params['projectId'] ?? '';
     const id = params['repoId'] ?? '';
-    if (!repos.findById(id)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
+    if (!hasRepoInProject(repos, id, projectId)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
     repos.delete(id);
     ok(res, { deleted: true });
   });
@@ -175,6 +207,7 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   // GET /projects/:projectId/repos/:repoId/git-info — list branches
   router.get('/projects/:projectId/repos/:repoId/git-info', (_req, res, params) => {
     const repo = repos.findById(params['repoId'] ?? '');
+    if (repo?.project_id !== (params['projectId'] ?? '')) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
     if (!repo) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
     try {
       const raw = execSync('git branch -a --format=%(refname:short)', { cwd: repo.path, timeout: 5000 }).toString();
@@ -207,20 +240,26 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   // GET /projects/:projectId/sites/:siteId/selectors?repoId=...&type=suite|scenario|tag|testcase
   router.get('/projects/:projectId/sites/:siteId/selectors', (req, res, params) => {
     const q = parseQuery(req);
+    const projectId = params['projectId'] ?? '';
     const siteId = params['siteId'] ?? '';
     const repoId = q['repoId'];
     const type = q['type'] as import('@zarb/storage').SelectorType | undefined;
+    if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
     if (!repoId) { badRequest(res, 'MISSING_REPO_ID', 'repoId query param required'); return; }
+    if (!hasRepoInProject(repos, repoId, projectId)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
     ok(res, selectorCache.find(siteId, repoId, type));
   });
 
   // POST /projects/:projectId/sites/:siteId/selectors/scan  { repoId }
   router.post('/projects/:projectId/sites/:siteId/selectors/scan', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
       const siteId = params['siteId'] ?? '';
+      if (!hasSiteInProject(sites, siteId, projectId)) { notFound(res, 'SITE_NOT_FOUND', 'Site not found'); return; }
       const body = await readBody<{ repoId: string }>(req);
       if (!body.repoId) { badRequest(res, 'MISSING_REPO_ID', 'repoId required'); return; }
       const repo = repos.findById(body.repoId);
+      if (repo?.project_id !== projectId) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
       if (!repo) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
       const result = scanAndCache(repo.path, siteId, body.repoId, selectorCache);
       ok(res, result);
@@ -230,8 +269,10 @@ export function registerProjectRoutes(router: Router, db: Db): void {
   // POST /projects/:projectId/repos/:repoId/selectors/scan  (no siteId required)
   router.post('/projects/:projectId/repos/:repoId/selectors/scan', async (req, res, params) => {
     try {
+      const projectId = params['projectId'] ?? '';
       const repoId = params['repoId'] ?? '';
       const repo = repos.findById(repoId);
+      if (repo?.project_id !== projectId) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
       if (!repo) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
       const result = scanAndCache(repo.path, '', repoId, selectorCache);
       ok(res, result);
@@ -240,18 +281,28 @@ export function registerProjectRoutes(router: Router, db: Db): void {
 
   // GET /projects/:projectId/repos/:repoId/selectors
   router.get('/projects/:projectId/repos/:repoId/selectors', (req, res, params) => {
+    const projectId = params['projectId'] ?? '';
+    if (!hasRepoInProject(repos, params['repoId'] ?? '', projectId)) { notFound(res, 'REPO_NOT_FOUND', 'Repo not found'); return; }
     const p = parseQuery(req);
     const type = p['type'];
     ok(res, selectorCache.find('', params['repoId'] ?? '', type as import('@zarb/storage').SelectorType | undefined));
   });
 
   // GET /projects/:projectId/selectors  (no siteId/repoId required)
-  router.get('/projects/:projectId/selectors', (req, res, _params) => {
+  router.get('/projects/:projectId/selectors', (req, res, params) => {
+    const projectId = params['projectId'] ?? '';
+    if (!projects.findById(projectId)) { notFound(res, 'PROJECT_NOT_FOUND', 'Project not found'); return; }
     const p = parseQuery(req);
     const type = p['type'] as import('@zarb/storage').SelectorType | undefined;
-    const rows = type
-      ? selectorCache.db_findByType(type)
-      : selectorCache.db_findAll();
-    ok(res, rows);
+    const rows = repos.findByProjectId(projectId)
+      .flatMap(repo => selectorCache.find('', repo.id, type));
+    const seen = new Set<string>();
+    const deduped = rows.filter((row) => {
+      const key = `${row.repo_id}:${row.type}:${row.value}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    ok(res, deduped);
   });
 }

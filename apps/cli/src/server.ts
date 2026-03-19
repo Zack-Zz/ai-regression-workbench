@@ -14,6 +14,7 @@ import { CodeTaskService } from './services/code-task-service.js';
 import { DoctorService } from './services/doctor-service.js';
 import { buildRouter, handleRequest } from './handlers/index.js';
 import { appLogger } from '@zarb/logger';
+import { resolveStoragePath } from './storage-paths.js';
 
 const log = appLogger.child('Server');
 
@@ -33,6 +34,9 @@ export function createAppServer(opts: ServerOptions) {
 
   const runner = new TestRunner(opts.db);
   const cfg = settingsSvc.getSync();
+  const resolveArtifactRoot = (): string => resolveStoragePath(opts.configPath, settingsSvc.getSync().storage.artifactRoot, ['data', 'artifacts']);
+  const resolveDiagnosticRoot = (): string => resolveStoragePath(opts.configPath, settingsSvc.getSync().storage.diagnosticRoot, ['data', 'diagnostics']);
+  const resolveCodeTaskRoot = (): string => resolveStoragePath(opts.configPath, settingsSvc.getSync().storage.codeTaskRoot, ['data', 'code-tasks']);
   const traceProvider = createTraceProvider(cfg.trace);
   const logProvider = createLogProvider({ ...cfg.logs, logFields: cfg.diagnostics.correlationKeys.logFields });
   const aiProvider = createAIProvider(cfg.ai);
@@ -46,16 +50,18 @@ export function createAppServer(opts: ServerOptions) {
     },
   });
 
-  const runSvcOpts: import('./services/run-service.js').RunServiceOptions = { dataRoot, runner, aiEngine, autoApprove: cfg.codeAgent.autoApprove ?? false };
+  const runSvcOpts: import('./services/run-service.js').RunServiceOptions = { dataRoot, artifactRootResolver: resolveArtifactRoot, runner, aiEngine, autoApprove: cfg.codeAgent.autoApprove ?? false };
   if (cfg.codeAgent.autoApproveMaxRiskLevel) runSvcOpts.autoApproveMaxRiskLevel = cfg.codeAgent.autoApproveMaxRiskLevel;
   if (cfg.workspace.testSuitesRoot) runSvcOpts.testSuitesRoot = cfg.workspace.testSuitesRoot;
   const runSvc = new RunService(opts.db, runSvcOpts);
-  const diagSvc = new DiagnosticsService(opts.db, dataRoot, traceProvider, logProvider, aiEngine);
+  const diagSvc = new DiagnosticsService(opts.db, dataRoot, resolveArtifactRoot(), resolveDiagnosticRoot(), traceProvider, logProvider, aiEngine);
   settingsSvc.registerObserver(diagSvc);
   const taskSvc = new CodeTaskService(
     opts.db,
     dataRoot,
     cfg.codeAgent.engine === 'kiro' ? new KiroCliAgent() : new CodexCliAgent(),
+    undefined,
+    resolveCodeTaskRoot(),
   );
   const doctorSvc = new DoctorService(opts.db, settingsSvc);
   const router = buildRouter(runSvc, diagSvc, taskSvc, settingsSvc, doctorSvc, opts.db);

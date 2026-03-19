@@ -56,17 +56,21 @@ export interface RunEventPage { items: RunEventItem[]; nextCursor?: string; }
 
 export interface ExecutionReport {
   runId: string; status: RunStatus; runMode: RunMode;
-  startedAt: string; endedAt?: string;
+  startedAt: string; endedAt?: string; durationMs?: number;
+  scopeType?: string; scopeValue?: string;
+  selector?: { suite?: string; scenarioId?: string; tag?: string; testcaseId?: string };
+  exploration?: ExplorationConfig;
   summary: { total: number; passed: number; failed: number; skipped: number };
   totals: { flowStepCount: number; uiActionCount: number; apiCallCount: number; failedApiCount: number };
-  stageResults: Array<{ stageName: string; status: string; durationMs?: number }>;
+  stageResults: Array<{ stage: string; status: string; message?: string }>;
   degradedSteps: string[]; fatalReason?: string;
-  failureReports: Array<{ testcaseId: string; errorMessage?: string }>;
+  failureReports: Array<{ testcaseId: string; errorMessage?: string; reportPath?: string }>;
   codeTaskSummaries: Array<{ taskId: string; testcaseId?: string; status: CodeTaskStatus; updatedAt: string }>;
   flowSummaries: Array<{ flowId: string; stepCount: number; uiActionCount: number; apiCallCount: number; failedApiCount: number; durationMs?: number }>;
   testcaseProfiles: Array<{ testcaseId: string; profilePath: string }>;
   artifactLinks: string[];
   warnings?: string[];
+  recommendations?: string[];
 }
 
 export interface FailureReportSummary {
@@ -95,7 +99,7 @@ export interface TestcaseExecutionProfile {
 
 export interface DiagnosticsDetail {
   correlationContext: { traceIds: string[]; requestIds: string[]; sessionIds: string[] };
-  diagnosticFetches: Array<{ id: string; type: string; status: string; provider?: string; rawLink?: string; createdAt: string }>;
+  diagnosticFetches: Array<{ id: string; type: 'trace' | 'log'; status: 'pending' | 'succeeded' | 'failed' | 'degraded'; provider?: string; rawLink?: string; createdAt: string }>;
 }
 
 export interface TraceDetail {
@@ -137,7 +141,7 @@ export interface CommitRecord {
 export interface CodeTaskDetail {
   summary: CodeTaskSummary;
   scopePaths: string[]; constraints: string[]; verificationCommands: string[];
-  changedFiles: string[]; diffPath?: string; patchPath?: string; rawOutputPath?: string;
+  changedFiles: string[]; diffPath?: string; patchPath?: string; rawOutputPath?: string; verifyOutputPath?: string;
   reviews: ReviewRecord[];
   commit?: CommitRecord;
 }
@@ -179,11 +183,16 @@ export interface StepLogEntry {
   ts: string; component: string; action: string; detail?: string;
   status: 'ok' | 'warn' | 'error' | 'skip' | 'pending'; durationMs?: number;
   toolInput?: unknown; toolOutput?: unknown;
-  pageState?: { url: string; title: string; formCount: number; linkCount: number; consoleErrors: number; networkErrors: number };
+  pageState?: {
+    url: string; title: string; formCount: number; linkCount: number; consoleErrors: number; networkErrors: number;
+    headings?: string[]; primaryButtons?: string[]; navLinks?: string[]; ctaCandidates?: string[]; inputHints?: string[]; textSnippet?: string;
+  };
   reason?: string;
   model?: string;
   tool?: string;
   actionId?: string;
+  promptTemplateVersion?: string;
+  promptContextSummary?: string;
 }
 export interface NetworkLogEntry {
   ts: string; url: string; method: string; status: number;
@@ -192,6 +201,19 @@ export interface NetworkLogEntry {
   requestBody?: string;
   responseHeaders?: Record<string, string>;
   responseBody?: string;
+}
+
+export interface PromptSampleEntry {
+  sessionId: string;
+  stepIndex: number;
+  timestamp: string;
+  phase: string;
+  templateVersion: string;
+  prompt: string;
+  response?: string;
+  promptContextSummary?: string;
+  sampledBy: 'first-step' | 'interval' | 'forced';
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActionResult {
@@ -203,6 +225,7 @@ export interface StartRunInput {
   selector?: { suite?: string; scenarioId?: string; tag?: string; testcaseId?: string };
   projectPath?: string;
   projectId?: string;
+  repoId?: string;
   siteId?: string;
   credentialId?: string;
   exploration?: { startUrls: string[]; allowedHosts?: string[]; maxSteps: number; maxPages: number; focusAreas?: string[]; persistAsCandidateTests?: boolean; credentialId?: string };
@@ -243,7 +266,18 @@ export interface PersonalSettings {
   ui?: { locale?: 'zh-CN' | 'en-US' };
 }
 
-export interface SettingsSnapshot { version: number; sourcePath: string; updatedAt: string; values: PersonalSettings; }
+export interface SettingsSnapshot {
+  version: number;
+  sourcePath: string;
+  updatedAt: string;
+  values: PersonalSettings;
+  resolvedPaths?: {
+    sqlitePath: string;
+    artifactRoot: string;
+    diagnosticRoot: string;
+    codeTaskRoot: string;
+  };
+}
 export interface UpdateSettingsInput { patch: Partial<PersonalSettings>; expectedVersion?: number; }
 export interface SettingsValidationResult { valid: boolean; errors: string[]; warnings?: string[]; }
 export interface SettingsApplyResult extends ActionResult { version?: number; requiresRestart?: boolean; reloadedModules?: string[]; nextRunOnlyKeys?: string[]; }

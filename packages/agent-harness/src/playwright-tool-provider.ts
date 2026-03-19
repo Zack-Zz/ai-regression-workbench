@@ -45,7 +45,9 @@ export class PlaywrightToolProvider {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private readonly networkLog: NetworkEntry[] = [];
+  private readonly consoleErrorLog: Array<{ ts: string; url: string; text: string }> = [];
   private readonly requestStartTimes = new Map<string, number>();
+  private stateCursor = { network: 0, console: 0 };
 
   async launch(opts?: PlaywrightToolProviderOptions): Promise<void> {
     const { chromium } = await import('playwright');
@@ -54,6 +56,7 @@ export class PlaywrightToolProvider {
       userAgent: 'zarb-exploration-agent/1.0',
     });
     this.page = await this.context.newPage();
+    this.stateCursor = { network: 0, console: 0 };
 
     // Collect network events for later persistence
     this.context.on('request', (req: Request) => {
@@ -93,6 +96,14 @@ export class PlaywrightToolProvider {
         error: req.failure()?.errorText ?? 'unknown',
       });
     });
+    this.page.on('console', (msg) => {
+      if (msg.type() !== 'error') return;
+      this.consoleErrorLog.push({
+        ts: new Date().toISOString(),
+        url: this.page?.url() ?? '',
+        text: msg.text(),
+      });
+    });
 
     void opts;
   }
@@ -124,7 +135,7 @@ export class PlaywrightToolProvider {
         return { ok: true };
       } catch (e) {
         log.warn('click failed', { selector, error: String(e), durationMs: Date.now() - t0 });
-        return { ok: false, error: String(e) };
+        throw new Error(String(e));
       }
     });
 
@@ -139,7 +150,7 @@ export class PlaywrightToolProvider {
         return { ok: true };
       } catch (e) {
         log.warn('fill failed', { selector, error: String(e), durationMs: Date.now() - t0 });
-        return { ok: false, error: String(e) };
+        throw new Error(String(e));
       }
     });
 
@@ -273,6 +284,7 @@ export class PlaywrightToolProvider {
     try { await this.context?.close(); } catch { /* ignore */ }
     try { await this.browser?.close(); } catch { /* ignore */ }
     this.page = null; this.context = null; this.browser = null;
+    this.stateCursor = { network: this.networkLog.length, console: this.consoleErrorLog.length };
   }
 
   private requirePage(): Page {
@@ -285,23 +297,89 @@ export class PlaywrightToolProvider {
     return this.requirePage();
   }
 
+  getRecentNetworkHighlights(limit = 5): string[] {
+    return this.networkLog
+      .filter((entry) =>
+        entry.status >= 400 ||
+        !!entry.error ||
+        ((entry.resourceType === 'xhr' || entry.resourceType === 'fetch') && entry.durationMs >= 1200)
+      )
+      .slice(-limit)
+      .map((entry) => {
+        const status = entry.error ? `error=${entry.error}` : `status=${String(entry.status)}`;
+        return `${entry.method} ${entry.resourceType} ${status} ${entry.url} (${String(entry.durationMs)}ms)`;
+      });
+  }
+
   private async collectState(page: Page, url: string): Promise<PageProbe> {
-    const consoleErrors: string[] = [];
-    const networkErrors: Array<{ url: string; status: number }> = [];
+    const recentConsole = this.consoleErrorLog.slice(this.stateCursor.console);
+    const recentNetwork = this.networkLog.slice(this.stateCursor.network);
+    this.stateCursor = { network: this.networkLog.length, console: this.consoleErrorLog.length };
+    const consoleErrors = recentConsole.slice(-10).map((entry) => entry.text);
+    const networkErrors = recentNetwork
+      .filter((entry) => entry.status >= 400 || !!entry.error)
+      .slice(-10)
+      .map((entry) => ({ url: entry.url, status: entry.status }));
 
     // Collect console errors via evaluate (avoids listener lifecycle issues)
     const title = await page.title().catch(() => '');
 
-    const counts = await page.evaluate(() => [
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).document.querySelectorAll('form').length as number,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).document.querySelectorAll('a[href]').length as number,
-    ]).catch(() => [0, 0]);
-    const formCount = counts[0] ?? 0;
-    const linkCount = counts[1] ?? 0;
+    const snapshot = await page.evaluate(() => {
+      const doc = ((globalThis as unknown) as { document: { querySelectorAll: (selector: string) => ArrayLike<{ textContent?: string | null }>; querySelector: (selector: string) => { textContent?: string | null } | null; body?: { textContent?: string | null } | null } }).document;
+      const textOf = (el: { textContent?: string | null } | null): string => (el?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+      const scoreText = (text: string): number => {
+        const normalized = text.toLowerCase();
+        let score = 0;
+        if (/submit|save|search|next|continue|create|add|new|view|detail|login|sign in|checkout|apply/.test(normalized)) score += 3;
+        if (/cancel|close|back/.test(normalized)) score -= 2;
+        if (normalized.length > 0 && normalized.length < 40) score += 1;
+        return score;
+      };
+      const headings = Array.from(doc.querySelectorAll('h1, h2, h3')).slice(0, 5).map((el) => textOf(el)).filter(Boolean);
+      const primaryButtons = Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]')).slice(0, 8).map((el) => textOf(el)).filter(Boolean);
+      const navLinks = Array.from(doc.querySelectorAll('nav a[href], aside a[href], header a[href]')).slice(0, 8).map((el) => textOf(el)).filter(Boolean);
+      const ctaCandidates = [
+        ...Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]')).map((el) => ({ kind: 'button', text: textOf(el) })),
+        ...Array.from(doc.querySelectorAll('a[href]')).slice(0, 20).map((el) => ({ kind: 'link', text: textOf(el) })),
+      ]
+        .filter((item) => item.text)
+        .map((item) => ({ ...item, score: scoreText(item.text) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
+        .map((item) => `${item.kind}:${item.text} (score=${String(item.score)})`);
+      const inputHints = Array.from(doc.querySelectorAll('input:not([type=hidden]), textarea, select')).slice(0, 8).map((el) => {
+        const htmlEl = el as { getAttribute: (name: string) => string | null };
+        return [htmlEl.getAttribute('name'), htmlEl.getAttribute('placeholder'), htmlEl.getAttribute('aria-label')].filter(Boolean).join(' / ');
+      }).filter(Boolean);
+      const textSnippet = textOf(doc.querySelector('main')) || textOf(doc.body ?? null);
+      return {
+        formCount: doc.querySelectorAll('form').length,
+        linkCount: doc.querySelectorAll('a[href]').length,
+        headings,
+        primaryButtons,
+        navLinks,
+        ctaCandidates,
+        inputHints,
+        textSnippet,
+      };
+    }).catch(() => ({ formCount: 0, linkCount: 0, headings: [], primaryButtons: [], navLinks: [], ctaCandidates: [], inputHints: [], textSnippet: '' }));
 
-    return { url, title, consoleErrors, networkErrors, formCount, linkCount };
+    return {
+      url,
+      title,
+      consoleErrors,
+      networkErrors,
+      formCount: snapshot.formCount ?? 0,
+      linkCount: snapshot.linkCount ?? 0,
+      domSummary: {
+        headings: snapshot.headings ?? [],
+        primaryButtons: snapshot.primaryButtons ?? [],
+        navLinks: snapshot.navLinks ?? [],
+        ctaCandidates: snapshot.ctaCandidates ?? [],
+        inputHints: snapshot.inputHints ?? [],
+        ...(snapshot.textSnippet ? { textSnippet: snapshot.textSnippet } : {}),
+      },
+    };
   }
 
   /** Build a probe function compatible with ExplorationAgent's probe callback. */
@@ -325,15 +403,11 @@ export class PlaywrightToolProvider {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
         await page.waitForTimeout(500);
         const title = await page.title().catch(() => '');
-        const counts = await page.evaluate(() => [
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (globalThis as any).document.querySelectorAll('form').length as number,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (globalThis as any).document.querySelectorAll('a[href]').length as number,
-        ]).catch(() => [0, 0]);
-        const formCount = counts[0] ?? 0;
-        const linkCount = counts[1] ?? 0;
-        return { url, title, consoleErrors, networkErrors, formCount, linkCount };
+        return this.collectState(page, url).then((state) => ({
+          ...state,
+          consoleErrors,
+          networkErrors,
+        }));
       } finally {
         page.off('response', onResponse);
         page.off('console', onConsole);

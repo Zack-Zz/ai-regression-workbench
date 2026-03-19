@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync, readdirSync, readFileSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository } from '@zarb/storage';
+import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository, ProjectRepository, LocalRepoRepository, FindingRepository, DiagnosticFetchRepository } from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -113,6 +113,30 @@ describe('Run lifecycle flow', () => {
     expect(resumeBody.errorCode).toBe('RUN_RESUME_NOT_SUPPORTED');
   });
 
+  it('resume restores paused exploration run to its previous stage', async () => {
+    const created = runSvc.startRun({
+      runMode: 'exploration',
+      exploration: { startUrls: ['http://localhost:3000'], maxSteps: 10, maxPages: 5 },
+    });
+    const runId = created.run?.runId as string;
+    new RunRepository(db).update(runId, {
+      status: 'PAUSED',
+      currentStage: 'RUNNING_EXPLORATION',
+      pausedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const resume = res();
+    await router.handle(req('POST', `/runs/${runId}/resume`), resume.res);
+    expect(resume.status()).toBe(200);
+
+    const detail = res();
+    await router.handle(req('GET', `/runs/${runId}`), detail.res);
+    const detailData = detail.body().data as { summary: { status: string; currentStage?: string } };
+    expect(detailData.summary.status).toBe('RUNNING_EXPLORATION');
+    expect(detailData.summary.currentStage).toBe('RUNNING_EXPLORATION');
+  });
+
   it('resume on non-paused run returns 409', async () => {
     const created = runSvc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     const runId = created.run?.runId as string;
@@ -171,6 +195,118 @@ describe('Run lifecycle flow', () => {
     expect(r.status()).toBe(200);
     expect(r.body().success).toBe(true);
   });
+
+  it('start run rejects project-scoped execution without explicit repo selection', async () => {
+    const project = new ProjectRepository(db).create({ name: 'Project A' });
+    new LocalRepoRepository(db).create({ projectId: project.id, name: 'Repo A', path: '/ws/project-a' });
+
+    const r = res();
+    await router.handle(req('POST', '/runs', {
+      runMode: 'regression',
+      projectId: project.id,
+      selector: { suite: 'smoke' },
+    }), r.res);
+    expect(r.status()).toBe(400);
+    expect((r.body() as { errorCode: string }).errorCode).toBe('RUN_REPO_REQUIRED');
+  });
+
+  it('execution report aggregates failure reports, code tasks, testcase profiles, and artifact links', () => {
+    new RunRepository(db).create({ runId: 'r-report', scopeType: 'suite', scopeValue: 'smoke', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    new RunRepository(db).update('r-report', {
+      status: 'ANALYZING_FAILURES',
+      currentStage: 'ANALYZING_FAILURES',
+      total: 2,
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      summary: 'failure-detected',
+      updatedAt: new Date().toISOString(),
+    });
+    db.prepare(`
+      INSERT INTO execution_reports (id, run_id, status, report_path, totals_json, generated_at)
+      VALUES ('er-1', 'r-report', 'ANALYZING_FAILURES', 'runs/r-report-execution-report.json', '{"flowStepCount":4,"uiActionCount":2,"apiCallCount":3,"failedApiCount":1}', ?)
+    `).run(new Date().toISOString());
+    db.prepare(`
+      INSERT INTO test_results
+        (id, run_id, testcase_id, status, error_message, screenshot_path, trace_path, started_at, created_at)
+      VALUES
+        ('tr-pass', 'r-report', 'tc-pass', 'passed', NULL, NULL, NULL, ?, ?),
+        ('tr-fail', 'r-report', 'tc-fail', 'failed', 'boom', 'artifacts/r-report/tc-fail/shot.png', 'artifacts/r-report/tc-fail/trace.zip', ?, ?)
+    `).run(new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), new Date().toISOString());
+    new CodeTaskRepository(db).create({ taskId: 'task-report', runId: 'r-report', testcaseId: 'tc-fail', workspacePath: '/ws', goal: 'fix boom', createdAt: new Date().toISOString() });
+    db.prepare(`
+      UPDATE code_tasks
+      SET status = 'FAILED', diff_path = 'code-tasks/task-report/changes.diff', patch_path = 'code-tasks/task-report/changes.patch', updated_at = ?
+      WHERE task_id = 'task-report'
+    `).run(new Date().toISOString());
+    db.prepare(`
+      INSERT INTO run_events (id, run_id, entity_type, entity_id, event_type, payload_schema_version, payload_json, created_at)
+      VALUES ('evt-1', 'r-report', 'run', 'r-report', 'RUN_STEP_DEGRADED', 1, '{"reason":"trace provider unavailable"}', ?)
+    `).run(new Date().toISOString());
+    db.prepare(`
+      INSERT INTO flow_step_records
+        (id, run_id, testcase_id, flow_id, step_name, success, started_at, ended_at, duration_ms, ui_action_count, api_call_count, failed_api_count)
+      VALUES
+        ('fs-1', 'r-report', 'tc-fail', 'flow-main', 'open checkout', 1, ?, ?, 320, 2, 3, 1)
+    `).run('2026-03-19T08:00:00.000Z', '2026-03-19T08:00:00.320Z');
+    db.prepare(`
+      INSERT INTO ui_action_records
+        (id, run_id, testcase_id, flow_step_id, action_type, locator, page_url, success, started_at, ended_at, duration_ms, api_call_count, failed_api_count)
+      VALUES
+        ('ua-1', 'r-report', 'tc-fail', 'fs-1', 'click', '[data-test=checkout]', 'https://example.test/checkout', 1, ?, ?, 80, 2, 1)
+    `).run('2026-03-19T08:00:00.050Z', '2026-03-19T08:00:00.130Z');
+    db.prepare(`
+      INSERT INTO api_call_records
+        (id, run_id, testcase_id, flow_step_id, ui_action_id, method, url, status_code, response_summary, success, error_message, started_at, ended_at, duration_ms)
+      VALUES
+        ('api-1', 'r-report', 'tc-fail', 'fs-1', 'ua-1', 'POST', 'https://example.test/api/checkout', 500, 'internal error', 0, 'boom', ?, ?, 120)
+    `).run('2026-03-19T08:00:00.070Z', '2026-03-19T08:00:00.190Z');
+    new FindingRepository(db).save({
+      id: 'finding-1',
+      runId: 'r-report',
+      category: 'console-errors',
+      severity: 'high',
+      title: 'Console errors detected',
+      summary: 'Page raised repeated console errors',
+      createdAt: new Date().toISOString(),
+    });
+
+    const report = runSvc.getExecutionReport('r-report');
+    expect(report).not.toBeNull();
+    expect(report?.failureReports).toHaveLength(1);
+    expect(report?.failureReports[0]?.testcaseId).toBe('tc-fail');
+    expect(report?.codeTaskSummaries).toHaveLength(1);
+    expect(report?.codeTaskSummaries[0]?.taskId).toBe('task-report');
+    expect(report?.testcaseProfiles.map((item) => item.testcaseId)).toEqual(expect.arrayContaining(['tc-pass', 'tc-fail']));
+    expect(report?.artifactLinks).toContain('/api/runs/r-report/testcases/tc-fail/artifacts/screenshot');
+    expect(report?.artifactLinks).toContain('/api/code-tasks/task-report/artifacts/diff');
+    expect(report?.degradedSteps).toContain('trace provider unavailable');
+    expect(report?.stageResults.map((item) => item.stage)).toEqual([
+      'RUNNING_TESTS',
+      'ANALYZING_FAILURES',
+      'AWAITING_CODE_ACTION',
+      'RUNNING_CODE_TASK',
+      'AWAITING_REVIEW',
+      'READY_TO_COMMIT',
+      'COMPLETED',
+    ]);
+    expect(report?.stageResults.find((item) => item.stage === 'RUNNING_TESTS')?.status).toBe('success');
+    expect(report?.stageResults.find((item) => item.stage === 'ANALYZING_FAILURES')?.status).toBe('degraded');
+    expect(report?.flowSummaries).toHaveLength(1);
+    expect(report?.flowSummaries[0]).toMatchObject({
+      flowId: 'flow-main',
+      stepCount: 1,
+      uiActionCount: 2,
+      apiCallCount: 3,
+      failedApiCount: 1,
+    });
+    expect(report?.warnings).toContain('trace provider unavailable');
+    expect(report?.warnings).toContain('存在 1 个失败接口调用');
+    expect(report?.warnings).toContain('存在 1 个失败用例');
+    expect(report?.warnings).toContain('存在 1 个 high findings');
+    expect(report?.recommendations).toContain('优先查看失败报告，并核对 trace/log/network 产物。');
+    expect(report?.recommendations).toContain('检查降级步骤涉及的外部依赖、凭据或诊断服务。');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -180,6 +316,7 @@ describe('Run lifecycle flow', () => {
 describe('CodeTask lifecycle flow', () => {
   function seedTask(taskId = 't1', runId = 'r1'): void {
     new RunRepository(db).create({ runId, scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    new RunRepository(db).update(runId, { status: 'ANALYZING_FAILURES', currentStage: 'ANALYZING_FAILURES', updatedAt: new Date().toISOString() });
     new CodeTaskRepository(db).create({ taskId, runId, workspacePath: '/ws', goal: 'fix test', createdAt: new Date().toISOString() });
   }
 
@@ -190,6 +327,7 @@ describe('CodeTask lifecycle flow', () => {
     const approve = res();
     await router.handle(req('POST', '/code-tasks/t1/approve'), approve.res);
     expect(approve.status()).toBe(200);
+    expect(new RunRepository(db).findById('r1')?.status).toBe('AWAITING_CODE_ACTION');
 
     // Execute — returns immediately (fire-and-forget)
     const execute = res();
@@ -204,11 +342,13 @@ describe('CodeTask lifecycle flow', () => {
     await router.handle(req('GET', '/code-tasks/t1'), afterExec.res);
     const afterExecData = afterExec.body().data as { summary: { status: string } };
     expect(afterExecData.summary.status).toBe('SUCCEEDED');
+    expect(new RunRepository(db).findById('r1')?.status).toBe('AWAITING_REVIEW');
 
     // Submit review (accept)
     const review = res();
     await router.handle(req('POST', '/reviews', { taskId: 't1', decision: 'accept', codeTaskVersion: 1 }), review.res);
     expect(review.status()).toBe(200);
+    expect(new RunRepository(db).findById('r1')?.status).toBe('READY_TO_COMMIT');
 
     // Detail — status should be COMMIT_PENDING
     const detail = res();
@@ -221,6 +361,27 @@ describe('CodeTask lifecycle flow', () => {
     const commit = res();
     await router.handle(req('POST', '/commits', { taskId: 't1', commitMessage: 'fix: stabilize test', expectedTaskVersion: 1 }), commit.res);
     expect(commit.status()).toBe(200);
+    expect(new RunRepository(db).findById('r1')?.status).toBe('COMPLETED');
+  });
+
+  it('failed agent execution persists rawOutputPath from the artifact writer', async () => {
+    new RunRepository(db).create({ runId: 'r-fail-path', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    new RunRepository(db).update('r-fail-path', { status: 'ANALYZING_FAILURES', currentStage: 'ANALYZING_FAILURES', updatedAt: new Date().toISOString() });
+    new CodeTaskRepository(db).create({ taskId: 't-fail-path', runId: 'r-fail-path', workspacePath: '/ws', goal: 'fix test', createdAt: new Date().toISOString() });
+    db.prepare("UPDATE code_tasks SET status='APPROVED' WHERE task_id='t-fail-path'").run();
+
+    const customRoot = join(dir, 'custom-code-tasks');
+    const failingAgent = { run: () => Promise.resolve({ rawOutput: 'boom', exitCode: 1 }) } as unknown as CodexCliAgent;
+    const commitMgr = { commit: () => ({ success: true, commitSha: 'abc123' }) } as unknown as CommitManager;
+    const svc = new CodeTaskService(db, dir, failingAgent, commitMgr, customRoot);
+
+    const result = await svc.executeCodeTask('t-fail-path');
+    expect(result.success).toBe(true);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    const detail = svc.getCodeTask('t-fail-path');
+    expect(detail?.summary.status).toBe('FAILED');
+    expect(detail?.rawOutputPath).toBe('custom-code-tasks/t-fail-path/raw-output.txt');
   });
 
 
@@ -282,6 +443,34 @@ describe('CodeTask lifecycle flow', () => {
     const r = res();
     await router.handle(req('POST', '/code-tasks/t3/retry'), r.res);
     expect(r.status()).toBe(200);
+  });
+
+  it('review retry marks the current task rejected and creates a follow-up draft', async () => {
+    seedTask('t-retry-review');
+    db.prepare("UPDATE code_tasks SET status='SUCCEEDED' WHERE task_id='t-retry-review'").run();
+
+    const review = res();
+    await router.handle(req('POST', '/reviews', {
+      taskId: 't-retry-review',
+      decision: 'retry',
+      codeTaskVersion: 1,
+    }), review.res);
+
+    expect(review.status()).toBe(200);
+
+    const tasks = new CodeTaskRepository(db).list({ runId: 'r1', limit: 10 }).items;
+    expect(tasks.map((task) => task.status)).toEqual(expect.arrayContaining(['REJECTED', 'DRAFT']));
+    const retried = tasks.find((task) => task.parent_task_id === 't-retry-review');
+    expect(retried?.attempt).toBe(2);
+  });
+
+  it('cancel task rejects terminal failed tasks', async () => {
+    seedTask('t-cancel-failed');
+    db.prepare("UPDATE code_tasks SET status='FAILED' WHERE task_id='t-cancel-failed'").run();
+    const r = res();
+    await router.handle(req('POST', '/code-tasks/t-cancel-failed/cancel'), r.res);
+    expect(r.status()).toBe(409);
+    expect((r.body() as { errorCode: string }).errorCode).toBe('CODE_TASK_STATE_INVALID');
   });
 
   it('approve unknown task returns 404', async () => {
@@ -572,9 +761,13 @@ describe('API contract: all documented endpoints exist', () => {
 
     // Inject a mock trace provider that returns a real TraceSummary
     const mockSummary = { traceId: 'trace-xyz', hasError: false, errorSpans: [], topSlowSpans: [] };
-    const mockDiagSvc = new DiagnosticsService(db, dir, {
-      getTrace: () => Promise.resolve(mockSummary),
-    }, undefined);
+    const mockDiagSvc = new DiagnosticsService(
+      db,
+      dir,
+      join(dir, 'artifacts'),
+      join(dir, 'diagnostics'),
+      { getTrace: () => Promise.resolve(mockSummary) },
+    );
     const mockRouter = buildRouter(runSvc, mockDiagSvc, taskSvc, new SettingsService(join(dir, 'config.json')));
 
     const r = res();
@@ -586,6 +779,105 @@ describe('API contract: all documented endpoints exist', () => {
     const summaryFile = join(dir, 'diagnostics', runId, 'tc-diag', 'trace-summary.json');
     const written = JSON.parse(readFileSync(summaryFile, 'utf8')) as { traceId: string };
     expect(written.traceId).toBe('trace-xyz');
+  });
+
+  it('fetchDiagnostics writes summaries under a configured diagnosticRoot', async () => {
+    const runId = seedRun();
+    new CorrelationContextRepository(db).save({
+      id: `ctx-configured-${runId}`,
+      runId,
+      testcaseId: 'tc-custom-diag',
+      traceIdsJson: JSON.stringify(['trace-custom']),
+      requestIdsJson: '[]',
+      sessionIdsJson: '[]',
+      createdAt: new Date().toISOString(),
+    });
+
+    const diagnosticRoot = join(dir, 'custom-diagnostics');
+    const diagSvc = new DiagnosticsService(
+      db,
+      dir,
+      join(dir, 'artifacts'),
+      diagnosticRoot,
+      { getTrace: () => Promise.resolve({ traceId: 'trace-custom', hasError: false, errorSpans: [], topSlowSpans: [] }) },
+    );
+
+    await diagSvc.fetchDiagnostics(runId, 'tc-custom-diag');
+
+    const summaryFile = join(diagnosticRoot, runId, 'tc-custom-diag', 'trace-summary.json');
+    const written = JSON.parse(readFileSync(summaryFile, 'utf8')) as { traceId: string };
+    expect(written.traceId).toBe('trace-custom');
+  });
+
+  it('GET /trace does not append duplicate degraded fetches on repeated reads', async () => {
+    const runId = seedRun();
+    new CorrelationContextRepository(db).save({
+      id: `ctx-repeat-trace-${runId}`,
+      runId,
+      testcaseId: 'tc-repeat-trace',
+      traceIdsJson: JSON.stringify(['trace-repeat']),
+      requestIdsJson: '[]',
+      sessionIdsJson: '[]',
+      createdAt: new Date().toISOString(),
+    });
+
+    const diagSvc = new DiagnosticsService(
+      db,
+      dir,
+      join(dir, 'artifacts'),
+      join(dir, 'diagnostics'),
+      { getTrace: () => Promise.resolve(null) },
+    );
+    const repeatRouter = buildRouter(runSvc, diagSvc, taskSvc, new SettingsService(join(dir, 'config.json')));
+
+    const first = res();
+    await repeatRouter.handle(req('GET', `/runs/${runId}/testcases/tc-repeat-trace/trace`), first.res);
+    expect(first.status()).toBe(200);
+
+    const second = res();
+    await repeatRouter.handle(req('GET', `/runs/${runId}/testcases/tc-repeat-trace/trace`), second.res);
+    expect(second.status()).toBe(200);
+
+    const rows = new DiagnosticFetchRepository(db).findByTestcase(runId, 'tc-repeat-trace')
+      .filter((row) => row.type === 'trace');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe('degraded');
+  });
+
+  it('GET /logs does not append duplicate degraded fetches on repeated reads', async () => {
+    const runId = seedRun();
+    new CorrelationContextRepository(db).save({
+      id: `ctx-repeat-log-${runId}`,
+      runId,
+      testcaseId: 'tc-repeat-log',
+      traceIdsJson: '[]',
+      requestIdsJson: JSON.stringify(['req-repeat']),
+      sessionIdsJson: '[]',
+      createdAt: new Date().toISOString(),
+    });
+
+    const diagSvc = new DiagnosticsService(
+      db,
+      dir,
+      join(dir, 'artifacts'),
+      join(dir, 'diagnostics'),
+      undefined,
+      { query: () => Promise.resolve(null) },
+    );
+    const repeatRouter = buildRouter(runSvc, diagSvc, taskSvc, new SettingsService(join(dir, 'config.json')));
+
+    const first = res();
+    await repeatRouter.handle(req('GET', `/runs/${runId}/testcases/tc-repeat-log/logs`), first.res);
+    expect(first.status()).toBe(200);
+
+    const second = res();
+    await repeatRouter.handle(req('GET', `/runs/${runId}/testcases/tc-repeat-log/logs`), second.res);
+    expect(second.status()).toBe(200);
+
+    const rows = new DiagnosticFetchRepository(db).findByTestcase(runId, 'tc-repeat-log')
+      .filter((row) => row.type === 'log');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe('degraded');
   });
 
   it('onConfigUpdated refreshes trace/log providers', async () => {

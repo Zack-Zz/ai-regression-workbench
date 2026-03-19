@@ -11,12 +11,14 @@ import type {
 } from '@zarb/shared-types';
 import type { AIEngine } from '@zarb/ai-engine';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createTraceProvider } from '@zarb/trace-bridge';
 import { createLogProvider } from '@zarb/log-bridge';
+import { resolveStoragePath, resolveConfiguredRelativePath, resolveRelativePathWithinRoot, mustResolveConfiguredRelativePath } from '../storage-paths.js';
 
 export class DiagnosticsService implements ConfigObserver {
+  private readonly dataRoot: string;
   private readonly results: TestResultRepository;
   private readonly correlations: CorrelationContextRepository;
   private readonly diagnosticFetches: DiagnosticFetchRepository;
@@ -24,15 +26,20 @@ export class DiagnosticsService implements ConfigObserver {
   private readonly apiCalls: ApiCallRepository;
   private readonly uiActions: UiActionRepository;
   private readonly flowSteps: FlowStepRepository;
+  private artifactRoot: string;
+  private diagnosticRoot: string;
   private traceProvider: TraceProvider;
   private logProvider: LogProvider;
+  private readonly aiEngine: AIEngine | undefined;
 
   constructor(
     private readonly db: Db,
-    private readonly dataRoot: string,
+    dataRoot = '.',
+    artifactRoot = join(dataRoot, 'artifacts'),
+    diagnosticRoot = join(dataRoot, 'diagnostics'),
     traceProvider?: TraceProvider,
     logProvider?: LogProvider,
-    private readonly aiEngine?: AIEngine,
+    aiEngine?: AIEngine,
   ) {
     this.results = new TestResultRepository(db);
     this.correlations = new CorrelationContextRepository(db);
@@ -41,14 +48,44 @@ export class DiagnosticsService implements ConfigObserver {
     this.apiCalls = new ApiCallRepository(db);
     this.uiActions = new UiActionRepository(db);
     this.flowSteps = new FlowStepRepository(db);
+    this.dataRoot = dataRoot;
+    this.artifactRoot = artifactRoot;
+    this.diagnosticRoot = diagnosticRoot;
     this.traceProvider = traceProvider ?? createTraceProvider({ provider: 'none', endpoint: '' });
     this.logProvider = logProvider ?? createLogProvider({ provider: 'none', endpoint: '', defaultLimit: 100 });
+    this.aiEngine = aiEngine;
   }
 
   onConfigUpdated(snapshot: SettingsSnapshot): Promise<void> {
+    this.artifactRoot = resolveStoragePath(snapshot.sourcePath, snapshot.values.storage.artifactRoot, ['data', 'artifacts']);
+    this.diagnosticRoot = resolveStoragePath(snapshot.sourcePath, snapshot.values.storage.diagnosticRoot, ['data', 'diagnostics']);
     this.traceProvider = createTraceProvider(snapshot.values.trace);
     this.logProvider = createLogProvider({ ...snapshot.values.logs, logFields: snapshot.values.diagnostics.correlationKeys.logFields });
     return Promise.resolve();
+  }
+
+  private resolveArtifactPath(relativePath: string): string | null {
+    const configured = resolveConfiguredRelativePath(this.artifactRoot, 'artifacts', relativePath);
+    if (configured && existsSync(configured)) return configured;
+    const fallback = resolveRelativePathWithinRoot(this.dataRoot, relativePath);
+    if (fallback && existsSync(fallback)) return fallback;
+    return null;
+  }
+
+  private resolveDiagnosticPath(relativePath: string): string | null {
+    const configured = resolveConfiguredRelativePath(this.diagnosticRoot, 'diagnostics', relativePath);
+    if (configured && existsSync(configured)) return configured;
+    const fallback = resolveRelativePathWithinRoot(this.dataRoot, relativePath);
+    if (fallback && existsSync(fallback)) return fallback;
+    return null;
+  }
+
+  private resolveDiagnosticWritePath(relativePath: string): string {
+    return mustResolveConfiguredRelativePath(this.diagnosticRoot, 'diagnostics', relativePath);
+  }
+
+  private shouldFetchDiagnostic(fetches: import('@zarb/storage').DiagnosticFetchRow[], type: 'trace' | 'log'): boolean {
+    return !fetches.some((fetch) => fetch.type === type);
   }
 
   listFailureReports(runId: string): FailureReportSummary[] {
@@ -77,6 +114,8 @@ export class DiagnosticsService implements ConfigObserver {
         ...(result.screenshot_path ? { screenshotPath: result.screenshot_path } : {}),
         ...(result.video_path ? { videoPath: result.video_path } : {}),
         ...(result.trace_path ? { tracePath: result.trace_path } : {}),
+        ...(result.html_report_path ? { htmlReportPath: result.html_report_path } : {}),
+        ...(result.network_log_path ? { networkLogPath: result.network_log_path } : {}),
       },
       correlationContext: {
         traceIds: ctx ? JSON.parse(ctx.trace_ids_json ?? '[]') as string[] : [],
@@ -84,6 +123,26 @@ export class DiagnosticsService implements ConfigObserver {
         sessionIds: ctx ? JSON.parse(ctx.session_ids_json ?? '[]') as string[] : [],
       },
     };
+  }
+
+  getFailureArtifactPath(
+    runId: string,
+    testcaseId: string,
+    kind: 'screenshot' | 'video' | 'trace' | 'html-report' | 'network',
+  ): string | null {
+    const result = this.results.findByTestcase(runId, testcaseId);
+    if (!result) return null;
+    const relativePath = kind === 'screenshot'
+      ? result.screenshot_path
+      : kind === 'video'
+        ? result.video_path
+        : kind === 'trace'
+          ? result.trace_path
+          : kind === 'html-report'
+            ? result.html_report_path
+            : result.network_log_path;
+    if (!relativePath) return null;
+    return this.resolveArtifactPath(relativePath);
   }
 
   getExecutionProfile(runId: string, testcaseId: string): TestcaseExecutionProfile | null {
@@ -157,7 +216,7 @@ export class DiagnosticsService implements ConfigObserver {
   async getTrace(runId: string, testcaseId: string): Promise<TraceDetail | null> {
     const fetches = this.diagnosticFetches.findByTestcase(runId, testcaseId);
     let traceFetch = fetches.find(f => f.type === 'trace' && f.status === 'succeeded');
-    if (!traceFetch) {
+    if (!traceFetch && this.shouldFetchDiagnostic(fetches, 'trace')) {
       // On-demand fetch if not yet populated
       await this.fetchDiagnostics(runId, testcaseId);
       const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
@@ -192,7 +251,7 @@ export class DiagnosticsService implements ConfigObserver {
   async getLogs(runId: string, testcaseId: string): Promise<LogDetail | null> {
     const fetches = this.diagnosticFetches.findByTestcase(runId, testcaseId);
     let logFetch = fetches.find(f => f.type === 'log' && f.status === 'succeeded');
-    if (!logFetch) {
+    if (!logFetch && this.shouldFetchDiagnostic(fetches, 'log')) {
       await this.fetchDiagnostics(runId, testcaseId);
       const updated = this.diagnosticFetches.findByTestcase(runId, testcaseId);
       logFetch = updated.find(f => f.type === 'log' && f.status === 'succeeded');
@@ -310,7 +369,7 @@ export class DiagnosticsService implements ConfigObserver {
 
   private writeSummaryFile(relativePath: string, content: string): void {
     try {
-      const abs = join(this.dataRoot, relativePath);
+      const abs = this.resolveDiagnosticWritePath(relativePath);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, content, 'utf8');
     } catch { /* non-fatal */ }

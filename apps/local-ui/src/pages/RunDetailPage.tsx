@@ -15,6 +15,7 @@ export function RunDetailPage(): React.ReactElement {
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getRun(id), [id]);
   const { data: taskData } = useAsync(() => api.listCodeTasks(`runId=${id}`), [id]);
+  const { data: report } = useAsync(() => api.getExecutionReport(id), [id]);
   useServerEvents(['run.updated', 'run.step.updated'], () => reload(), (e) => !e.id || e.id === id, () => { void reload(); });
   const isActive = data ? !TERMINAL.has(data.summary.status) : false;
 
@@ -58,6 +59,50 @@ export function RunDetailPage(): React.ReactElement {
         )}
       </Card>
 
+      {report && (
+        <>
+          <Card title="执行摘要">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
+              <MetricCard label="总用例" value={String(report.summary.total)} />
+              <MetricCard label="通过" value={String(report.summary.passed)} tone="ok" />
+              <MetricCard label="失败" value={String(report.summary.failed)} tone={report.summary.failed > 0 ? 'error' : 'neutral'} />
+              <MetricCard label="UI 操作" value={String(report.totals.uiActionCount)} />
+              <MetricCard label="接口调用" value={String(report.totals.apiCallCount)} />
+              <MetricCard label="失败接口" value={String(report.totals.failedApiCount)} tone={report.totals.failedApiCount > 0 ? 'warn' : 'neutral'} />
+            </div>
+            {report.fatalReason && (
+              <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.8rem', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, color: '#be123c', fontSize: '0.9em' }}>
+                {report.fatalReason}
+              </div>
+            )}
+            {report.warnings && report.warnings.length > 0 && (
+              <div style={{ marginTop: '0.75rem', color: '#b45309', fontSize: '0.9em' }}>
+                {report.warnings.join('；')}
+              </div>
+            )}
+            {report.recommendations && report.recommendations.length > 0 && (
+              <div style={{ marginTop: '0.75rem', color: '#1d4ed8', fontSize: '0.9em' }}>
+                {report.recommendations.join('；')}
+              </div>
+            )}
+          </Card>
+
+          {report.stageResults.length > 0 && (
+            <Card title="阶段结果">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {report.stageResults.map((stage, index) => (
+                  <div key={`${stage.stage}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid #f3f4f6' }}>
+                    <span style={{ minWidth: 180, fontWeight: 600 }}>{stage.stage}</span>
+                    <span style={{ color: stage.status === 'success' ? '#2a7' : stage.status === 'failed' ? '#c33' : stage.status === 'degraded' ? '#b45309' : '#6b7280' }}>{stage.status}</span>
+                    <span style={{ color: '#888', fontSize: '0.85em' }}>{stage.message ?? '-'}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
       {explorationConfig && (
         <Card title={t('run.explorationConfig')}>
           <KV label={t('run.startUrls')} value={explorationConfig.startUrls.join(', ')} />
@@ -71,12 +116,23 @@ export function RunDetailPage(): React.ReactElement {
       {testResults.length > 0 && (
         <Card title={`测试结果 (${String(testResults.length)})`}>
           <Table
-            headers={['Testcase', t('common.status'), t('common.duration'), t('common.error')]}
+            headers={['Testcase', t('common.status'), t('common.duration'), t('common.error'), '查看']}
             rows={testResults.map(r => [
-              <button key="tc" onClick={() => { navigate(`/runs/${id}/testcases/${r.testcaseId}/failure-report`); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline' }}>{r.testcaseId}</button>,
+              r.testcaseId,
               <span key="s" style={{ color: r.status === 'passed' ? '#2a7' : r.status === 'failed' ? '#c33' : '#888' }}>{r.status}</span>,
               r.durationMs !== undefined ? `${String(r.durationMs)}ms` : '-',
               r.errorMessage ?? '-',
+              <button
+                key="open"
+                onClick={() => {
+                  navigate(r.status === 'failed'
+                    ? `/runs/${id}/testcases/${r.testcaseId}/failure-report`
+                    : `/runs/${id}/testcases/${r.testcaseId}/execution-profile`);
+                }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline' }}
+              >
+                {r.status === 'failed' ? '失败诊断' : '执行详情'}
+              </button>,
             ])}
           />
         </Card>
@@ -127,6 +183,18 @@ export function RunDetailPage(): React.ReactElement {
       {(summary.runMode === 'exploration' || summary.runMode === 'hybrid') && (
         <StepLogPanel runId={id} {...(summary.summary !== undefined ? { runSummary: summary.summary } : {})} />
       )}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'ok' | 'warn' | 'error' }): React.ReactElement {
+  const color = tone === 'ok' ? '#047857' : tone === 'warn' ? '#b45309' : tone === 'error' ? '#b91c1c' : '#111827';
+  const bg = tone === 'ok' ? '#ecfdf5' : tone === 'warn' ? '#fffbeb' : tone === 'error' ? '#fef2f2' : '#f9fafb';
+  const border = tone === 'ok' ? '#a7f3d0' : tone === 'warn' ? '#fde68a' : tone === 'error' ? '#fecaca' : '#e5e7eb';
+  return (
+    <div style={{ border: `1px solid ${border}`, background: bg, borderRadius: 6, padding: '0.75rem' }}>
+      <div style={{ fontSize: '0.8em', color: '#6b7280' }}>{label}</div>
+      <div style={{ fontSize: '1.25rem', fontWeight: 700, color }}>{value}</div>
     </div>
   );
 }

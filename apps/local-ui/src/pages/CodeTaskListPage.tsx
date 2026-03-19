@@ -3,13 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAsync } from '../hooks.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, Table, Card } from '../components/ui.js';
-
-const STATUS_COLOR: Record<string, string> = {
-  PENDING_APPROVAL: '#f90', APPROVED: '#36c', RUNNING: '#36c',
-  SUCCEEDED: '#2a7', FAILED: '#c33', CANCELLED: '#888',
-  PENDING_REVIEW: '#f90', COMMITTED: '#2a7',
-};
+import { Loading, ErrorBanner, Table, Card, TaskStatusBadge } from '../components/ui.js';
 
 export function CodeTaskListPage(): React.ReactElement {
   const navigate = useNavigate();
@@ -33,7 +27,7 @@ export function CodeTaskListPage(): React.ReactElement {
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline', fontFamily: 'monospace' }}>
                   {item.taskId}
                 </button>,
-                <span key="s" style={{ color: STATUS_COLOR[item.status] ?? '#888', fontWeight: 600 }}>{item.status}</span>,
+                <TaskStatusBadge key="s" status={item.status} />,
                 <button key="run" onClick={() => { navigate(`/runs/${item.runId}`); }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline', fontFamily: 'monospace' }}>
                   {item.runId}

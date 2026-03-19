@@ -58,6 +58,7 @@ export interface StartRunInput {
   };
   projectPath?: string;
   projectId?: string;
+  repoId?: string;
   siteId?: string;
   credentialId?: string;
   includeSharedInRuns?: boolean;
@@ -187,6 +188,12 @@ export interface SettingsSnapshot {
   sourcePath: string;
   updatedAt: string;
   values: PersonalSettings;
+  resolvedPaths?: {
+    sqlitePath: string;
+    artifactRoot: string;
+    diagnosticRoot: string;
+    codeTaskRoot: string;
+  };
 }
 
 export interface UpdateSettingsInput {

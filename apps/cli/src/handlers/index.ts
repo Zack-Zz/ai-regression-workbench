@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
+import { extname, basename } from 'node:path';
 import type { RunService } from '../services/run-service.js';
 import type { DiagnosticsService } from '../services/diagnostics-service.js';
 import type { CodeTaskService } from '../services/code-task-service.js';
@@ -71,8 +72,8 @@ export function buildRouter(
   router.post('/runs', async (req, res) => {
     try {
       const body = await readBody<StartRunInput>(req);
-      // Inject projectPath from settings if not provided by caller
-      if (!body.projectPath) {
+      // Legacy fallback only for unmanaged runs without explicit project/repo targeting.
+      if (!body.projectPath && !body.projectId && !body.repoId) {
         const cfg = settingsSvc.getSync();
         if (cfg.workspace?.targetProjectPath) body.projectPath = cfg.workspace.targetProjectPath;
       }
@@ -122,6 +123,11 @@ export function buildRouter(
     serveNdjson(res, filePath);
   });
 
+  router.get('/runs/:runId/prompt-samples', (_req, res, params) => {
+    const filePath = runSvc.getRunFilePath(params['runId'] ?? '', 'prompt-samples.jsonl');
+    serveNdjson(res, filePath);
+  });
+
   router.post('/runs/:runId/pause', (_req, res, params) => {
     const result = runSvc.pauseRun(params['runId'] ?? '');
     if (!result.success) {
@@ -165,6 +171,24 @@ export function buildRouter(
     ok(res, report);
   });
 
+  router.get('/runs/:runId/testcases/:testcaseId/artifacts/:kind', (_req, res, params) => {
+    const kind = params['kind'];
+    if (!kind || !['screenshot', 'video', 'trace', 'html-report', 'network'].includes(kind)) {
+      badRequest(res, 'ARTIFACT_KIND_INVALID', 'Unsupported artifact kind');
+      return;
+    }
+    const absPath = diagSvc.getFailureArtifactPath(
+      params['runId'] ?? '',
+      params['testcaseId'] ?? '',
+      kind as 'screenshot' | 'video' | 'trace' | 'html-report' | 'network',
+    );
+    if (!absPath || !existsSync(absPath)) {
+      notFound(res, 'ARTIFACT_NOT_FOUND', 'Artifact not found');
+      return;
+    }
+    serveFile(res, absPath);
+  });
+
   router.get('/runs/:runId/testcases/:testcaseId/execution-profile', (_req, res, params) => {
     const profile = diagSvc.getExecutionProfile(params['runId'] ?? '', params['testcaseId'] ?? '');
     if (!profile) { notFound(res, 'RUN_NOT_FOUND', 'Execution profile not found'); return; }
@@ -196,7 +220,11 @@ export function buildRouter(
     ok(res, taskSvc.listDrafts(params['runId'] ?? '', params['testcaseId']));
   });
   router.post('/runs/:runId/testcases/:testcaseId/drafts/:draftId/promote', (_req, res, params) => {
-    const result = taskSvc.promoteToCodeTask(params['draftId'] ?? '');
+    const result = taskSvc.promoteToCodeTask(
+      params['draftId'] ?? '',
+      params['runId'] ?? '',
+      params['testcaseId'] ?? '',
+    );
     if (!result.success) { notFound(res, result.errorCode ?? 'NOT_FOUND', result.message); return; }
     ok(res, result);
   });
@@ -216,6 +244,23 @@ export function buildRouter(
     const detail = taskSvc.getCodeTask(params['taskId'] ?? '');
     if (!detail) { notFound(res, 'CODE_TASK_NOT_FOUND', 'CodeTask not found'); return; }
     ok(res, detail);
+  });
+
+  router.get('/code-tasks/:taskId/artifacts/:kind', (_req, res, params) => {
+    const kind = params['kind'];
+    if (!kind || !['diff', 'patch', 'raw-output', 'verify-output'].includes(kind)) {
+      badRequest(res, 'ARTIFACT_KIND_INVALID', 'Unsupported artifact kind');
+      return;
+    }
+    const absPath = taskSvc.getCodeTaskArtifactPath(
+      params['taskId'] ?? '',
+      kind as 'diff' | 'patch' | 'raw-output' | 'verify-output',
+    );
+    if (!absPath || !existsSync(absPath)) {
+      notFound(res, 'ARTIFACT_NOT_FOUND', 'Artifact not found');
+      return;
+    }
+    serveFile(res, absPath);
   });
 
   router.post('/code-tasks/:taskId/approve', (_req, res, params) => {
@@ -309,6 +354,34 @@ function serveNdjson(res: ServerResponse, filePath: string): void {
     const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
     ok(res, lines.map(l => JSON.parse(l) as unknown));
   } catch { ok(res, []); }
+}
+
+function serveFile(res: ServerResponse, filePath: string): void {
+  const ext = extname(filePath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.zip': 'application/zip',
+    '.har': 'application/json',
+    '.json': 'application/json',
+    '.jsonl': 'application/x-ndjson',
+    '.ndjson': 'application/x-ndjson',
+    '.txt': 'text/plain; charset=utf-8',
+    '.diff': 'text/plain; charset=utf-8',
+    '.patch': 'text/plain; charset=utf-8',
+    '.html': 'text/html; charset=utf-8',
+  };
+  res.writeHead(200, {
+    'Content-Type': mimeMap[ext] ?? 'application/octet-stream',
+    'Content-Disposition': `inline; filename="${basename(filePath)}"`,
+  });
+  res.end(readFileSync(filePath));
 }
 
 export async function handleRequest(

@@ -132,6 +132,7 @@
 - 保存时携带 `expectedVersion` 防并发覆盖
 - 保存成功后展示 `reloadedModules` / `nextRunOnlyKeys`
 - 若 `report.port` 更新，前端提示“重启本地服务后生效”，不自动跳转
+- `storage.artifactRoot / diagnosticRoot / codeTaskRoot` 保存后对后续新写入即时生效，不要求迁移历史文件
 
 ## 3.5 多语言与文案规范（i18n）
 

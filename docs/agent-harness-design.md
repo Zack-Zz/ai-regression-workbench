@@ -161,6 +161,7 @@
 
 - session 上下文摘要
 - step 级 tool call 记录
+- 采样后的 prompt 原文与响应
 - approval 记录
 - 关键产物引用
 
@@ -179,6 +180,7 @@
 - `agent-traces/<sessionId>/context-summary.json`
 - `agent-traces/<sessionId>/steps.jsonl`
 - `agent-traces/<sessionId>/tool-calls.jsonl`
+- `agent-traces/<sessionId>/prompt-samples.jsonl`
 
 说明：
 

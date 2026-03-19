@@ -1,5 +1,5 @@
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { execSync } from 'node:child_process';
 import { codeTaskDiffPath, codeTaskPatchPath, codeTaskVerifyPath, codeTaskRawOutputPath } from '@zarb/storage';
 import type { Db } from '@zarb/storage';
@@ -23,6 +23,21 @@ export interface GenerateArtifactsResult {
   changedFiles: string[];
 }
 
+function resolveConfiguredRelativePath(rootDir: string, defaultPrefix: string, relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  const prefix = `${defaultPrefix}/`;
+  const candidate = resolve(rootDir, normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized);
+  const rel = relative(resolve(rootDir), candidate);
+  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+    return candidate;
+  }
+  throw new Error(`Path escapes configured root: ${relativePath}`);
+}
+
+function toConfiguredRelativePath(rootDir: string, defaultPrefix: string, ...segments: string[]): string {
+  return join(rootDir.split(/[/\\]/).pop() ?? defaultPrefix, ...segments);
+}
+
 /**
  * ArtifactWriter — writes system-derived CodeTask artifacts.
  * diff/patch/verify outputs are produced by the Harness from workspace state,
@@ -31,9 +46,11 @@ export interface GenerateArtifactsResult {
  */
 export class ArtifactWriter {
   private readonly codeTaskRepo: CodeTaskRepository | null;
+  private readonly codeTaskRoot: string;
 
-  constructor(private readonly dataRoot: string, db?: Db) {
+  constructor(private readonly dataRoot: string, db?: Db, codeTaskRoot?: string) {
     this.codeTaskRepo = db ? new CodeTaskRepository(db) : null;
+    this.codeTaskRoot = codeTaskRoot ?? join(dataRoot, 'code-tasks');
   }
 
   /**
@@ -123,10 +140,11 @@ export class ArtifactWriter {
   }
 
   private write(relPath: string, content: string): string {
-    const absPath = join(this.dataRoot, relPath);
+    const absPath = resolveConfiguredRelativePath(this.codeTaskRoot, 'code-tasks', relPath);
     mkdirSync(dirname(absPath), { recursive: true });
     writeFileSync(absPath, content, 'utf8');
-    return relPath;
+    const parts = relPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    return toConfiguredRelativePath(this.codeTaskRoot, 'code-tasks', ...parts.slice(1));
   }
 
   private runCommand(cmd: string, cwd: string): string {

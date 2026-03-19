@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
@@ -236,6 +236,31 @@ describe('TestRunner', () => {
 
     const rows = new TestResultRepository(db).findByRun('run-6');
     expect(rows[0]?.network_log_path).toBeTruthy();
+  });
+
+  it('writes artifacts under the configured artifactRoot', async () => {
+    const db = makeDb();
+    makeRun(db, 'run-artifacts');
+
+    const screenshotPath = join(dir, 'shot.png');
+    writeFileSync(screenshotPath, 'png-bytes');
+
+    writeReport(dir, 'run-artifacts', [
+      {
+        title: 'artifact test',
+        status: 'passed',
+        annotations: [{ type: 'zarb-testcase-id', description: 'tc-art' }],
+        attachments: [{ name: 'screenshot', path: screenshotPath, contentType: 'image/png' }],
+      },
+    ]);
+
+    const customArtifactRoot = join(dir, 'custom-shots');
+    const runner = new TestRunner(db);
+    await runner.execute({ runId: 'run-artifacts', workspacePath: dir, dataRoot: dir, artifactRoot: customArtifactRoot });
+
+    const row = new TestResultRepository(db).findByTestcase('run-artifacts', 'tc-art');
+    expect(row?.screenshot_path).toBe('custom-shots/run-artifacts/tc-art/shot.png');
+    expect(existsSync(join(dir, 'custom-shots', 'run-artifacts', 'tc-art', 'shot.png'))).toBe(true);
   });
 
   it('returns startupFailure when workspacePath does not exist', async () => {

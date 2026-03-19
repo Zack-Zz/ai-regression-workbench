@@ -1,5 +1,5 @@
 import type { Db, RunRow } from '@zarb/storage';
-import { RunRepository, RunEventRepository, TestResultRepository, FindingRepository, ExecutionReportRepository, CodeTaskDraftRepository, CodeTaskRepository, SelectorCacheRepository, ProjectRepository, SiteRepository, LocalRepoRepository, SiteCredentialRepository } from '@zarb/storage';
+import { RunRepository, RunEventRepository, TestResultRepository, FindingRepository, ExecutionReportRepository, CodeTaskDraftRepository, CodeTaskRepository, SelectorCacheRepository, ProjectRepository, SiteRepository, LocalRepoRepository, SiteCredentialRepository, FlowStepRepository, UiActionRepository, ApiCallRepository } from '@zarb/storage';
 import { join } from 'node:path';
 import type {
   RunSummary, RunDetail, RunSummaryPage, RunEventPage, ActionResult,
@@ -7,6 +7,7 @@ import type {
   ExecutionReport, ExplorationConfig,
 } from '@zarb/shared-types';
 import type { RunScopeType } from '@zarb/shared-types';
+import { isRunTransitionAllowed } from '@zarb/shared-types';
 import { DEFAULT_SETTINGS } from '@zarb/config';
 import type { TestRunner } from '@zarb/test-runner';
 import type { AIEngine, AIProvider } from '@zarb/ai-engine';
@@ -19,6 +20,8 @@ const log = appLogger.child('RunService');
 export interface RunServiceOptions {
   /** Absolute path to the workbench data root (for artifact storage) */
   dataRoot: string;
+  /** Absolute artifact root resolved from current settings. */
+  artifactRootResolver?: () => string;
   /** Optional runner — if provided, startRun will trigger real Playwright execution */
   runner?: TestRunner;
   /** Optional AI engine — if provided, triggers failure analysis after regression runs */
@@ -63,6 +66,85 @@ function validateSelector(sel: StartRunInput['selector']): boolean {
   return count === 1;
 }
 
+function mapRunStatusToStageStatus(status: RunStatus): 'success' | 'degraded' | 'failed' | 'skipped' {
+  if (status === 'FAILED' || status === 'CANCELLED') return 'failed';
+  if (status === 'COMPLETED') return 'success';
+  if (status === 'PAUSED') return 'degraded';
+  return 'degraded';
+}
+
+function getOrderedStages(runMode: 'regression' | 'exploration' | 'hybrid'): RunStatus[] {
+  if (runMode === 'exploration') {
+    return ['PLANNING_EXPLORATION', 'RUNNING_EXPLORATION', 'COLLECTING_ARTIFACTS', 'COMPLETED'];
+  }
+  if (runMode === 'hybrid') {
+    return [
+      'RUNNING_TESTS',
+      'PLANNING_EXPLORATION',
+      'RUNNING_EXPLORATION',
+      'COLLECTING_ARTIFACTS',
+      'ANALYZING_FAILURES',
+      'AWAITING_CODE_ACTION',
+      'RUNNING_CODE_TASK',
+      'AWAITING_REVIEW',
+      'READY_TO_COMMIT',
+      'COMPLETED',
+    ];
+  }
+  return [
+    'RUNNING_TESTS',
+    'ANALYZING_FAILURES',
+    'AWAITING_CODE_ACTION',
+    'RUNNING_CODE_TASK',
+    'AWAITING_REVIEW',
+    'READY_TO_COMMIT',
+    'COMPLETED',
+  ];
+}
+
+function stageMessage(stage: RunStatus, context: {
+  total: number;
+  failed: number;
+  findings: number;
+  pendingApprovalTasks: number;
+  activeTasks: number;
+  reviewPendingTasks: number;
+  commitPendingTasks: number;
+  degradedSteps: number;
+  fatalReason?: string;
+}): string | undefined {
+  switch (stage) {
+    case 'RUNNING_TESTS':
+      return context.total > 0 ? `${String(context.total)} 个用例，失败 ${String(context.failed)} 个` : undefined;
+    case 'PLANNING_EXPLORATION':
+      return '准备探索策略与初始页面上下文';
+    case 'RUNNING_EXPLORATION':
+      return context.findings > 0 ? `已记录 ${String(context.findings)} 条 finding` : '探索进行中';
+    case 'COLLECTING_ARTIFACTS':
+      return context.degradedSteps > 0 ? `存在 ${String(context.degradedSteps)} 个降级步骤` : '整理截图、trace、network 等产物';
+    case 'ANALYZING_FAILURES':
+      return context.failed > 0 ? `${String(context.failed)} 个失败用例等待分析` : '分析失败原因';
+    case 'AWAITING_CODE_ACTION':
+      return context.pendingApprovalTasks > 0 ? `${String(context.pendingApprovalTasks)} 个任务待批准` : '等待代码修复动作';
+    case 'RUNNING_CODE_TASK':
+      return context.activeTasks > 0 ? `${String(context.activeTasks)} 个代码任务执行中` : '代码修复执行中';
+    case 'AWAITING_REVIEW':
+      return context.reviewPendingTasks > 0 ? `${String(context.reviewPendingTasks)} 个任务待 review` : '等待 review';
+    case 'READY_TO_COMMIT':
+      return context.commitPendingTasks > 0 ? `${String(context.commitPendingTasks)} 个任务待提交` : '准备提交修复结果';
+    case 'COMPLETED':
+      return context.fatalReason;
+    default:
+      return context.fatalReason;
+  }
+}
+
+function summarizeFlowDuration(startedAt?: string | null, endedAt?: string | null): number | undefined {
+  if (!startedAt || !endedAt) return undefined;
+  const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
+}
+
 export class RunService {
   private readonly runs: RunRepository;
   private readonly events: RunEventRepository;
@@ -72,6 +154,9 @@ export class RunService {
   private readonly drafts: CodeTaskDraftRepository;
   private readonly tasks: CodeTaskRepository;
   private readonly selectorCache: SelectorCacheRepository;
+  private readonly flowSteps: FlowStepRepository;
+  private readonly uiActions: UiActionRepository;
+  private readonly apiCalls: ApiCallRepository;
   private readonly projects: ProjectRepository;
   private readonly sites: SiteRepository;
   private readonly credentials: SiteCredentialRepository;
@@ -89,6 +174,9 @@ export class RunService {
     this.drafts = new CodeTaskDraftRepository(db);
     this.tasks = new CodeTaskRepository(db);
     this.selectorCache = new SelectorCacheRepository(db);
+    this.flowSteps = new FlowStepRepository(db);
+    this.uiActions = new UiActionRepository(db);
+    this.apiCalls = new ApiCallRepository(db);
     this.projects = new ProjectRepository(db);
     this.sites = new SiteRepository(db);
     this.credentials = new SiteCredentialRepository(db);
@@ -147,14 +235,18 @@ export class RunService {
     const projectId = input.projectId ?? 'project-default';
     const runDataRoot = join(this.opts.dataRoot, '..', 'projects', projectId);
 
-    // Derive test suite path: testSuitesRoot/<projectId> (or legacy input.projectPath)
-    const testSuitePath = (this.opts.testSuitesRoot && input.projectId)
-      ? join(this.opts.testSuitesRoot, input.projectId)
-      : (input.projectPath ?? '');
-
-    // Derive workspace path for CodeTask: first LocalRepo of this project
     const repoRows = input.projectId ? this.localRepos.findByProjectId(input.projectId) : [];
-    const workspacePath = repoRows[0]?.path ?? input.projectPath ?? '';
+    const selectedRepo = input.repoId ? repoRows.find((repo) => repo.id === input.repoId) : undefined;
+    if (input.projectId && repoRows.length > 0 && !selectedRepo && !input.projectPath) {
+      return { success: false, message: 'run requires an explicit repo selection for the target project', errorCode: 'RUN_REPO_REQUIRED' };
+    }
+
+    // Derive test suite path from explicit repo, then testSuitesRoot, then legacy projectPath.
+    const testSuitePath = selectedRepo?.path
+      ?? ((this.opts.testSuitesRoot && input.projectId) ? join(this.opts.testSuitesRoot, input.projectId) : (input.projectPath ?? ''));
+
+    // Derive workspace path for CodeTask from the explicit repo first.
+    const workspacePath = selectedRepo?.path ?? input.projectPath ?? '';
 
     this.runs.create({
       runId,
@@ -188,6 +280,7 @@ export class RunService {
           runId,
           workspacePath: testSuitePath,
           dataRoot,
+          ...(this.opts.artifactRootResolver ? { artifactRoot: this.opts.artifactRootResolver() } : {}),
           ...(sel ? { selector: sel } : {}),
           onProgress: (counts) => {
             this.runs.update(runId, { ...counts, updatedAt: new Date().toISOString() });
@@ -260,7 +353,7 @@ export class RunService {
       void this.runExploration(runId, input.exploration, runDataRoot);
     }
     // hybrid without runner: skip regression, go straight to exploration
-    if (input.runMode === 'hybrid' && (!this.opts.runner || !input.projectPath) && input.exploration) {
+    if (input.runMode === 'hybrid' && (!this.opts.runner || !testSuitePath) && input.exploration) {
       void this.runExploration(runId, input.exploration, runDataRoot);
     }
 
@@ -445,7 +538,7 @@ export class RunService {
     this.tasks.update(taskId, { status, updatedAt: now });
   }
 
-  getRunFilePath(runId: string, filename: 'steps.ndjson' | 'network.jsonl'): string {
+  getRunFilePath(runId: string, filename: 'steps.ndjson' | 'network.jsonl' | 'prompt-samples.jsonl'): string {
     // We don't know projectId here without a DB lookup, so use the run row
     const row = this.runs.findById(runId);
     const projectId = row?.project_id ?? 'project-default';
@@ -501,21 +594,212 @@ export class RunService {
     if (!row) return null;
     const reportRow = this.executionReports.findByRunId(runId);
     const totals = reportRow?.totals_json ? JSON.parse(reportRow.totals_json) as { flowStepCount: number; uiActionCount: number; apiCallCount: number; failedApiCount: number } : { flowStepCount: 0, uiActionCount: 0, apiCallCount: 0, failedApiCount: 0 };
+    const results = this.results.findByRun(runId);
+    const failedResults = results.filter((result) => result.status === 'failed');
+    const codeTasks = this.tasks.list({ runId, limit: 1000 }).items;
+    const rawEvents = this.events.list(runId, { limit: 500 }).items;
+    const findings = this.findings.findByRun(runId);
+    const flowSteps = results.flatMap((result) => this.flowSteps.findByTestcase(runId, result.testcase_id));
+    const uiActions = results.flatMap((result) => this.uiActions.findByTestcase(runId, result.testcase_id));
+    const apiCalls = results.flatMap((result) => this.apiCalls.findByTestcase(runId, result.testcase_id));
+    const degradedSteps = rawEvents
+      .filter((event) => event.event_type === 'RUN_STEP_DEGRADED')
+      .map((event) => {
+        if (!event.payload_json) return `${event.entity_type}:${event.entity_id}`;
+        try {
+          const payload = JSON.parse(event.payload_json) as { reason?: string };
+          return payload.reason ?? `${event.entity_type}:${event.entity_id}`;
+        } catch {
+          return `${event.entity_type}:${event.entity_id}`;
+        }
+      });
+    const pendingApprovalTasks = codeTasks.filter((task) => task.status === 'PENDING_APPROVAL').length;
+    const activeTasks = codeTasks.filter((task) => task.status === 'APPROVED' || task.status === 'RUNNING' || task.status === 'VERIFYING').length;
+    const reviewPendingTasks = codeTasks.filter((task) => task.status === 'SUCCEEDED').length;
+    const commitPendingTasks = codeTasks.filter((task) => task.status === 'COMMIT_PENDING').length;
+    const orderedStages = getOrderedStages(row.run_mode);
+    const currentStage = row.current_stage ?? row.status;
+    const currentStageIndex = orderedStages.indexOf(currentStage as RunStatus);
+    const buildStageContext = (stage: RunStatus) => ({
+      total: row.total ?? 0,
+      failed: row.failed ?? 0,
+      findings: findings.length,
+      pendingApprovalTasks,
+      activeTasks,
+      reviewPendingTasks,
+      commitPendingTasks,
+      degradedSteps: degradedSteps.length,
+      ...(stage === currentStage && row.summary ? { fatalReason: row.summary } : {}),
+    });
+    const stageResults = orderedStages.map((stage, index) => {
+      let status: 'success' | 'degraded' | 'failed' | 'skipped';
+      if (currentStageIndex === -1) {
+        status = stage === currentStage ? mapRunStatusToStageStatus(row.status) : stage === 'COMPLETED' && row.status === 'COMPLETED' ? 'success' : 'skipped';
+      } else if (index < currentStageIndex) {
+        status = 'success';
+      } else if (index === currentStageIndex) {
+        status = mapRunStatusToStageStatus(row.status);
+      } else {
+        status = row.status === 'COMPLETED' ? 'success' : 'skipped';
+      }
+      if (degradedSteps.length > 0 && status === 'success' && (stage === 'COLLECTING_ARTIFACTS' || stage === 'ANALYZING_FAILURES')) {
+        status = 'degraded';
+      }
+      if ((row.status === 'FAILED' || row.status === 'CANCELLED') && index >= Math.max(currentStageIndex, 0)) {
+        status = stage === currentStage ? 'failed' : 'skipped';
+      }
+      const message = stageMessage(stage, buildStageContext(stage));
+      return {
+        stage,
+        status,
+        ...(message ? { message } : {}),
+      };
+    });
+    const criticalFindings = findings.filter((finding) => finding.severity === 'critical').length;
+    const highFindings = findings.filter((finding) => finding.severity === 'high').length;
+    const warnings = Array.from(new Set([
+      ...degradedSteps,
+      ...(totals.failedApiCount > 0 ? [`存在 ${String(totals.failedApiCount)} 个失败接口调用`] : []),
+      ...(failedResults.length > 0 ? [`存在 ${String(failedResults.length)} 个失败用例`] : []),
+      ...(criticalFindings > 0 ? [`存在 ${String(criticalFindings)} 个 critical findings`] : []),
+      ...(highFindings > 0 ? [`存在 ${String(highFindings)} 个 high findings`] : []),
+      ...(row.status === 'FAILED' && row.summary ? [row.summary] : []),
+    ]));
+    const recommendations = Array.from(new Set([
+      ...(failedResults.length > 0 ? ['优先查看失败报告，并核对 trace/log/network 产物。'] : []),
+      ...(pendingApprovalTasks > 0 ? [`先处理 ${String(pendingApprovalTasks)} 个待批准代码任务。`] : []),
+      ...(reviewPendingTasks > 0 ? [`先 review ${String(reviewPendingTasks)} 个已验证代码任务。`] : []),
+      ...(commitPendingTasks > 0 ? [`提交 ${String(commitPendingTasks)} 个待提交代码任务，推动 run 收敛。`] : []),
+      ...(criticalFindings + highFindings > 0 ? ['优先处理高严重度 exploration findings。'] : []),
+      ...(degradedSteps.length > 0 ? ['检查降级步骤涉及的外部依赖、凭据或诊断服务。'] : []),
+    ]));
+    const flowSummaryMap = new Map<string, {
+      flowId: string;
+      stepCount: number;
+      uiActionCount: number;
+      apiCallCount: number;
+      failedApiCount: number;
+      startedAt?: string;
+      endedAt?: string;
+    }>();
+    const flowStepToFlowId = new Map<string, string>();
+    for (const step of flowSteps) {
+      flowStepToFlowId.set(step.id, step.flow_id);
+      const existing = flowSummaryMap.get(step.flow_id) ?? {
+        flowId: step.flow_id,
+        stepCount: 0,
+        uiActionCount: 0,
+        apiCallCount: 0,
+        failedApiCount: 0,
+      };
+      existing.stepCount += 1;
+      existing.uiActionCount += step.ui_action_count ?? 0;
+      existing.apiCallCount += step.api_call_count ?? 0;
+      existing.failedApiCount += step.failed_api_count ?? 0;
+      existing.startedAt = existing.startedAt ? (existing.startedAt < step.started_at ? existing.startedAt : step.started_at) : step.started_at;
+      if (step.ended_at) {
+        existing.endedAt = existing.endedAt ? (existing.endedAt > step.ended_at ? existing.endedAt : step.ended_at) : step.ended_at;
+      }
+      flowSummaryMap.set(step.flow_id, existing);
+    }
+    for (const action of uiActions) {
+      const flowId = action.flow_step_id ? (flowStepToFlowId.get(action.flow_step_id) ?? action.flow_step_id) : `ui:${action.testcase_id}`;
+      const existing = flowSummaryMap.get(flowId) ?? {
+        flowId,
+        stepCount: 0,
+        uiActionCount: 0,
+        apiCallCount: 0,
+        failedApiCount: 0,
+      };
+      if (!action.flow_step_id) existing.uiActionCount += 1;
+      flowSummaryMap.set(flowId, existing);
+    }
+    for (const call of apiCalls) {
+      const flowId = call.flow_step_id
+        ? (flowStepToFlowId.get(call.flow_step_id) ?? call.flow_step_id)
+        : call.ui_action_id ?? `api:${call.testcase_id}`;
+      const existing = flowSummaryMap.get(flowId) ?? {
+        flowId,
+        stepCount: 0,
+        uiActionCount: 0,
+        apiCallCount: 0,
+        failedApiCount: 0,
+      };
+      if (!call.flow_step_id) {
+        existing.apiCallCount += 1;
+        if (call.success === 0) existing.failedApiCount += 1;
+      }
+      flowSummaryMap.set(flowId, existing);
+    }
+    const flowSummaries = Array.from(flowSummaryMap.values())
+      .map((flow) => {
+        const durationMs = summarizeFlowDuration(flow.startedAt ?? null, flow.endedAt ?? null);
+        return {
+          flowId: flow.flowId,
+          stepCount: flow.stepCount,
+          uiActionCount: flow.uiActionCount,
+          apiCallCount: flow.apiCallCount,
+          failedApiCount: flow.failedApiCount,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        };
+      })
+      .sort((left, right) => right.failedApiCount - left.failedApiCount || right.apiCallCount - left.apiCallCount || left.flowId.localeCompare(right.flowId));
+    const artifactLinks = Array.from(new Set([
+      ...failedResults.flatMap((result) => {
+        const base = `/api/runs/${runId}/testcases/${result.testcase_id}/artifacts`;
+        return [
+          ...(result.screenshot_path ? [`${base}/screenshot`] : []),
+          ...(result.video_path ? [`${base}/video`] : []),
+          ...(result.trace_path ? [`${base}/trace`] : []),
+          ...(result.html_report_path ? [`${base}/html-report`] : []),
+          ...(result.network_log_path ? [`${base}/network`] : []),
+        ];
+      }),
+      ...codeTasks.flatMap((task) => {
+        const base = `/api/code-tasks/${task.task_id}/artifacts`;
+        return [
+          ...(task.diff_path ? [`${base}/diff`] : []),
+          ...(task.patch_path ? [`${base}/patch`] : []),
+          ...(task.raw_output_path ? [`${base}/raw-output`] : []),
+          ...(task.verify_output_path ? [`${base}/verify-output`] : []),
+        ];
+      }),
+    ]));
     return {
       runId,
       status: row.status,
       runMode: row.run_mode,
       startedAt: row.started_at,
       ...(row.ended_at ? { endedAt: row.ended_at } : {}),
+      ...(row.ended_at ? { durationMs: Math.max(0, new Date(row.ended_at).getTime() - new Date(row.started_at).getTime()) } : {}),
+      ...(row.scope_type ? { scopeType: row.scope_type as RunScopeType } : {}),
+      ...(row.scope_value ? { scopeValue: row.scope_value } : {}),
+      ...(row.selector_json ? { selector: JSON.parse(row.selector_json) as import('@zarb/shared-types').RunSelector } : {}),
+      ...(row.exploration_config_json ? { exploration: JSON.parse(row.exploration_config_json) as ExplorationConfig } : {}),
       summary: { total: row.total ?? 0, passed: row.passed ?? 0, failed: row.failed ?? 0, skipped: row.skipped ?? 0 },
       totals,
-      stageResults: [],
-      degradedSteps: [],
-      failureReports: [],
-      codeTaskSummaries: [],
-      flowSummaries: [],
-      testcaseProfiles: [],
-      artifactLinks: [],
+      stageResults,
+      degradedSteps,
+      ...(row.summary && (row.status === 'FAILED' || row.status === 'CANCELLED') ? { fatalReason: row.summary } : {}),
+      failureReports: failedResults.map((result) => ({
+        testcaseId: result.testcase_id,
+        ...(result.error_message ? { errorMessage: result.error_message } : {}),
+        reportPath: `/runs/${runId}/testcases/${result.testcase_id}/failure-report`,
+      })),
+      codeTaskSummaries: codeTasks.map((task) => ({
+        taskId: task.task_id,
+        ...(task.testcase_id ? { testcaseId: task.testcase_id } : {}),
+        status: task.status,
+        updatedAt: task.updated_at,
+      })),
+      flowSummaries,
+      testcaseProfiles: results.map((result) => ({
+        testcaseId: result.testcase_id,
+        profilePath: `/runs/${runId}/testcases/${result.testcase_id}/execution-profile`,
+      })),
+      artifactLinks,
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(recommendations.length > 0 ? { recommendations } : {}),
     };
   }
 
@@ -552,7 +836,13 @@ export class RunService {
         errorCode: 'RUN_PAUSE_NOT_SUPPORTED',
       };
     }
-    this.runs.update(runId, { status: 'PAUSED', updatedAt: new Date().toISOString() });
+    const now = new Date().toISOString();
+    this.runs.update(runId, {
+      status: 'PAUSED',
+      currentStage: row.current_stage ?? row.status,
+      pausedAt: now,
+      updatedAt: now,
+    });
     this.emitRun(runId);
     return { success: true, message: 'Run paused' };
   }
@@ -573,9 +863,22 @@ export class RunService {
         errorCode: 'RUN_RESUME_NOT_SUPPORTED',
       };
     }
-    this.runs.update(runId, { status: 'RUNNING_TESTS', updatedAt: new Date().toISOString() });
+    const resumeTo = (row.current_stage ?? (row.run_mode === 'exploration' ? 'RUNNING_EXPLORATION' : 'RUNNING_TESTS')) as RunStatus;
+    if (!isRunTransitionAllowed('PAUSED', resumeTo)) {
+      return {
+        success: false,
+        message: `Run cannot resume to ${resumeTo}`,
+        errorCode: 'RUN_RESUME_NOT_SUPPORTED',
+      };
+    }
+    const now = new Date().toISOString();
+    this.runs.update(runId, {
+      status: resumeTo,
+      pausedAt: null,
+      updatedAt: now,
+    });
     this.emitRun(runId);
-    return { success: true, message: 'Run resumed' };
+    return { success: true, message: `Run resumed to ${resumeTo}` };
   }
 
   cancelRun(runId: string): ActionResult {

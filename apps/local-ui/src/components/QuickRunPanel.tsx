@@ -16,6 +16,7 @@ export function QuickRunPanel(): React.ReactElement {
   // Step 1: project / site
   const [projectId, setProjectId] = useState('');
   const [siteId, setSiteId] = useState('');
+  const [repoId, setRepoId] = useState('');
 
   // Step 2: mode + selector
   const [mode, setMode] = useState<import('../types.js').RunMode>('regression');
@@ -48,14 +49,14 @@ export function QuickRunPanel(): React.ReactElement {
   );
 
   // Load selector cache — only needs projectId; repoId is optional for finer scope
-  const repoId = repos?.[0]?.id ?? '';
   const { data: selectors, reload: reloadSelectors } = useAsync(
     () => {
       if (!projectId) return Promise.resolve([]);
       if (repoId) return api.listSelectorsForRepo(projectId, repoId, selectorType);
+      if (repos && repos.length > 0) return Promise.resolve([]);
       return api.listSelectorsForProject(projectId, selectorType);
     },
-    [projectId, repoId, selectorType],
+    [projectId, repoId, selectorType, repos],
   );
   const [scanning, setScanning] = React.useState(false);
 
@@ -78,14 +79,28 @@ export function QuickRunPanel(): React.ReactElement {
     } catch { /* ignore invalid URL */ }
   }, [siteId, sites]);
 
-  // When project changes, reset site
-  React.useEffect(() => { setSiteId(''); }, [projectId]);
+  React.useEffect(() => {
+    if (!siteId || !creds || creds.length === 0) {
+      setCredentialId('');
+      return;
+    }
+    const preferred = creds.find(c => c.isDefault) ?? creds[0];
+    setCredentialId(preferred?.id ?? '');
+  }, [siteId, creds]);
+
+  // When project changes, reset dependent selections
+  React.useEffect(() => {
+    setSiteId('');
+    setRepoId('');
+    setSelectorValue('');
+  }, [projectId]);
 
   const needsSelector = mode === 'regression' || mode === 'hybrid';
   const needsExploration = mode === 'exploration' || mode === 'hybrid';
 
-  // Derive projectPath from selected repo (first repo of project)
-  const projectPath = repos?.[0]?.path ?? '';
+  const selectedRepo = repos?.find(r => r.id === repoId);
+  const projectPath = selectedRepo?.path ?? '';
+  const requiresRepoSelection = Boolean(projectId && repos && repos.length > 0);
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -94,6 +109,7 @@ export function QuickRunPanel(): React.ReactElement {
     try {
       const input: import('../types.js').StartRunInput = { runMode: mode };
       if (projectId) input.projectId = projectId;
+      if (repoId) input.repoId = repoId;
       if (siteId) input.siteId = siteId;
       if (projectPath) input.projectPath = projectPath;
       if (needsSelector) {
@@ -155,6 +171,15 @@ export function QuickRunPanel(): React.ReactElement {
             <select value={credentialId} onChange={e => { setCredentialId(e.target.value); }} style={sel({})}>
               <option value="">— 不使用 —</option>
               {creds.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </label>
+        )}
+        {projectId && (
+          <label style={label({ minWidth: 180 })}>
+            代码仓库
+            <select value={repoId} onChange={e => { setRepoId(e.target.value); setSelectorValue(''); }} style={sel({})} required={requiresRepoSelection}>
+              <option value="">— 选择仓库 —</option>
+              {repos?.map(r => <option key={r.id} value={r.id}>{r.name} ({r.path})</option>)}
             </select>
           </label>
         )}
@@ -235,8 +260,22 @@ export function QuickRunPanel(): React.ReactElement {
         </div>
       )}
 
+      {(projectId || repoId || projectPath) && (
+        <div style={{ padding: '0.6rem 0.75rem', border: '1px solid #e5e7eb', borderRadius: 6, background: '#fafafa', fontSize: '0.85em', color: '#444' }}>
+          <div><strong>目标工作区</strong></div>
+          <div>项目：{projects?.find(p => p.id === projectId)?.name ?? '—'}</div>
+          <div>站点：{sites?.find(s => s.id === siteId)?.name ?? '—'}</div>
+          <div>凭据：{creds?.find(c => c.id === credentialId)?.label ?? '—'}</div>
+          <div>仓库：{selectedRepo?.name ?? (requiresRepoSelection ? '未选择' : '—')}</div>
+          <div style={{ wordBreak: 'break-all' }}>路径：{projectPath || '—'}</div>
+          {projectId && sites && sites.length > 0 && !siteId && (
+            <div style={{ color: '#b45309', marginTop: '0.35rem' }}>当前项目已配置站点，建议选择站点后再启动运行。</div>
+          )}
+        </div>
+      )}
+
       <div>
-        <Button type="submit" variant="primary" disabled={loading}>{loading ? t('common.loading') : t('run.start')}</Button>
+        <Button type="submit" variant="primary" disabled={loading || (requiresRepoSelection && !repoId)}>{loading ? t('common.loading') : t('run.start')}</Button>
       </div>
     </form>
   );

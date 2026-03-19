@@ -140,6 +140,11 @@ export function agentToolCallsPath(sessionId: string): string {
   return join('agent-traces', sessionId, 'tool-calls.jsonl');
 }
 
+export function agentPromptSamplesPath(sessionId: string): string {
+  assertSafeSegment(sessionId, 'sessionId');
+  return join('agent-traces', sessionId, 'prompt-samples.jsonl');
+}
+
 export function generatedTestPath(taskId: string): string {
   assertSafeSegment(taskId, 'taskId');
   return join('generated-tests', taskId, 'candidate.spec.ts');

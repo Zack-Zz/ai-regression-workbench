@@ -94,7 +94,7 @@ export class ConfigManager implements SettingsService {
     writeFileSync(this.configPath, dumpYaml(merged as unknown as object), 'utf8');
     writeMeta(this.configPath, { version: nextVersion, updatedAt });
 
-    this.snapshot = { version: nextVersion, sourcePath: this.configPath, updatedAt, values: merged };
+    this.snapshot = buildSnapshot(this.configPath, nextVersion, updatedAt);
 
     await this.broadcast();
 

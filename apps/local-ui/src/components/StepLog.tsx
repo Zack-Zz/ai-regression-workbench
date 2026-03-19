@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useAsync } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, Card, KV, Button } from './ui.js';
-import type { StepLogEntry, NetworkLogEntry } from '../types.js';
+import type { StepLogEntry, NetworkLogEntry, PromptSampleEntry } from '../types.js';
 import { fmtDatetime, fmtTime } from '../utils.js';
 
 export function fmtDuration(ms: number): string {
@@ -18,6 +18,8 @@ export const ACTION_LABELS: Record<string, { labelKey: string; toolKey: string }
   'explore.start':  { labelKey: 'step.action.explore.start',  toolKey: 'step.tool.ExplorationAgent' },
   'explore.done':   { labelKey: 'step.action.explore.done',   toolKey: 'step.tool.ExplorationAgent' },
   'navigate':       { labelKey: 'step.action.navigate',       toolKey: 'step.tool.playwright' },
+  'click':          { labelKey: 'step.action.click',          toolKey: 'step.tool.playwright' },
+  'fill':           { labelKey: 'step.action.fill',           toolKey: 'step.tool.playwright' },
   'llm.decide':     { labelKey: 'step.action.llm.decide',     toolKey: 'step.tool.AIProvider' },
   'findings':       { labelKey: 'step.action.findings',       toolKey: 'step.tool.FindingRepository' },
   'login.start':    { labelKey: 'step.action.login.start',    toolKey: 'step.tool.playwright' },
@@ -70,6 +72,25 @@ export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose
               </div>
             </section>
           )}
+          {(step.promptTemplateVersion || step.promptContextSummary) && (
+            <section>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>Prompt Context</div>
+              <div style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', lineHeight: 1.8 }}>
+                {step.promptTemplateVersion && (
+                  <div>
+                    <span style={{ color: '#888' }}>Template　</span>
+                    <span style={{ fontFamily: 'monospace' }}>{step.promptTemplateVersion}</span>
+                  </div>
+                )}
+                {step.promptContextSummary && (
+                  <div>
+                    <span style={{ color: '#888' }}>Summary　</span>
+                    <span style={{ fontFamily: 'monospace' }}>{step.promptContextSummary}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           {step.pageState && (
             <section>
               <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>{t('step.modal.pageState')}</div>
@@ -79,6 +100,12 @@ export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose
                 <div><span style={{ color: '#888' }}>{t('step.modal.pageState.forms')}　</span>{step.pageState.formCount}　<span style={{ color: '#888' }}>{t('step.modal.pageState.links')}　</span>{step.pageState.linkCount}</div>
                 {step.pageState.consoleErrors > 0 && <div style={{ color: '#c33' }}>{t('step.modal.pageState.consoleErrors')}　{step.pageState.consoleErrors}{t('step.modal.pageState.count') ? `　${t('step.modal.pageState.count')}` : ''}</div>}
                 {step.pageState.networkErrors > 0 && <div style={{ color: '#c33' }}>{t('step.modal.pageState.networkErrors')}　{step.pageState.networkErrors}{t('step.modal.pageState.count') ? `　${t('step.modal.pageState.count')}` : ''}</div>}
+                {step.pageState.headings && step.pageState.headings.length > 0 && <div><span style={{ color: '#888' }}>Headings　</span>{step.pageState.headings.join(' | ')}</div>}
+                {step.pageState.primaryButtons && step.pageState.primaryButtons.length > 0 && <div><span style={{ color: '#888' }}>Primary Buttons　</span>{step.pageState.primaryButtons.join(' | ')}</div>}
+                {step.pageState.navLinks && step.pageState.navLinks.length > 0 && <div><span style={{ color: '#888' }}>Nav Links　</span>{step.pageState.navLinks.join(' | ')}</div>}
+                {step.pageState.inputHints && step.pageState.inputHints.length > 0 && <div><span style={{ color: '#888' }}>Input Hints　</span>{step.pageState.inputHints.join(' | ')}</div>}
+                {step.pageState.ctaCandidates && step.pageState.ctaCandidates.length > 0 && <div><span style={{ color: '#888' }}>CTA Candidates　</span>{step.pageState.ctaCandidates.join(' | ')}</div>}
+                {step.pageState.textSnippet && <div><span style={{ color: '#888' }}>Text Snippet　</span>{step.pageState.textSnippet}</div>}
               </div>
             </section>
           )}
@@ -109,7 +136,7 @@ export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose
 export function StepRow({ step }: { step: StepLogEntry }): React.ReactElement {
   const [modal, setModal] = React.useState(false);
   const color = step.status === 'ok' ? '#2a7' : step.status === 'error' ? '#c33' : step.status === 'warn' ? '#f90' : step.status === 'pending' ? '#4080c0' : '#888';
-  const hasDetail = step.toolInput !== undefined || step.toolOutput !== undefined || step.pageState !== undefined || step.reason;
+  const hasDetail = step.toolInput !== undefined || step.toolOutput !== undefined || step.pageState !== undefined || step.reason || step.promptTemplateVersion || step.promptContextSummary;
   return (
     <>
       <div onClick={() => { if (hasDetail) setModal(true); }}
@@ -233,6 +260,53 @@ export function NetworkModal({ entries, onClose }: { entries: NetworkLogEntry[];
   );
 }
 
+function PromptSamplesModal({ entries, onClose }: { entries: PromptSampleEntry[]; onClose: () => void }): React.ReactElement {
+  const [selected, setSelected] = React.useState<PromptSampleEntry | null>(entries[0] ?? null);
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 8, width: '92vw', maxWidth: 1200, height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderBottom: '1px solid #eee', flexShrink: 0 }}>
+          <span style={{ fontWeight: 600, flex: 1 }}>Prompt Samples ({entries.length})</span>
+          <Button onClick={onClose}>✕</Button>
+        </div>
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ width: 320, borderRight: '1px solid #eee', overflowY: 'auto', fontSize: '0.82em' }}>
+            {entries.map((entry, i) => (
+              <div key={i} onClick={() => { setSelected(entry); }}
+                style={{ padding: '8px 10px', borderBottom: '1px solid #f3f3f3', cursor: 'pointer', background: selected === entry ? '#e8f0fe' : '#fff' }}>
+                <div style={{ fontWeight: 600 }}>{entry.phase}</div>
+                <div style={{ color: '#666' }}>step {entry.stepIndex} · {entry.sampledBy}</div>
+                <div style={{ color: '#888', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{entry.templateVersion}</div>
+              </div>
+            ))}
+          </div>
+          {selected && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', color: '#666', fontSize: '0.9em', flexWrap: 'wrap' }}>
+                <span>{fmtDatetime(selected.timestamp)}</span>
+                <span>{selected.phase}</span>
+                <span>{selected.sampledBy}</span>
+                <span style={{ fontFamily: 'monospace' }}>{selected.templateVersion}</span>
+              </div>
+              {selected.promptContextSummary && (
+                <div style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 10px', fontFamily: 'monospace', fontSize: '0.9em' }}>
+                  {selected.promptContextSummary}
+                </div>
+              )}
+              {selected.metadata && (
+                <CopyPrettyBlock label="Metadata" value={JSON.stringify(selected.metadata, null, 2)} isJson />
+              )}
+              <CopyPrettyBlock label="Prompt" value={selected.prompt} />
+              {selected.response !== undefined && <CopyPrettyBlock label="Response" value={selected.response} isJson={selected.response.trimStart().startsWith('{') || selected.response.trimStart().startsWith('[')} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Reusable step log panel. Fetches steps and network for a run and renders them.
  * Can be embedded in any page that has a runId.
@@ -240,7 +314,9 @@ export function NetworkModal({ entries, onClose }: { entries: NetworkLogEntry[];
 export function StepLogPanel({ runId, runSummary }: { runId: string; runSummary?: string }): React.ReactElement {
   const { data: steps, loading } = useAsync(() => api.getRunSteps(runId), [runId]);
   const { data: network } = useAsync(() => api.getRunNetwork(runId), [runId]);
+  const { data: promptSamples } = useAsync(() => api.getRunPromptSamples(runId), [runId]);
   const [networkModal, setNetworkModal] = React.useState(false);
+  const [promptModal, setPromptModal] = React.useState(false);
 
   if (loading) return <Loading />;
   if (!steps || steps.length === 0) {
@@ -257,6 +333,11 @@ export function StepLogPanel({ runId, runSummary }: { runId: string; runSummary?
   return (
     <Card title={t('exploration.steps.title')}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
+        {promptSamples && promptSamples.length > 0 && (
+          <Button onClick={() => { setPromptModal(true); }}>
+            Prompt Samples ({promptSamples.length})
+          </Button>
+        )}
         {network && network.length > 0 && (
           <Button onClick={() => { setNetworkModal(true); }}>
             {t('exploration.steps.network')} ({network.length}{t('exploration.steps.networkCount') ? ` ${t('exploration.steps.networkCount')}` : ''})
@@ -268,6 +349,9 @@ export function StepLogPanel({ runId, runSummary }: { runId: string; runSummary?
       </div>
       {networkModal && network && (
         <NetworkModal entries={network} onClose={() => { setNetworkModal(false); }} />
+      )}
+      {promptModal && promptSamples && promptSamples.length > 0 && (
+        <PromptSamplesModal entries={promptSamples} onClose={() => { setPromptModal(false); }} />
       )}
     </Card>
   );

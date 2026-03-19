@@ -6,6 +6,7 @@ import { RunListPage } from './pages/RunListPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { FailureReportPage } from './pages/FailureReportPage.js';
 import { ExecutionReportPage } from './pages/ExecutionReportPage.js';
+import { TestcaseExecutionPage } from './pages/TestcaseExecutionPage.js';
 import { CodeTaskDetailPage } from './pages/CodeTaskDetailPage.js';
 import { CodeTaskListPage } from './pages/CodeTaskListPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
@@ -20,6 +21,7 @@ export function App(): React.ReactElement {
         <Route path="runs" element={<RunListPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
         <Route path="runs/:runId/execution-report" element={<ExecutionReportPage />} />
+        <Route path="runs/:runId/testcases/:testcaseId/execution-profile" element={<TestcaseExecutionPage />} />
         <Route path="runs/:runId/testcases/:testcaseId/failure-report" element={<FailureReportPage />} />
         <Route path="code-tasks" element={<CodeTaskListPage />} />
         <Route path="code-tasks/:taskId" element={<CodeTaskDetailPage />} />

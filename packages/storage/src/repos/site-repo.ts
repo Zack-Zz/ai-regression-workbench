@@ -46,6 +46,10 @@ export class SiteRepository {
     return this.db.prepare('SELECT * FROM sites WHERE id = ?').get(id) as SiteRow | undefined;
   }
 
+  findByIdAndProjectId(id: string, projectId: string): SiteRow | undefined {
+    return this.db.prepare('SELECT * FROM sites WHERE id = ? AND project_id = ?').get(id, projectId) as SiteRow | undefined;
+  }
+
   findByProjectId(projectId: string): SiteRow[] {
     return this.db.prepare('SELECT * FROM sites WHERE project_id = ? ORDER BY created_at ASC').all(projectId) as SiteRow[];
   }

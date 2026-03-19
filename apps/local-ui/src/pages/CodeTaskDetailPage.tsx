@@ -6,6 +6,14 @@ import { t } from '../i18n.js';
 import { Loading, ErrorBanner, TaskStatusBadge, Card, KV, Button } from '../components/ui.js';
 import type { SubmitReviewInput } from '../types.js';
 
+const CANCELLABLE_TASK_STATUSES = new Set([
+  'DRAFT',
+  'PENDING_APPROVAL',
+  'APPROVED',
+  'RUNNING',
+  'COMMIT_PENDING',
+]);
+
 export function CodeTaskDetailPage(): React.ReactElement {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -26,7 +34,11 @@ export function CodeTaskDetailPage(): React.ReactElement {
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
-  const { summary, reviews, commit, changedFiles, verificationCommands, diffPath, patchPath } = data;
+  const { summary, reviews, commit, changedFiles, verificationCommands, diffPath, patchPath, rawOutputPath, verifyOutputPath } = data;
+  const diffUrl = diffPath ? api.getCodeTaskArtifactUrl(id, 'diff') : null;
+  const patchUrl = patchPath ? api.getCodeTaskArtifactUrl(id, 'patch') : null;
+  const rawOutputUrl = rawOutputPath ? api.getCodeTaskArtifactUrl(id, 'raw-output') : null;
+  const verifyOutputUrl = verifyOutputPath ? api.getCodeTaskArtifactUrl(id, 'verify-output') : null;
 
   return (
     <div>
@@ -41,7 +53,7 @@ export function CodeTaskDetailPage(): React.ReactElement {
         {summary.status === 'APPROVED'
           ? <Button variant="primary" disabled={actionLoading} onClick={() => { void doAction(() => api.executeCodeTask(id)); }}>{t('task.execute')}</Button>
           : null}
-        {!['COMMITTED', 'CANCELLED'].includes(summary.status)
+        {CANCELLABLE_TASK_STATUSES.has(summary.status)
           ? <Button variant="danger" disabled={actionLoading} onClick={() => { void doAction(() => api.cancelCodeTask(id)); }}>{t('task.cancel')}</Button>
           : null}
         {['FAILED', 'REJECTED'].includes(summary.status)
@@ -68,10 +80,12 @@ export function CodeTaskDetailPage(): React.ReactElement {
         </Card>
       )}
 
-      {(diffPath ?? patchPath) && (
-        <Card title="Diff / Patch">
-          {diffPath && <KV label="Diff" value={<a href={diffPath} target="_blank" rel="noreferrer">查看</a>} />}
-          {patchPath && <KV label="Patch" value={<a href={patchPath} target="_blank" rel="noreferrer">下载</a>} />}
+      {(diffUrl ?? patchUrl ?? rawOutputUrl ?? verifyOutputUrl) && (
+        <Card title="产物">
+          {diffUrl && <KV label="Diff" value={<a href={diffUrl} target="_blank" rel="noreferrer">查看</a>} />}
+          {patchUrl && <KV label="Patch" value={<a href={patchUrl} target="_blank" rel="noreferrer">下载</a>} />}
+          {rawOutputUrl && <KV label="Raw Output" value={<a href={rawOutputUrl} target="_blank" rel="noreferrer">查看</a>} />}
+          {verifyOutputUrl && <KV label="Verify Output" value={<a href={verifyOutputUrl} target="_blank" rel="noreferrer">查看</a>} />}
         </Card>
       )}
 
@@ -82,7 +96,7 @@ export function CodeTaskDetailPage(): React.ReactElement {
       )}
 
       {/* Review panel — show when task has succeeded verification or is in a reviewable state */}
-      {(['VERIFYING', 'SUCCEEDED', 'FAILED'] as string[]).includes(summary.status) ? (
+      {(['SUCCEEDED', 'FAILED'] as string[]).includes(summary.status) ? (
         <Card title={t('review.submitReview')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <div style={{ display: 'flex', gap: '0.5rem' }}>

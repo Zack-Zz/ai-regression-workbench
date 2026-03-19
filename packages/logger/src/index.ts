@@ -118,11 +118,19 @@ export interface StepRecord {
   pageState?: {              // page snapshot at this step
     url: string; title: string; formCount: number; linkCount: number;
     consoleErrors: number; networkErrors: number;
+    headings?: string[];
+    primaryButtons?: string[];
+    navLinks?: string[];
+    ctaCandidates?: string[];
+    inputHints?: string[];
+    textSnippet?: string;
   };
   reason?: string;           // why agent took this action / transitioned to next step
   model?: string;            // AI model used for this step (if applicable)
   tool?: string;             // specific tool used (e.g. 'playwright', 'fetch')
   actionId?: string;         // groups pending + terminal records for the same logical action
+  promptTemplateVersion?: string; // versioned prompt template used for this step
+  promptContextSummary?: string;  // compact summary of context fed into the prompt
 }
 
 export class StepLogger {

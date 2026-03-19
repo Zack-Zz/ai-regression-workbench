@@ -217,6 +217,25 @@ describe('HarnessSessionManager trace appending', () => {
     const content = readFileSync(join(dir, 'agent-traces', session.session_id, 'tool-calls.jsonl'), 'utf8');
     expect(content).toContain('noop');
   });
+
+  it('appendPromptSample writes to prompt-samples.jsonl', () => {
+    const db = makeDb(); seedRun(db);
+    const mgr = new HarnessSessionManager(db);
+    const session = mgr.startSession({ runId: 'r1', kind: 'exploration', agentName: 'a', policy: DEFAULT_EXPLORATION_POLICY, dataRoot: dir });
+    mgr.appendPromptSample(session.session_id, {
+      sessionId: session.session_id,
+      stepIndex: 0,
+      timestamp: new Date().toISOString(),
+      phase: 'exploration-decision',
+      templateVersion: 'exploration-decision/default@v1',
+      prompt: 'prompt body',
+      response: '{"action":"done"}',
+      sampledBy: 'first-step',
+    }, dir);
+    const content = readFileSync(join(dir, 'agent-traces', session.session_id, 'prompt-samples.jsonl'), 'utf8');
+    expect(content).toContain('prompt body');
+    expect(content).toContain('exploration-decision');
+  });
 });
 
 describe('HarnessSessionManager.completeSession', () => {
@@ -263,6 +282,15 @@ describe('ArtifactWriter', () => {
     const relPath = writer.writeRawOutput('t1', 'agent raw output');
     expect(relPath).toBe('code-tasks/t1/raw-output.txt');
     expect(existsSync(join(dir, relPath))).toBe(true);
+  });
+
+  it('writes code task artifacts under a configured codeTaskRoot', () => {
+    const codeTaskRoot = join(dir, 'custom-code-tasks');
+    const writer = new ArtifactWriter(dir, undefined, codeTaskRoot);
+    const relPath = writer.writeDiff('t9', 'custom diff');
+    expect(relPath).toBe('custom-code-tasks/t9/changes.diff');
+    expect(existsSync(join(dir, relPath))).toBe(true);
+    expect(readFileSync(join(dir, relPath), 'utf8')).toBe('custom diff');
   });
 
   it('generateArtifacts: diff and patch both reflect current workspace changes', () => {

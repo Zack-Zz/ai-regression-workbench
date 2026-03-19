@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Db } from '@zarb/storage';
+import { ProjectRepository, SiteRepository } from '@zarb/storage';
 import type { ConfigManager } from '@zarb/config';
 
 export interface DoctorCheckResult {
@@ -53,14 +54,21 @@ function commandVersion(cmd: string): string | null {
  * Derived from packaging-design.md §6 and observability-design.md §7.
  */
 export class DoctorService {
+  private readonly projects: ProjectRepository;
+  private readonly sites: SiteRepository;
+
   constructor(
     private readonly db: Db,
     private readonly config: ConfigManager,
-  ) {}
+  ) {
+    this.projects = new ProjectRepository(db);
+    this.sites = new SiteRepository(db);
+  }
 
   async runChecks(): Promise<DoctorResult> {
     const settings = await this.config.getSettings();
     const v = settings.values;
+    const resolvedPaths = settings.resolvedPaths;
 
     const checks: DoctorCheckResult[] = [
       // Node.js version
@@ -74,7 +82,7 @@ export class DoctorService {
 
       // SQLite writable
       check('sqlite.writable', () => {
-        const path = resolve(v.storage.sqlitePath);
+        const path = resolvedPaths?.sqlitePath ?? v.storage.sqlitePath;
         if (!existsSync(path)) return { status: 'warn', message: `DB not yet created at ${path}` };
         try { accessSync(path, constants.W_OK); return { status: 'ok', message: path }; }
         catch { return { status: 'fail', message: `Not writable: ${path}` }; }
@@ -141,15 +149,31 @@ export class DoctorService {
         return ver ? { status: 'ok', message: ver } : { status: 'warn', message: 'kiro-cli not found' };
       }),
 
-      // Target project path
+      // Project management readiness
+      check('projects.available', () => {
+        const count = this.projects.list().length;
+        return count > 0
+          ? { status: 'ok', message: `${String(count)} project(s) configured` }
+          : { status: 'warn', message: 'No projects configured — create a project before starting managed runs' };
+      }),
+
+      check('sites.available', () => {
+        const projectIds = this.projects.list().map((project) => project.id);
+        const siteCount = projectIds.reduce((count, projectId) => count + this.sites.findByProjectId(projectId).length, 0);
+        return siteCount > 0
+          ? { status: 'ok', message: `${String(siteCount)} site(s) configured` }
+          : { status: 'warn', message: 'No sites configured — add at least one site to a project' };
+      }),
+
+      // Legacy workspace compatibility
       check('workspace.targetProjectPath', () => {
         const p = v.workspace.targetProjectPath;
-        if (!p) return { status: 'warn', message: 'Not configured — set via Settings page' };
-        if (!existsSync(p)) return { status: 'fail', message: `Path not found: ${p}` };
+        if (!p) return { status: 'warn', message: 'Legacy workspace path not configured — managed projects now drive target workspaces' };
+        if (!existsSync(p)) return { status: 'warn', message: `Legacy workspace path not found: ${p}` };
         const isGit = existsSync(resolve(p, '.git'));
         return isGit
-          ? { status: 'ok', message: p }
-          : { status: 'warn', message: `${p} — no .git directory found` };
+          ? { status: 'ok', message: `${p} (legacy fallback)` }
+          : { status: 'warn', message: `${p} — no .git directory found (legacy fallback)` };
       }),
 
       // AI API key check (direct key or env var, per active provider)

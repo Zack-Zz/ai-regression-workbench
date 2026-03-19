@@ -6,8 +6,9 @@ import { FindingRepository, SiteCredentialRepository } from '@zarb/storage';
 import { HarnessSessionManager } from './session-manager.js';
 import { ToolRegistry } from './tool-registry.js';
 import { StepLogger, appLogger } from '@zarb/logger';
-import type { PlaywrightToolProvider } from './playwright-tool-provider.js';
+import type { DomSnapshot, PlaywrightToolProvider } from './playwright-tool-provider.js';
 import { LoginFailedError, isLoginUrl } from './playwright-tool-provider.js';
+import { HARNESS_TEMPLATE_VERSIONS, renderHarnessTemplate } from './prompt-loader.js';
 
 const log = appLogger.child('ExplorationAgent');
 
@@ -24,6 +25,14 @@ export interface PageProbe {
   networkErrors: Array<{ url: string; status: number }>;
   formCount: number;
   linkCount: number;
+  domSummary?: {
+    headings: string[];
+    primaryButtons: string[];
+    navLinks: string[];
+    inputHints: string[];
+    ctaCandidates?: string[];
+    textSnippet?: string;
+  };
   screenshot?: string;
 }
 
@@ -43,6 +52,130 @@ export interface ExplorationResult {
   pagesVisited: number;
   /** Set when exploration stopped early due to LLM failure */
   llmError?: string;
+}
+
+export interface ExplorationPromptContext {
+  page: PageProbe;
+  config: ExplorationConfig;
+  stepIndex: number;
+  visited: string[];
+  recentSteps: string[];
+  recentFindings: string[];
+  recentToolResults: string[];
+  recentNetworkHighlights: string[];
+  supportedActions: string;
+  remainingSteps: number;
+  remainingPages: number;
+  domSnapshot?: DomSnapshot;
+}
+
+function summarizeFocusAreas(config: ExplorationConfig): string[] {
+  const focusAreas = config.focusAreas ?? ['navigation', 'forms', 'console-errors', 'network-errors'];
+  const directives: string[] = [];
+  if (focusAreas.includes('navigation')) directives.push('prioritize meaningful user flows and page transitions');
+  if (focusAreas.includes('forms')) directives.push('exercise visible forms, search boxes, filters, and submission paths');
+  if (focusAreas.includes('auth')) directives.push('watch for auth walls, session expiry, and redirects to login');
+  if (focusAreas.includes('console-errors')) directives.push('capture client-side exceptions and broken page behavior');
+  if (focusAreas.includes('network-errors')) directives.push('surface failed APIs, bad status codes, and degraded responses');
+  if (focusAreas.includes('smoke')) directives.push('cover key happy paths before going deep');
+  return directives;
+}
+
+function summarizeDomSnapshot(domSnapshot?: DomSnapshot): string {
+  if (!domSnapshot) return 'No structured DOM snapshot available.';
+  const inputs = domSnapshot.inputs.slice(0, 8).map((input) =>
+    `${input.selector} [type=${input.type}${input.name ? `, name=${input.name}` : ''}${input.label ? `, label=${input.label}` : ''}${input.placeholder ? `, placeholder=${input.placeholder}` : ''}]`
+  );
+  const buttons = domSnapshot.buttons.slice(0, 8).map((button) =>
+    `${button.selector} [text=${button.text || '—'}${button.type ? `, type=${button.type}` : ''}]`
+  );
+  const forms = domSnapshot.forms.slice(0, 5).map((form, index) =>
+    `form#${String(index + 1)} [action=${form.action ?? '—'}, method=${form.method ?? '—'}, inputs=${String(form.inputCount)}]`
+  );
+  return [
+    `Inputs: ${inputs.length > 0 ? inputs.join(' | ') : 'none'}`,
+    `Buttons: ${buttons.length > 0 ? buttons.join(' | ') : 'none'}`,
+    `Forms: ${forms.length > 0 ? forms.join(' | ') : 'none'}`,
+  ].join('\n');
+}
+
+function listOrFallback(items: string[], fallback: string): string {
+  return items.length > 0 ? items.join('\n') : fallback;
+}
+
+function summarizePromptContext(ctx: ExplorationPromptContext): string {
+  return [
+    `remainingSteps=${String(ctx.remainingSteps)}`,
+    `remainingPages=${String(ctx.remainingPages)}`,
+    `visited=${String(ctx.visited.length)}`,
+    `recentSteps=${String(ctx.recentSteps.length)}`,
+    `recentFindings=${String(ctx.recentFindings.length)}`,
+    `recentToolResults=${String(ctx.recentToolResults.length)}`,
+    `recentNetwork=${String(ctx.recentNetworkHighlights.length)}`,
+    `actions=${ctx.supportedActions.replace(/"/g, '')}`,
+    `focusAreas=${(ctx.config.focusAreas ?? []).join('|') || 'general'}`,
+  ].join(' ');
+}
+
+function pushRecent(list: string[], value: string, limit = 8): void {
+  list.push(value);
+  while (list.length > limit) list.shift();
+}
+
+function getPromptSampleReason(stepIndex: number, force = false): 'first-step' | 'interval' | 'forced' | null {
+  if (force) return 'forced';
+  if (stepIndex === 0) return 'first-step';
+  if (stepIndex > 0 && stepIndex % 5 === 0) return 'interval';
+  return null;
+}
+
+function buildPageSnapshot(pageState: PageProbe): NonNullable<import('@zarb/logger').StepRecord['pageState']> {
+  return {
+    url: pageState.url,
+    title: pageState.title,
+    formCount: pageState.formCount,
+    linkCount: pageState.linkCount,
+    consoleErrors: pageState.consoleErrors.length,
+    networkErrors: pageState.networkErrors.length,
+    ...(pageState.domSummary?.headings ? { headings: pageState.domSummary.headings } : {}),
+    ...(pageState.domSummary?.primaryButtons ? { primaryButtons: pageState.domSummary.primaryButtons } : {}),
+    ...(pageState.domSummary?.navLinks ? { navLinks: pageState.domSummary.navLinks } : {}),
+    ...(pageState.domSummary?.ctaCandidates ? { ctaCandidates: pageState.domSummary.ctaCandidates } : {}),
+    ...(pageState.domSummary?.inputHints ? { inputHints: pageState.domSummary.inputHints } : {}),
+    ...(pageState.domSummary?.textSnippet ? { textSnippet: pageState.domSummary.textSnippet } : {}),
+  };
+}
+
+export function buildExplorationDecisionPrompt(ctx: ExplorationPromptContext): string {
+  const focusDirectives = summarizeFocusAreas(ctx.config).map((item) => `- ${item}`);
+  const domSummary = ctx.page.domSummary
+    ? [
+      `Headings: ${ctx.page.domSummary.headings.join(' | ') || 'none'}`,
+      `Primary buttons: ${ctx.page.domSummary.primaryButtons.join(' | ') || 'none'}`,
+      `Nav links: ${ctx.page.domSummary.navLinks.join(' | ') || 'none'}`,
+      `Input hints: ${ctx.page.domSummary.inputHints.join(' | ') || 'none'}`,
+      `CTA candidates: ${ctx.page.domSummary.ctaCandidates?.join(' | ') || 'none'}`,
+      `Text snippet: ${ctx.page.domSummary.textSnippet ?? 'none'}`,
+    ].join('\n')
+    : 'No page summary available.';
+  return renderHarnessTemplate(HARNESS_TEMPLATE_VERSIONS.explorationDecision, {
+    startUrls: ctx.config.startUrls.join(', '),
+    allowedHosts: (ctx.config.allowedHosts ?? []).join(', ') || 'derived from start URL',
+    stepIndex: String(ctx.stepIndex),
+    remainingBudget: `${String(ctx.remainingSteps)} steps, ${String(ctx.remainingPages)} pages`,
+    focusAreas: listOrFallback(focusDirectives, '- general exploration'),
+    currentPage: `${ctx.page.url} (title: "${ctx.page.title}")`,
+    observedCounts: `forms=${String(ctx.page.formCount)}, links=${String(ctx.page.linkCount)}, consoleErrors=${String(ctx.page.consoleErrors.length)}, networkErrors=${String(ctx.page.networkErrors.length)}`,
+    consoleErrors: ctx.page.consoleErrors.slice(0, 3).join(' | ') || 'none',
+    networkErrors: ctx.page.networkErrors.slice(0, 3).map((item) => `${item.status} ${item.url}`).join(' | ') || 'none',
+    availableControls: `${summarizeDomSnapshot(ctx.domSnapshot)}\n${domSummary}`,
+    visitedPages: ctx.visited.slice(-8).join(', ') || 'none',
+    recentSteps: ctx.recentSteps.length > 0 ? ctx.recentSteps.join(' | ') : 'none',
+    recentFindings: ctx.recentFindings.length > 0 ? ctx.recentFindings.join(' | ') : 'none',
+    recentToolResults: ctx.recentToolResults.length > 0 ? ctx.recentToolResults.join(' | ') : 'none',
+    recentNetworkHighlights: ctx.recentNetworkHighlights.length > 0 ? ctx.recentNetworkHighlights.join(' | ') : 'none',
+    supportedActions: ctx.supportedActions,
+  });
 }
 
 /**
@@ -92,6 +225,19 @@ export class ExplorationAgent {
       kind: 'exploration',
       agentName: 'ExplorationAgent',
       policy: { sessionBudgetMs: (config.maxSteps ?? 20) * 30_000, toolCallTimeoutMs: 30_000, allowedHosts, allowedWriteScopes: [], requireApprovalFor: [], reviewOnVerifyFailureAllowed: false },
+      contextRefs: {
+        startUrls: config.startUrls,
+        allowedHosts,
+        maxSteps: config.maxSteps ?? 20,
+        maxPages: config.maxPages ?? 10,
+        focusAreas: config.focusAreas ?? [],
+        credentialId: config.credentialId ?? null,
+        loginStrategy: config.loginStrategy ?? 'none',
+        promptTemplates: {
+          explorationDecision: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+          explorationLogin: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+        },
+      },
       dataRoot,
     });
 
@@ -112,7 +258,7 @@ export class ExplorationAgent {
             const baseUrl = config.startUrls[0] ?? '';
             const strategy = config.loginStrategy ?? 'ai';
             if (strategy === 'ai') {
-              const loginErr = await this.runAiLogin(baseUrl, cred, stepLogger);
+              const loginErr = await this.runAiLogin(baseUrl, cred, stepLogger, session.session_id, dataRoot);
               if (loginErr) {
                 log.warn('AI login failed', { runId, reason: loginErr });
                 stepLogger.log({ component: 'ExplorationAgent', action: 'explore.done', status: 'error', detail: loginErr });
@@ -153,6 +299,12 @@ export class ExplorationAgent {
     const maxPages = config.maxPages ?? 10;
     const visitedUrls = new Set<string>();
     const pendingUrls: string[] = [...config.startUrls];
+    const recentSteps: string[] = [];
+    const recentFindings: string[] = [];
+    const recentToolResults: string[] = [];
+    const recentNetworkHighlights: string[] = [];
+    const seenFindingKeys = new Set<string>();
+    let currentPage: PageProbe | undefined;
     let stepIndex = 0;
     let noNewFindingsStreak = 0;
     let totalFindings = 0;
@@ -163,38 +315,52 @@ export class ExplorationAgent {
     const AUTH_RETRY_MAX = 3;
 
     try {
-      while (stepIndex < maxSteps && visitedUrls.size < maxPages && pendingUrls.length > 0) {
-        const url = pendingUrls.shift()!;
-        if (visitedUrls.has(url)) continue;
-        visitedUrls.add(url);
-
-        // Navigate via ToolRegistry (enforces allowedHosts) or fall back to probe
+      while (stepIndex < maxSteps && visitedUrls.size < maxPages && (currentPage !== undefined || pendingUrls.length > 0)) {
         let pageState: PageProbe;
-        const navStart = Date.now();
-        if (activePwProvider) {
-          const result = await registry.call<PageProbe>('playwright.navigate', { url }, { sessionId: session.session_id, stepIndex });
-          if (!result.ok) {
-            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'playwright' });
-            continue;
+        if (!currentPage) {
+          const url = pendingUrls.shift()!;
+          if (visitedUrls.has(url)) continue;
+
+          const navStart = Date.now();
+          if (activePwProvider) {
+            const result = await registry.call<PageProbe>('playwright.navigate', { url }, { sessionId: session.session_id, stepIndex });
+            if (!result.ok) {
+              stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'playwright' });
+              continue;
+            }
+            pageState = result.value!;
+          } else {
+            try { pageState = await effectiveProbe(url); } catch {
+              stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'fetch' });
+              continue;
+            }
           }
-          pageState = result.value!;
+
+          visitedUrls.add(pageState.url);
+          const navDuration = Date.now() - navStart;
+          stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, toolOutput: pageState, pageState: buildPageSnapshot(pageState), tool: activePwProvider ? 'playwright' : 'fetch' });
+          pushRecent(recentSteps, `navigate ${pageState.url}`);
+          pushRecent(recentToolResults, `navigate => ${pageState.title || pageState.url} forms=${String(pageState.formCount)} links=${String(pageState.linkCount)}`);
+          if (activePwProvider) {
+            for (const highlight of activePwProvider.getRecentNetworkHighlights(3)) pushRecent(recentNetworkHighlights, highlight, 6);
+          }
         } else {
-          try { pageState = await effectiveProbe(url); } catch {
-            stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'fetch' });
-            continue;
-          }
+          pageState = currentPage;
         }
-        const navDuration = Date.now() - navStart;
-        const pageSnapshot = { url: pageState.url, title: pageState.title, formCount: pageState.formCount, linkCount: pageState.linkCount, consoleErrors: pageState.consoleErrors.length, networkErrors: pageState.networkErrors.length };
-        stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, toolOutput: pageState, pageState: pageSnapshot, tool: activePwProvider ? 'playwright' : 'fetch' });
 
         // Persist findings from this page
-        const newFindings = this.extractFindings(runId, pageState, config);
+        const newFindings = this.extractFindings(runId, pageState, config).filter((finding) => {
+          const key = `${finding.category}:${finding.severity}:${finding.pageUrl ?? ''}:${finding.summary}`;
+          if (seenFindingKeys.has(key)) return false;
+          seenFindingKeys.add(key);
+          return true;
+        });
         for (const f of newFindings) { this.findings.save(f); totalFindings++; }
         if (newFindings.length > 0) {
+          for (const finding of newFindings.map((f) => `${f.category}: ${f.summary}`)) pushRecent(recentFindings, finding);
           stepLogger.log({
             component: 'ExplorationAgent', action: 'findings', status: 'ok',
-            detail: `${String(newFindings.length)} findings on ${url}`,
+            detail: `${String(newFindings.length)} findings on ${pageState.url}`,
             toolOutput: newFindings.map(f => ({ category: f.category, severity: f.severity, title: f.title, summary: f.summary })),
           });
         }
@@ -223,7 +389,7 @@ export class ExplorationAgent {
           if (cred) {
             const strategy = config.loginStrategy ?? 'ai';
             if (strategy === 'ai') {
-              const loginErr = await this.runAiLogin(pageState.url, cred, stepLogger);
+              const loginErr = await this.runAiLogin(pageState.url, cred, stepLogger, session.session_id, dataRoot);
               if (loginErr) { llmError = loginErr; break; }
             } else {
               try {
@@ -236,8 +402,32 @@ export class ExplorationAgent {
         // Ask LLM for next action
         const llmStart = Date.now();
         const llmActionId = `llm-${String(llmStart)}`;
-        stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'pending', detail: `deciding next step from ${url}`, toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount }, actionId: llmActionId });
-        const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls], stepLogger, llmActionId);
+        const domSnapshot = activePwProvider ? await activePwProvider.collectDomSnapshot().catch(() => undefined) : undefined;
+        const promptContextSummary = summarizePromptContext({
+          page: pageState,
+          config,
+          stepIndex,
+          visited: [...visitedUrls],
+          recentSteps,
+          recentFindings,
+          recentToolResults,
+          recentNetworkHighlights,
+          supportedActions: activePwProvider ? '"click"|"fill"|"navigate"|"done"' : '"navigate"|"done"',
+          remainingSteps: Math.max((config.maxSteps ?? 20) - stepIndex, 0),
+          remainingPages: Math.max((config.maxPages ?? 10) - visitedUrls.size, 0),
+          ...(domSnapshot ? { domSnapshot } : {}),
+        });
+        stepLogger.log({
+          component: 'ExplorationAgent',
+          action: 'llm.decide',
+          status: 'pending',
+          detail: `deciding next step from ${pageState.url}`,
+          toolInput: { currentUrl: pageState.url, formCount: pageState.formCount, linkCount: pageState.linkCount },
+          actionId: llmActionId,
+          promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+          promptContextSummary,
+        });
+        const nextStep = await this.decideNextStep(pageState, config, stepIndex, [...visitedUrls], stepLogger, session.session_id, dataRoot, llmActionId, recentSteps, recentFindings, recentToolResults, recentNetworkHighlights, domSnapshot);
         if (nextStep.llmError) {
           llmError = nextStep.llmError;
           log.warn('LLM error during exploration, stopping early', { runId, llmError });
@@ -247,21 +437,73 @@ export class ExplorationAgent {
           stepLogger.log({
             component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
             detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
-            toolInput: { currentUrl: url, formCount: pageState.formCount, linkCount: pageState.linkCount },
-            toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl },
+            toolInput: { currentUrl: pageState.url, formCount: pageState.formCount, linkCount: pageState.linkCount },
+            toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl, selector: nextStep.selector },
             reason: nextStep.reasoning,
             actionId: llmActionId,
+            promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+            promptContextSummary,
             ...(this.provider.model ? { model: this.provider.model } : {}),
           });
         }
         if (nextStep.action === 'done') break;
         if (nextStep.action === 'navigate' && nextStep.targetUrl) {
           if (!visitedUrls.has(nextStep.targetUrl)) pendingUrls.unshift(nextStep.targetUrl);
+          currentPage = undefined;
+        } else if ((nextStep.action === 'click' || nextStep.action === 'fill') && activePwProvider && nextStep.selector) {
+          const actionStart = Date.now();
+          const toolName = nextStep.action === 'click' ? 'playwright.click' : 'playwright.fill';
+          const toolInput = nextStep.action === 'click'
+            ? { selector: nextStep.selector }
+            : { selector: nextStep.selector, value: nextStep.value ?? '' };
+          const actionResult = await registry.call<Record<string, unknown>>(toolName, toolInput, { sessionId: session.session_id, stepIndex });
+          if (!actionResult.ok) {
+            stepLogger.log({ component: 'ExplorationAgent', action: nextStep.action, detail: nextStep.selector, status: 'error', durationMs: Date.now() - actionStart, toolInput, toolOutput: { error: actionResult.error }, reason: nextStep.reasoning, tool: 'playwright' });
+            currentPage = undefined;
+            break;
+          }
+          pushRecent(recentSteps, `${nextStep.action} ${nextStep.selector}`);
+          const stateResult = await registry.call<PageProbe>('playwright.getState', {}, { sessionId: session.session_id, stepIndex });
+          if (!stateResult.ok) {
+            currentPage = undefined;
+            pushRecent(recentToolResults, `${nextStep.action} ${nextStep.selector} => state unavailable`);
+          } else {
+            currentPage = stateResult.value!;
+            if (!visitedUrls.has(currentPage.url) && visitedUrls.size < maxPages) visitedUrls.add(currentPage.url);
+            pushRecent(recentToolResults, `${nextStep.action} ${nextStep.selector} => ${currentPage.title || currentPage.url}`);
+            for (const highlight of activePwProvider.getRecentNetworkHighlights(3)) pushRecent(recentNetworkHighlights, highlight, 6);
+          }
+          stepLogger.log({
+            component: 'ExplorationAgent',
+            action: nextStep.action,
+            detail: nextStep.selector,
+            status: 'ok',
+            durationMs: Date.now() - actionStart,
+            toolInput,
+            toolOutput: actionResult.value,
+            ...(currentPage ? { pageState: buildPageSnapshot(currentPage) } : {}),
+            ...(nextStep.reasoning ? { reason: nextStep.reasoning } : {}),
+            tool: 'playwright',
+          });
+        } else {
+          if ((nextStep.action === 'click' || nextStep.action === 'fill') && nextStep.selector) {
+            stepLogger.log({
+              component: 'ExplorationAgent',
+              action: nextStep.action,
+              detail: nextStep.selector,
+              status: 'warn',
+              toolInput: { selector: nextStep.selector, value: nextStep.value },
+              toolOutput: { error: 'INTERACTIVE_ACTION_UNAVAILABLE_IN_FETCH_MODE' },
+              reason: nextStep.reasoning,
+              tool: 'fetch',
+            });
+          }
+          currentPage = undefined;
         }
 
         this.sessionManager.appendStep(session.session_id, {
           stepIndex,
-          description: `navigate: ${url}`,
+          description: `${nextStep.action}: ${pageState.url}`,
           outcome: `findings: ${String(newFindings.length)}, errors: ${String(pageState.consoleErrors.length + pageState.networkErrors.length)}`,
           timestamp: new Date().toISOString(),
         }, dataRoot);
@@ -322,41 +564,123 @@ export class ExplorationAgent {
     stepIndex: number,
     visited: string[],
     stepLogger: StepLogger,
+    sessionId: string,
+    dataRoot: string,
     actionId?: string,
+    recentSteps: string[] = [],
+    recentFindings: string[] = [],
+    recentToolResults: string[] = [],
+    recentNetworkHighlights: string[] = [],
+    domSnapshot?: DomSnapshot,
   ): Promise<ExplorationStep> {
-    const focusAreas = config.focusAreas ?? [];
-    const prompt = [
-      'You are an AI site exploration agent. Decide the next action to take.',
-      `Current page: ${page.url} (title: "${page.title}")`,
-      `Console errors: ${page.consoleErrors.length}, Network errors: ${page.networkErrors.length}`,
-      `Forms: ${page.formCount}, Links: ${page.linkCount}`,
-      `Focus areas: ${focusAreas.join(', ') || 'general'}`,
-      `Already visited: ${visited.slice(-5).join(', ')}`,
-      `Step: ${String(stepIndex)}`,
-      '',
-      'Respond with JSON only: {"action":"navigate"|"done","targetUrl":"...","reasoning":"..."}',
-      'Choose "done" if the page has been thoroughly explored or there is nothing new to find.',
-    ].join('\n');
+    const prompt = buildExplorationDecisionPrompt({
+      page,
+      config,
+      stepIndex,
+      visited,
+      recentSteps,
+      recentFindings,
+      recentToolResults,
+      recentNetworkHighlights,
+      supportedActions: domSnapshot ? '"click"|"fill"|"navigate"|"done"' : '"navigate"|"done"',
+      remainingSteps: Math.max((config.maxSteps ?? 20) - stepIndex, 0),
+      remainingPages: Math.max((config.maxPages ?? 10) - visited.length, 0),
+      ...(domSnapshot ? { domSnapshot } : {}),
+    });
 
     let raw = '';
     const toolInput = { currentUrl: page.url, formCount: page.formCount, linkCount: page.linkCount };
+    const promptContextSummary = summarizePromptContext({
+      page,
+      config,
+      stepIndex,
+      visited,
+      recentSteps,
+      recentFindings,
+      recentToolResults,
+      recentNetworkHighlights,
+      supportedActions: domSnapshot ? '"click"|"fill"|"navigate"|"done"' : '"navigate"|"done"',
+      remainingSteps: Math.max((config.maxSteps ?? 20) - stepIndex, 0),
+      remainingPages: Math.max((config.maxPages ?? 10) - visited.length, 0),
+      ...(domSnapshot ? { domSnapshot } : {}),
+    });
     try {
       raw = await this.provider.complete(prompt);
     } catch (e) {
-      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: `LLM call threw: ${String(e)}`, reason: 'LLM unavailable', toolInput, toolOutput: { error: String(e) }, ...(actionId ? { actionId } : {}) });
+      this.sessionManager.appendPromptSample(sessionId, {
+        sessionId,
+        stepIndex,
+        timestamp: new Date().toISOString(),
+        phase: 'exploration-decision',
+        templateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+        prompt,
+        response: String(e),
+        promptContextSummary,
+        sampledBy: getPromptSampleReason(stepIndex, true) ?? 'forced',
+        metadata: {
+          currentUrl: page.url,
+          visitedCount: visited.length,
+          supportedActions: domSnapshot ? ['click', 'fill', 'navigate', 'done'] : ['navigate', 'done'],
+        },
+      }, dataRoot);
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: `LLM call threw: ${String(e)}`, reason: 'LLM unavailable', toolInput, toolOutput: { error: String(e) }, promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision, ...(actionId ? { actionId } : {}) });
       return { stepIndex, action: 'done', reasoning: 'LLM unavailable', llmError: 'LLM_CALL_FAILED' };
     }
 
+    const sampledBy = getPromptSampleReason(stepIndex);
+    if (sampledBy) {
+      this.sessionManager.appendPromptSample(sessionId, {
+        sessionId,
+        stepIndex,
+        timestamp: new Date().toISOString(),
+        phase: 'exploration-decision',
+        templateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+        prompt,
+        response: raw,
+        promptContextSummary,
+        sampledBy,
+        metadata: {
+          currentUrl: page.url,
+          visitedCount: visited.length,
+          supportedActions: domSnapshot ? ['click', 'fill', 'navigate', 'done'] : ['navigate', 'done'],
+          recentToolResults,
+          recentNetworkHighlights,
+        },
+      }, dataRoot);
+    }
+
     if (!raw || raw.trim() === '') {
-      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: 'LLM returned empty response', reason: 'empty response', toolInput, toolOutput: { status: 'empty' }, ...(actionId ? { actionId } : {}) });
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'error', detail: 'LLM returned empty response', reason: 'empty response', toolInput, toolOutput: { status: 'empty' }, promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision, ...(actionId ? { actionId } : {}) });
       return { stepIndex, action: 'done', reasoning: 'LLM returned empty response', llmError: 'LLM_EMPTY_RESPONSE' };
     }
 
-    const parsed = parseJson<{ action?: string; targetUrl?: string; reasoning?: string }>(raw, {});
+    const parsed = parseJson<{ action?: string; targetUrl?: string; selector?: string; value?: string; reasoning?: string }>(raw, {});
+
+    if ((parsed.action === 'click' || parsed.action === 'fill') && !domSnapshot) {
+      stepLogger.log({
+        component: 'ExplorationAgent',
+        action: 'llm.decide',
+        status: 'warn',
+        detail: `LLM returned ${parsed.action} without interactive runtime — treating as done`,
+        toolInput,
+        toolOutput: parsed,
+        promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+        ...(actionId ? { actionId } : {}),
+      });
+      return { stepIndex, action: 'done', reasoning: parsed.reasoning ?? 'interactive action unavailable in fetch mode' };
+    }
+
+    if (parsed.action === 'click' && parsed.selector) {
+      return { stepIndex, action: 'click', selector: parsed.selector, reasoning: parsed.reasoning ?? '', targetUrl: undefined, value: undefined };
+    }
+
+    if (parsed.action === 'fill' && parsed.selector) {
+      return { stepIndex, action: 'fill', selector: parsed.selector, value: parsed.value ?? '', reasoning: parsed.reasoning ?? '', targetUrl: undefined };
+    }
 
     // navigate without a targetUrl is meaningless — treat as done
-    if (parsed.action !== 'done' && !parsed.targetUrl) {
-      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'warn', detail: 'LLM returned navigate without targetUrl — treating as done', toolInput, toolOutput: parsed, ...(actionId ? { actionId } : {}) });
+    if (parsed.action !== 'done' && parsed.action !== 'click' && parsed.action !== 'fill' && !parsed.targetUrl) {
+      stepLogger.log({ component: 'ExplorationAgent', action: 'llm.decide', status: 'warn', detail: 'LLM returned navigate without targetUrl — treating as done', toolInput, toolOutput: parsed, promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision, ...(actionId ? { actionId } : {}) });
       return { stepIndex, action: 'done', reasoning: parsed.reasoning ?? 'no targetUrl in LLM response' };
     }
 
@@ -377,6 +701,8 @@ export class ExplorationAgent {
     startUrl: string,
     cred: import('@zarb/storage').SiteCredentialRow,
     stepLogger: StepLogger,
+    sessionId: string,
+    dataRoot: string,
   ): Promise<string | undefined> {
     const pw = this.playwrightProvider;
     if (!pw) return 'LOGIN_AI_FAILED';
@@ -406,27 +732,59 @@ export class ExplorationAgent {
         return undefined;
       }
 
-      const prompt = [
-        'You are an AI login agent. Analyze the page DOM and decide the next action.',
-        '',
-        `Page: ${snapshot.url} (title: "${snapshot.title}")`,
-        `Inputs: ${JSON.stringify(snapshot.inputs.map(({ type, name, placeholder, label, selector }) => ({ type, name, placeholder, label, selector })))}`,
-        `Buttons: ${JSON.stringify(snapshot.buttons.map(({ text, type, selector }) => ({ text, type, selector })))}`,
-        '',
-        `Credentials: username="${cred.username ?? ''}", password=[AVAILABLE]`,
-        '',
-        'Respond with JSON only:',
-        '{"isLoginPage":true|false,"action":"fill"|"click"|"done","selector":"...","value":"...","reasoning":"..."}',
-        'For fill with password, set value to "__PASSWORD__" and the system will substitute it.',
-        'Set action="done" if login appears complete.',
-      ].join('\n');
+      const promptContextSummary = `login url=${snapshot.url} inputs=${String(snapshot.inputs.length)} buttons=${String(snapshot.buttons.length)} forms=${String(snapshot.forms.length)}`;
+      const prompt = renderHarnessTemplate(HARNESS_TEMPLATE_VERSIONS.explorationLogin, {
+        currentPage: `${snapshot.url} (title: "${snapshot.title}")`,
+        inputs: JSON.stringify(snapshot.inputs.map(({ type, name, placeholder, label, selector }) => ({ type, name, placeholder, label, selector }))),
+        buttons: JSON.stringify(snapshot.buttons.map(({ text, type, selector }) => ({ text, type, selector }))),
+        forms: JSON.stringify(snapshot.forms),
+        username: cred.username ?? '',
+      });
 
       let raw = '';
       try {
         raw = await this.provider.complete(prompt);
       } catch (e) {
-        stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `LLM call failed: ${String(e)}`, durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright' });
+        this.sessionManager.appendPromptSample(sessionId, {
+          sessionId,
+          stepIndex: i,
+          timestamp: new Date().toISOString(),
+          phase: 'exploration-login',
+          templateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+          prompt,
+          response: String(e),
+          promptContextSummary,
+          sampledBy: getPromptSampleReason(i, true) ?? 'forced',
+          metadata: {
+            currentUrl: snapshot.url,
+            inputs: snapshot.inputs.length,
+            buttons: snapshot.buttons.length,
+            forms: snapshot.forms.length,
+          },
+        }, dataRoot);
+        stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `LLM call failed: ${String(e)}`, durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright', promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin, promptContextSummary });
         return 'LOGIN_AI_FAILED';
+      }
+
+      const sampledBy = getPromptSampleReason(i);
+      if (sampledBy) {
+        this.sessionManager.appendPromptSample(sessionId, {
+          sessionId,
+          stepIndex: i,
+          timestamp: new Date().toISOString(),
+          phase: 'exploration-login',
+          templateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+          prompt,
+          response: raw,
+          promptContextSummary,
+          sampledBy,
+          metadata: {
+            currentUrl: snapshot.url,
+            inputs: snapshot.inputs.length,
+            buttons: snapshot.buttons.length,
+            forms: snapshot.forms.length,
+          },
+        }, dataRoot);
       }
 
       const decision = parseJson<{ isLoginPage?: boolean; action?: string; selector?: string; value?: string; reasoning?: string }>(raw, {});

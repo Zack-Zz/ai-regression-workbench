@@ -26,6 +26,10 @@ const put = <T>(path: string, body?: unknown) => request<T>('PUT', path, body);
 
 // Runs
 export const api = {
+  getFailureArtifactUrl: (runId: string, tcId: string, kind: 'screenshot' | 'video' | 'trace' | 'html-report' | 'network') =>
+    `${BASE}/runs/${runId}/testcases/${tcId}/artifacts/${kind}`,
+  getCodeTaskArtifactUrl: (taskId: string, kind: 'diff' | 'patch' | 'raw-output' | 'verify-output') =>
+    `${BASE}/code-tasks/${taskId}/artifacts/${kind}`,
   listRuns: (q?: string) => get<import('./types').RunSummaryPage>(`/runs${q ? `?${q}` : ''}`),
   getRun: (id: string) => get<import('./types').RunDetail>(`/runs/${id}`),
   getExecutionReport: (id: string) => get<import('./types').ExecutionReport>(`/runs/${id}/execution-report`),
@@ -61,6 +65,7 @@ export const api = {
   // Exploration session detail
   getRunSteps: (runId: string) => get<import('./types').StepLogEntry[]>(`/runs/${runId}/steps`),
   getRunNetwork: (runId: string) => get<import('./types').NetworkLogEntry[]>(`/runs/${runId}/network`),
+  getRunPromptSamples: (runId: string) => get<import('./types').PromptSampleEntry[]>(`/runs/${runId}/prompt-samples`),
 
   // Settings
   getSettings: () => get<import('./types').SettingsSnapshot>('/settings'),
