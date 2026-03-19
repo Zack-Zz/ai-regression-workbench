@@ -82,6 +82,12 @@ packages/agent-harness/
 }
 ```
 
+运行时约束：
+
+- 使用 `response_format: { type: "json_object" }`
+- 使用 function tool schema（`decide_exploration_action`），`tool_choice: "required"`
+- 空响应自动重试（最多 2 次）
+
 ### 4.2 exploration-login
 
 用途：辅助 AI 登录流程。
@@ -105,6 +111,12 @@ packages/agent-harness/
   "reasoning": "..."
 }
 ```
+
+运行时约束：
+
+- 使用 `response_format: { type: "json_object" }`
+- 使用 function tool schema（`decide_login_action`），`tool_choice: "required"`
+- 空响应自动重试（最多 2 次）
 
 密码值不直接写入 prompt，只允许返回 `__PASSWORD__` 占位符。
 

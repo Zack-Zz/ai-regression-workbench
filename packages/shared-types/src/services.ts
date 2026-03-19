@@ -21,6 +21,14 @@ import type {
 } from './dtos.js';
 import type { RunMode } from './enums.js';
 
+export type AIProviderScene =
+  | 'explorationDecision'
+  | 'explorationLogin'
+  | 'failureAnalysis'
+  | 'findingSummary'
+  | 'testDraft'
+  | 'codeTaskDraft';
+
 // ---------------------------------------------------------------------------
 // Query inputs
 // ---------------------------------------------------------------------------
@@ -145,6 +153,7 @@ export interface PersonalSettings {
     activeProvider: string;
     enabled: boolean;
     promptTemplatesDir?: string;
+    sceneProviders?: Partial<Record<AIProviderScene, string>>;
     providers: {
       [key: string]: {
         baseUrl: string;

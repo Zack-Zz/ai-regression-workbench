@@ -35,7 +35,11 @@ function seedRun(db: ReturnType<typeof makeDb>, runId = 'r1') {
 
 /** Stub provider that returns a fixed JSON response. */
 function stubProvider(response: unknown): AIProvider {
-  return { complete: () => Promise.resolve(JSON.stringify(response)) };
+  return {
+    complete: () => Promise.resolve(JSON.stringify(response)),
+    isConfigured: () => true,
+    model: 'stub-model',
+  };
 }
 
 // ---------------------------------------------------------------------------

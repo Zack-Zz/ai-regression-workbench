@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { useAsync } from '../hooks.js';
+import { useAsync, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, Card, KV, Button } from './ui.js';
 import type { StepLogEntry, NetworkLogEntry, PromptSampleEntry } from '../types.js';
@@ -22,6 +22,7 @@ export const ACTION_LABELS: Record<string, { labelKey: string; toolKey: string }
   'fill':           { labelKey: 'step.action.fill',           toolKey: 'step.tool.playwright' },
   'llm.decide':     { labelKey: 'step.action.llm.decide',     toolKey: 'step.tool.AIProvider' },
   'findings':       { labelKey: 'step.action.findings',       toolKey: 'step.tool.FindingRepository' },
+  'state.capture':  { labelKey: 'step.action.state.capture',  toolKey: 'step.tool.playwright' },
   'login.start':    { labelKey: 'step.action.login.start',    toolKey: 'step.tool.playwright' },
   'login.fill':     { labelKey: 'step.action.login.fill',     toolKey: 'step.tool.playwright' },
   'login.click':    { labelKey: 'step.action.login.click',    toolKey: 'step.tool.playwright' },
@@ -39,9 +40,96 @@ export function filterSteps(steps: StepLogEntry[]): StepLogEntry[] {
   });
 }
 
+function asRecord(input: unknown): Record<string, unknown> | null {
+  return input !== null && typeof input === 'object' ? (input as Record<string, unknown>) : null;
+}
+
+function describePromptTemplate(template?: string): string {
+  if (!template) return '—';
+  if (template === 'exploration-login/default@v1') return `${template} (${t('step.modal.llm.template.systemLogin')})`;
+  if (template === 'exploration-decision/default@v1') return `${template} (${t('step.modal.llm.template.systemDecision')})`;
+  return `${template} (${t('step.modal.llm.template.systemKey')})`;
+}
+
+function parsePromptSummary(summary?: string): Array<{ key: string; value: string }> {
+  if (!summary) return [];
+  return summary
+    .split(/\s+/)
+    .map((segment) => {
+      const idx = segment.indexOf('=');
+      if (idx === -1) return null;
+      const key = segment.slice(0, idx);
+      const value = segment.slice(idx + 1);
+      return { key, value };
+    })
+    .filter((item): item is { key: string; value: string } => item !== null);
+}
+
+function promptSummaryLabel(key: string): string {
+  const labels: Record<string, string> = {
+    remainingSteps: 'step.modal.promptSummary.remainingSteps',
+    remainingPages: 'step.modal.promptSummary.remainingPages',
+    visited: 'step.modal.promptSummary.visited',
+    recentSteps: 'step.modal.promptSummary.recentSteps',
+    recentFindings: 'step.modal.promptSummary.recentFindings',
+    recentToolResults: 'step.modal.promptSummary.recentToolResults',
+    recentNetwork: 'step.modal.promptSummary.recentNetwork',
+    actions: 'step.modal.promptSummary.actions',
+    focusAreas: 'step.modal.promptSummary.focusAreas',
+    url: 'step.modal.promptSummary.url',
+    currentUrl: 'step.modal.promptSummary.currentUrl',
+    inputs: 'step.modal.promptSummary.inputs',
+    buttons: 'step.modal.promptSummary.buttons',
+    forms: 'step.modal.promptSummary.forms',
+  };
+  return labels[key] ? t(labels[key]!) : key;
+}
+
+function tryParseJsonText(value: string): string | null {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return null;
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function renderSummaryValue(value: unknown): React.ReactElement {
+  if (typeof value === 'string') {
+    const pretty = tryParseJsonText(value);
+    if (pretty) {
+      return (
+        <pre style={{ margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {pretty}
+        </pre>
+      );
+    }
+    return (
+      <span style={{ fontFamily: 'monospace' }} title={value}>
+        {value.length > 160 ? `${value.slice(0, 160)}…` : value}
+      </span>
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return (
+      <pre style={{ margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    );
+  }
+  return <span style={{ fontFamily: 'monospace' }}>{String(value)}</span>;
+}
+
 export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose: () => void }): React.ReactElement {
   const color = step.status === 'ok' ? '#2a7' : step.status === 'error' ? '#c33' : step.status === 'warn' ? '#f90' : step.status === 'pending' ? '#4080c0' : '#888';
   const actionMeta = ACTION_LABELS[step.action];
+  const isLlmDecision = step.action === 'llm.decide';
+  const toolInputRecord = asRecord(step.toolInput);
+  const toolOutputRecord = asRecord(step.toolOutput);
+  const promptSummaryItems = parsePromptSummary(step.promptContextSummary);
+  const showLlmRequestSummary = isLlmDecision && !!toolInputRecord;
+  const showLlmResponseSummary = isLlmDecision && !!toolOutputRecord;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -74,21 +162,31 @@ export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose
           )}
           {(step.promptTemplateVersion || step.promptContextSummary) && (
             <section>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>Prompt Context</div>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>
+                {isLlmDecision ? t('step.modal.llm.context') : t('step.modal.promptContext')}
+              </div>
               <div style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', lineHeight: 1.8 }}>
                 {step.promptTemplateVersion && (
                   <div>
-                    <span style={{ color: '#888' }}>Template　</span>
-                    <span style={{ fontFamily: 'monospace' }}>{step.promptTemplateVersion}</span>
+                    <span style={{ color: '#888' }}>{t('step.modal.template')}　</span>
+                    <span style={{ fontFamily: 'monospace' }}>{describePromptTemplate(step.promptTemplateVersion)}</span>
                   </div>
                 )}
-                {step.promptContextSummary && (
-                  <div>
-                    <span style={{ color: '#888' }}>Summary　</span>
-                    <span style={{ fontFamily: 'monospace' }}>{step.promptContextSummary}</span>
+                {promptSummaryItems.length > 0 && promptSummaryItems.map((item, idx) => (
+                  <div key={`${item.key}-${idx}`}>
+                    <span style={{ color: '#888' }}>{promptSummaryLabel(item.key)}　</span>
+                    <span style={{ fontFamily: 'monospace' }}>{item.value}</span>
                   </div>
+                ))}
+                {promptSummaryItems.length === 0 && step.promptContextSummary && (
+                  <div><span style={{ color: '#888' }}>{t('step.modal.summary')}　</span><span style={{ fontFamily: 'monospace' }}>{step.promptContextSummary}</span></div>
                 )}
               </div>
+              {isLlmDecision && (
+                <div style={{ marginTop: 6, color: '#666', fontSize: '0.82em' }}>
+                  {t('step.modal.llm.fullPromptHint')}
+                </div>
+              )}
             </section>
           )}
           {step.pageState && (
@@ -111,14 +209,54 @@ export function StepDetailModal({ step, onClose }: { step: StepLogEntry; onClose
           )}
           {step.toolInput !== undefined && (
             <section>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>{t('step.modal.toolInput')}</div>
-              <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', margin: 0, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolInput, null, 2)}</pre>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>
+                {isLlmDecision ? t('step.modal.llm.requestSummary') : t('step.modal.toolInput')}
+              </div>
+              {showLlmRequestSummary && (
+                <div style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', marginBottom: 8, lineHeight: 1.8 }}>
+                  {Object.entries(toolInputRecord).map(([k, v]) => (
+                    <div key={k}>
+                      <span style={{ color: '#888' }}>{promptSummaryLabel(k)}　</span>
+                      {renderSummaryValue(v)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!showLlmRequestSummary && (
+                <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', margin: 0, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolInput, null, 2)}</pre>
+              )}
+              {showLlmRequestSummary && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: 'pointer', color: '#666' }}>{t('step.modal.llm.rawRequest')}</summary>
+                  <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', marginTop: 6, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolInput, null, 2)}</pre>
+                </details>
+              )}
             </section>
           )}
           {step.toolOutput !== undefined && (
             <section>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>{t('step.modal.toolOutput')}</div>
-              <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', margin: 0, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolOutput, null, 2)}</pre>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#444' }}>
+                {isLlmDecision ? t('step.modal.llm.responseSummary') : t('step.modal.toolOutput')}
+              </div>
+              {showLlmResponseSummary && (
+                <div style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', marginBottom: 8, lineHeight: 1.8 }}>
+                  {Object.entries(toolOutputRecord).slice(0, 6).map(([k, v]) => (
+                    <div key={k}>
+                      <span style={{ color: '#888' }}>{k}　</span>
+                      {renderSummaryValue(v)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!showLlmResponseSummary && (
+                <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', margin: 0, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolOutput, null, 2)}</pre>
+              )}
+              {showLlmResponseSummary && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: 'pointer', color: '#666' }}>{t('step.modal.llm.rawResponse')}</summary>
+                  <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', marginTop: 6, overflowX: 'auto', fontSize: '0.9em' }}>{JSON.stringify(step.toolOutput, null, 2)}</pre>
+                </details>
+              )}
             </section>
           )}
           {step.reason && (
@@ -267,7 +405,7 @@ function PromptSamplesModal({ entries, onClose }: { entries: PromptSampleEntry[]
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: '#fff', borderRadius: 8, width: '92vw', maxWidth: 1200, height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderBottom: '1px solid #eee', flexShrink: 0 }}>
-          <span style={{ fontWeight: 600, flex: 1 }}>Prompt Samples ({entries.length})</span>
+          <span style={{ fontWeight: 600, flex: 1 }}>{t('prompt.modal.title')} ({entries.length})</span>
           <Button onClick={onClose}>✕</Button>
         </div>
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -276,7 +414,7 @@ function PromptSamplesModal({ entries, onClose }: { entries: PromptSampleEntry[]
               <div key={i} onClick={() => { setSelected(entry); }}
                 style={{ padding: '8px 10px', borderBottom: '1px solid #f3f3f3', cursor: 'pointer', background: selected === entry ? '#e8f0fe' : '#fff' }}>
                 <div style={{ fontWeight: 600 }}>{entry.phase}</div>
-                <div style={{ color: '#666' }}>step {entry.stepIndex} · {entry.sampledBy}</div>
+                <div style={{ color: '#666' }}>{t('prompt.modal.step')} {entry.stepIndex} · {entry.sampledBy}</div>
                 <div style={{ color: '#888', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{entry.templateVersion}</div>
               </div>
             ))}
@@ -295,10 +433,10 @@ function PromptSamplesModal({ entries, onClose }: { entries: PromptSampleEntry[]
                 </div>
               )}
               {selected.metadata && (
-                <CopyPrettyBlock label="Metadata" value={JSON.stringify(selected.metadata, null, 2)} isJson />
+                <CopyPrettyBlock label={t('prompt.modal.metadata')} value={JSON.stringify(selected.metadata, null, 2)} isJson />
               )}
-              <CopyPrettyBlock label="Prompt" value={selected.prompt} />
-              {selected.response !== undefined && <CopyPrettyBlock label="Response" value={selected.response} isJson={selected.response.trimStart().startsWith('{') || selected.response.trimStart().startsWith('[')} />}
+              <CopyPrettyBlock label={t('prompt.modal.prompt')} value={selected.prompt} />
+              {selected.response !== undefined && <CopyPrettyBlock label={t('prompt.modal.response')} value={selected.response} isJson={selected.response.trimStart().startsWith('{') || selected.response.trimStart().startsWith('[')} />}
             </div>
           )}
         </div>
@@ -312,13 +450,27 @@ function PromptSamplesModal({ entries, onClose }: { entries: PromptSampleEntry[]
  * Can be embedded in any page that has a runId.
  */
 export function StepLogPanel({ runId, runSummary }: { runId: string; runSummary?: string }): React.ReactElement {
-  const { data: steps, loading } = useAsync(() => api.getRunSteps(runId), [runId]);
-  const { data: network } = useAsync(() => api.getRunNetwork(runId), [runId]);
-  const { data: promptSamples } = useAsync(() => api.getRunPromptSamples(runId), [runId]);
+  const { data: steps, loading, reload: reloadSteps } = useAsync(() => api.getRunSteps(runId), [runId]);
+  const { data: network, reload: reloadNetwork } = useAsync(() => api.getRunNetwork(runId), [runId]);
+  const { data: promptSamples, reload: reloadPromptSamples } = useAsync(() => api.getRunPromptSamples(runId), [runId]);
+  useServerEvents(
+    ['run.step.updated', 'run.updated'],
+    () => {
+      reloadSteps();
+      reloadNetwork();
+      reloadPromptSamples();
+    },
+    (event) => event.id === runId,
+    () => {
+      reloadSteps();
+      reloadNetwork();
+      reloadPromptSamples();
+    },
+  );
   const [networkModal, setNetworkModal] = React.useState(false);
   const [promptModal, setPromptModal] = React.useState(false);
 
-  if (loading) return <Loading />;
+  if (loading && !steps) return <Loading />;
   if (!steps || steps.length === 0) {
     const reason = runSummary ? t(`run.summary.${runSummary}`) : null;
     return (
@@ -335,7 +487,7 @@ export function StepLogPanel({ runId, runSummary }: { runId: string; runSummary?
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
         {promptSamples && promptSamples.length > 0 && (
           <Button onClick={() => { setPromptModal(true); }}>
-            Prompt Samples ({promptSamples.length})
+            {t('exploration.steps.promptSamples')} ({promptSamples.length})
           </Button>
         )}
         {network && network.length > 0 && (

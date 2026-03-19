@@ -1,5 +1,5 @@
 export { LocalAIEngine } from './ai-engine.js';
-export type { AIEngine, AIProvider } from './ai-engine.js';
+export type { AIEngine, AIProvider, AICompletionOptions, AIProviderScene } from './ai-engine.js';
 export { OpenAIProvider, NullAIProvider, createAIProvider } from './ai-engine.js';
 export { trimContext } from './context-trimmer.js';
 export type { TrimmedContext } from './context-trimmer.js';

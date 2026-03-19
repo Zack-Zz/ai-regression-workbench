@@ -17,10 +17,65 @@ import { appLogger } from '@zarb/logger';
 
 const log = appLogger.child('AIEngine');
 
+export type AIProviderScene =
+  | 'explorationDecision'
+  | 'explorationLogin'
+  | 'failureAnalysis'
+  | 'findingSummary'
+  | 'testDraft'
+  | 'codeTaskDraft';
+
+export interface AICompletionOptions {
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  responseFormat?: { type: 'json_object' };
+  tools?: Array<{
+    type: 'function';
+    function: {
+      name: string;
+      description?: string;
+      parameters: Record<string, unknown>;
+      strict?: boolean;
+    };
+  }>;
+  toolChoice?: 'auto' | 'required' | { type: 'function'; function: { name: string } };
+  retry?: {
+    maxAttempts?: number;
+    retryOnEmpty?: boolean;
+  };
+  scene?: AIProviderScene;
+}
+
 export interface AIProvider {
-  complete(prompt: string): Promise<string>;
+  complete(prompt: string, options?: AICompletionOptions): Promise<string>;
   isConfigured(): boolean;
-  readonly model?: string;
+  readonly model: string | undefined;
+}
+
+interface ChatCompletionRequestBody {
+  model: string;
+  messages: Array<{ role: 'system' | 'user'; content: string }>;
+  temperature?: number;
+  max_tokens?: number;
+  response_format?: { type: 'json_object' };
+  tools?: AICompletionOptions['tools'];
+  tool_choice?: AICompletionOptions['toolChoice'];
+}
+
+interface ChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }>;
+      tool_calls?: Array<{ function?: { arguments?: string } }>;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_cache_hit_tokens?: number;
+    prompt_cache_miss_tokens?: number;
+  };
 }
 
 /**
@@ -36,30 +91,81 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   isConfigured(): boolean { return !!this.apiKey; }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, options: AICompletionOptions = {}): Promise<string> {
     if (!this.apiKey) return '';
-    try {
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!res.ok) {
-        log.warn('AI provider HTTP error', { model: this.model, status: res.status, baseUrl: this.baseUrl });
-        return '';
+    const maxAttempts = Math.max(1, options.retry?.maxAttempts ?? 1);
+    let lastNetworkErr: unknown = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const fullBody = this.buildRequestBody(prompt, options, true);
+      const fallbackBody = this.buildRequestBody(prompt, options, false);
+      const payloads = this.samePayload(fullBody, fallbackBody) ? [fullBody] : [fullBody, fallbackBody];
+
+      for (let idx = 0; idx < payloads.length; idx++) {
+        const body = payloads[idx]!;
+        try {
+          const res = await fetch(`${this.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!res.ok) {
+            log.warn('AI provider HTTP error', {
+              model: this.model,
+              status: res.status,
+              baseUrl: this.baseUrl,
+              attempt,
+              fallbackPayload: idx > 0,
+            });
+            continue;
+          }
+          const parsed = await res.json() as ChatCompletionResponse;
+          log.debug('AI provider response', {
+            model: this.model,
+            attempt,
+            promptTokens: parsed.usage?.prompt_tokens,
+            completionTokens: parsed.usage?.completion_tokens,
+            cacheHitTokens: parsed.usage?.prompt_cache_hit_tokens,
+            cacheMissTokens: parsed.usage?.prompt_cache_miss_tokens,
+          });
+
+          const output = extractChatOutput(parsed).trim();
+          if (output.length > 0) return output;
+        } catch (err) {
+          lastNetworkErr = err;
+          log.error('AI provider request failed', { model: this.model, error: String(err), attempt });
+          break;
+        }
       }
-      const body = await res.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
-      log.debug('AI provider response', { model: this.model, promptTokens: body.usage?.prompt_tokens, completionTokens: body.usage?.completion_tokens });
-      return body.choices?.[0]?.message?.content ?? '';
-    } catch (err) {
-      log.error('AI provider request failed', { model: this.model, error: String(err) });
-      throw err;
+      if (!options.retry?.retryOnEmpty) break;
     }
+
+    if (lastNetworkErr) throw lastNetworkErr;
+    return '';
+  }
+
+  private samePayload(a: ChatCompletionRequestBody, b: ChatCompletionRequestBody): boolean {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  private buildRequestBody(prompt: string, options: AICompletionOptions, allowTools: boolean): ChatCompletionRequestBody {
+    const messages: ChatCompletionRequestBody['messages'] = [];
+    if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt });
+    messages.push({ role: 'user', content: prompt });
+
+    const body: ChatCompletionRequestBody = {
+      model: this.model,
+      messages,
+      temperature: options.temperature ?? 0.2,
+    };
+    if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
+    if (options.responseFormat) body.response_format = options.responseFormat;
+    if (allowTools && options.tools && options.tools.length > 0) {
+      body.tools = options.tools;
+      if (options.toolChoice) body.tool_choice = options.toolChoice;
+    }
+    return body;
   }
 }
 
@@ -75,8 +181,38 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
  * Returns empty string so callers degrade gracefully.
  */
 export class NullAIProvider implements AIProvider {
+  readonly model = undefined;
   isConfigured(): boolean { return false; }
-  complete(_prompt: string): Promise<string> { return Promise.resolve(''); }
+  complete(_prompt: string, _options?: AICompletionOptions): Promise<string> { return Promise.resolve(''); }
+}
+
+class RoutedAIProvider implements AIProvider {
+  constructor(
+    private readonly providers: Record<string, AIProvider>,
+    private readonly defaultProviderKey: string,
+    private readonly sceneProviders: Partial<Record<AIProviderScene, string>>,
+  ) {}
+
+  get model(): string | undefined {
+    return this.providerFor(undefined).model;
+  }
+
+  isConfigured(): boolean {
+    return this.providerFor(undefined).isConfigured();
+  }
+
+  complete(prompt: string, options: AICompletionOptions = {}): Promise<string> {
+    const provider = this.providerFor(options.scene);
+    const forwardedOptions: AICompletionOptions = { ...options };
+    if (forwardedOptions.scene) delete forwardedOptions.scene;
+    return provider.complete(prompt, forwardedOptions);
+  }
+
+  private providerFor(scene?: AIProviderScene): AIProvider {
+    const sceneKey = scene ? this.sceneProviders[scene] : undefined;
+    if (sceneKey && this.providers[sceneKey]) return this.providers[sceneKey]!;
+    return this.providers[this.defaultProviderKey] ?? new NullAIProvider();
+  }
 }
 
 /**
@@ -85,15 +221,27 @@ export class NullAIProvider implements AIProvider {
 export function createAIProvider(config: {
   activeProvider: string;
   enabled: boolean;
+  sceneProviders?: Partial<Record<AIProviderScene, string>>;
   providers: { [key: string]: { baseUrl: string; model: string; apiKey?: string; apiKeyEnvVar?: string } };
 }): AIProvider {
   if (!config.enabled) return new NullAIProvider();
-  const providerCfg = config.providers[config.activeProvider];
-  if (!providerCfg) return new NullAIProvider();
-  const apiKey = (providerCfg.apiKey && providerCfg.apiKey !== '**masked**')
-    ? providerCfg.apiKey
-    : (providerCfg.apiKeyEnvVar ? (process.env[providerCfg.apiKeyEnvVar] ?? '') : '');
-  return new OpenAICompatibleProvider(providerCfg.baseUrl, apiKey, providerCfg.model);
+  const providerEntries = Object.entries(config.providers ?? {});
+  if (providerEntries.length === 0) return new NullAIProvider();
+
+  const providers: Record<string, AIProvider> = {};
+  for (const [key, cfg] of providerEntries) {
+    const apiKey = (cfg.apiKey && cfg.apiKey !== '**masked**')
+      ? cfg.apiKey
+      : (cfg.apiKeyEnvVar ? (process.env[cfg.apiKeyEnvVar] ?? '') : '');
+    providers[key] = new OpenAICompatibleProvider(cfg.baseUrl, apiKey, cfg.model);
+  }
+
+  const defaultKey = providers[config.activeProvider]
+    ? config.activeProvider
+    : providerEntries[0]?.[0];
+  if (!defaultKey) return new NullAIProvider();
+
+  return new RoutedAIProvider(providers, defaultKey, config.sceneProviders ?? {});
 }
 export interface AIEngine {
   getProvider(): AIProvider;
@@ -148,7 +296,13 @@ export class LocalAIEngine implements AIEngine {
     });
     log.info('analyzeFailure start', { runId: input.runId, testcaseId: input.testcaseId, model: this.provider.model });
     const t0 = Date.now();
-    const raw = await this.provider.complete(prompt);
+    const raw = await this.provider.complete(prompt, {
+      scene: 'failureAnalysis',
+      responseFormat: { type: 'json_object' },
+      temperature: 0.1,
+      maxTokens: 900,
+      retry: { maxAttempts: 2, retryOnEmpty: true },
+    });
     log.info('analyzeFailure done', { runId: input.runId, testcaseId: input.testcaseId, durationMs: Date.now() - t0, hasOutput: raw.length > 0 });
     const parsed = parseJson<{
       category?: string;
@@ -197,7 +351,12 @@ export class LocalAIEngine implements AIEngine {
     const prompt = renderTemplate(TEMPLATE_VERSIONS.findingSummary, {
       findings: JSON.stringify(input.findings),
     });
-    const raw = await this.provider.complete(prompt);
+    const raw = await this.provider.complete(prompt, {
+      scene: 'findingSummary',
+      temperature: 0.1,
+      maxTokens: 1200,
+      retry: { maxAttempts: 2, retryOnEmpty: true },
+    });
     const parsed = parseJson<FindingSummary[]>(raw, []);
     return Array.isArray(parsed) ? parsed : [];
   }
@@ -215,7 +374,13 @@ export class LocalAIEngine implements AIEngine {
     const prompt = renderTemplate(TEMPLATE_VERSIONS.testDraft, {
       context: JSON.stringify(ctx),
     });
-    const raw = await this.provider.complete(prompt);
+    const raw = await this.provider.complete(prompt, {
+      scene: 'testDraft',
+      responseFormat: { type: 'json_object' },
+      temperature: 0.1,
+      maxTokens: 1200,
+      retry: { maxAttempts: 2, retryOnEmpty: true },
+    });
     const parsed = parseJson<{ title?: string; code?: string }>(raw, {});
 
     const id = randomUUID();
@@ -261,7 +426,13 @@ export class LocalAIEngine implements AIEngine {
     });
     log.info('createCodeTaskDraft start', { runId: input.runId, analysisId: input.id, model: this.provider.model });
     const t0 = Date.now();
-    const raw = await this.provider.complete(prompt);
+    const raw = await this.provider.complete(prompt, {
+      scene: 'codeTaskDraft',
+      responseFormat: { type: 'json_object' },
+      temperature: 0.1,
+      maxTokens: 900,
+      retry: { maxAttempts: 2, retryOnEmpty: true },
+    });
     log.info('createCodeTaskDraft done', { runId: input.runId, durationMs: Date.now() - t0 });
     const parsed = parseJson<{
       goal?: string;
@@ -321,4 +492,20 @@ function isFailureContext(
   input: FailureContext | ExplorationFindingContext,
 ): input is FailureContext {
   return 'testcaseId' in input;
+}
+
+function extractChatOutput(body: ChatCompletionResponse): string {
+  const message = body.choices?.[0]?.message;
+  const toolArgs = message?.tool_calls?.[0]?.function?.arguments;
+  if (typeof toolArgs === 'string' && toolArgs.trim().length > 0) return toolArgs;
+
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => part.text ?? '')
+      .join('\n')
+      .trim();
+  }
+  return '';
 }

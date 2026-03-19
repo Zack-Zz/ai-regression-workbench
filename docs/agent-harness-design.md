@@ -141,6 +141,8 @@
 - 再结合软停止策略：`stopConditions`
 - 若 regression/hybrid 已提供失败线索，应优先覆盖失败相关页面、接口和 `focusAreas`
 - 当当前 step 未产生新的 finding，且连续达到 `stopWhenNoNewFindingsForSteps` 时可提前停止
+- `llm.decide` 调用必须使用结构化约束（JSON mode + function tool schema），并启用空响应重试
+- `explorationDecision` 与 `explorationLogin` 为独立场景，可通过 `ai.sceneProviders` 绑定不同模型
 
 ### 6.2 CodeAgent
 

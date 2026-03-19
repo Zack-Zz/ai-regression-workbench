@@ -48,6 +48,14 @@ export const DEFAULT_SETTINGS: PersonalSettings = {
   ai: {
     activeProvider: 'openai',
     enabled: true,
+    sceneProviders: {
+      explorationDecision: 'openai',
+      explorationLogin: 'openai',
+      failureAnalysis: 'openai',
+      findingSummary: 'openai',
+      testDraft: 'openai',
+      codeTaskDraft: 'openai',
+    },
     providers: {
       openai: {
         baseUrl: 'https://api.openai.com/v1',

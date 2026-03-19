@@ -124,8 +124,7 @@ export function buildRouter(
   });
 
   router.get('/runs/:runId/prompt-samples', (_req, res, params) => {
-    const filePath = runSvc.getRunFilePath(params['runId'] ?? '', 'prompt-samples.jsonl');
-    serveNdjson(res, filePath);
+    ok(res, runSvc.getRunPromptSamples(params['runId'] ?? ''));
   });
 
   router.post('/runs/:runId/pause', (_req, res, params) => {

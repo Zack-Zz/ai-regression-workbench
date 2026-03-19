@@ -256,7 +256,16 @@ export class PlaywrightToolProvider {
       const inputs = Array.from(doc.querySelectorAll('input:not([type=hidden]):not([type=submit])')).slice(0, 20).map((el: any, i: number) => {
         const id = el.getAttribute('id') as string | null;
         const name = el.getAttribute('name') as string | null;
-        return { type: (el.getAttribute('type') ?? 'text') as string, name: name ?? undefined, id: id ?? undefined, placeholder: (el.getAttribute('placeholder') as string | null) ?? undefined, label: getLabelText(el) || undefined, selector: id ? `#${id}` : name ? `input[name="${name}"]` : `input:nth-of-type(${i + 1})` };
+        const value = ((el.value ?? '') as string).trim();
+        return {
+          type: (el.getAttribute('type') ?? 'text') as string,
+          name: name ?? undefined,
+          id: id ?? undefined,
+          placeholder: (el.getAttribute('placeholder') as string | null) ?? undefined,
+          label: getLabelText(el) || undefined,
+          selector: id ? `#${id}` : name ? `input[name="${name}"]` : `input:nth-of-type(${i + 1})`,
+          filled: value.length > 0,
+        };
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const buttons = Array.from(doc.querySelectorAll('button, input[type=submit]')).slice(0, 10).map((el: any, i: number) => {
@@ -419,7 +428,7 @@ export class PlaywrightToolProvider {
 export interface DomSnapshot {
   url: string;
   title: string;
-  inputs: Array<{ type: string; name?: string; id?: string; placeholder?: string; label?: string; selector: string }>;
+  inputs: Array<{ type: string; name?: string; id?: string; placeholder?: string; label?: string; selector: string; filled?: boolean }>;
   buttons: Array<{ text: string; type?: string; selector: string }>;
   forms: Array<{ action?: string; method?: string; inputCount: number }>;
 }

@@ -139,6 +139,53 @@ export function SettingsPage(): React.ReactElement {
           </select>
         </div>
 
+        <div style={{ border: '1px solid #eee', borderRadius: 6, padding: '0.75rem', marginTop: '0.5rem' }}>
+          <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#555' }}>{t('settings.ai.sceneRouting')}</div>
+          {([
+            ['explorationDecision', t('settings.ai.scene.explorationDecision')],
+            ['explorationLogin', t('settings.ai.scene.explorationLogin')],
+            ['failureAnalysis', t('settings.ai.scene.failureAnalysis')],
+            ['findingSummary', t('settings.ai.scene.findingSummary')],
+            ['testDraft', t('settings.ai.scene.testDraft')],
+            ['codeTaskDraft', t('settings.ai.scene.codeTaskDraft')],
+          ] as Array<[string, string]>).map(([sceneKey, sceneLabel]) => {
+            const patchedAi = patch.ai as { sceneProviders?: Record<string, string> } | undefined;
+            const patchedSceneProviders = patchedAi?.sceneProviders ?? {};
+            const current = patchedSceneProviders[sceneKey]
+              ?? (v.ai.sceneProviders as Record<string, string> | undefined)?.[sceneKey]
+              ?? v.ai.activeProvider;
+            return (
+              <div key={sceneKey} style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9em', marginBottom: '0.35rem' }}>
+                <div style={{ minWidth: 220, fontWeight: 500 }}>{sceneLabel}</div>
+                <select
+                  value={String(current)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPatch((p) => {
+                      const prevAi = (p.ai as { sceneProviders?: Record<string, string> } | undefined) ?? {};
+                      return {
+                        ...p,
+                        ai: {
+                          ...(p.ai ?? {}),
+                          sceneProviders: {
+                            ...(prevAi.sceneProviders ?? {}),
+                            [sceneKey]: value,
+                          },
+                        },
+                      } as DeepPartial<PersonalSettings>;
+                    });
+                  }}
+                  style={{ flex: 1, padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }}
+                >
+                  {Object.keys((v.ai?.providers ?? {})).map(k => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+
         {/* Per-provider config */}
         {Object.entries(v.ai?.providers ?? {}).map(([providerKey, providerCfg]) => {
           const patchedProviders = (patch.ai as { providers?: Record<string, unknown> } | undefined)?.providers ?? {};

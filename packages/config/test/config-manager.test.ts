@@ -30,8 +30,9 @@ describe('ConfigManager.getSettings', () => {
   it('default values are isolated from DEFAULT_SETTINGS', async () => {
     const cm = new ConfigManager(configPath());
     const snap = await cm.getSettings();
-    snap.values.ai.model = 'mutated';
-    expect(DEFAULT_SETTINGS.ai.model).not.toBe('mutated');
+    const active = snap.values.ai.activeProvider;
+    snap.values.ai.providers[active]!.model = 'mutated';
+    expect(DEFAULT_SETTINGS.ai.providers[DEFAULT_SETTINGS.ai.activeProvider]!.model).not.toBe('mutated');
   });
 });
 
@@ -138,8 +139,9 @@ describe('loadSettingsFromFile isolation', () => {
   it('mutating returned value does not pollute DEFAULT_SETTINGS', async () => {
     const { loadSettingsFromFile } = await import('../src/loader.js');
     const result = loadSettingsFromFile(join(dir, 'nonexistent.yaml'));
-    result.ai.model = 'polluted';
-    expect(DEFAULT_SETTINGS.ai.model).not.toBe('polluted');
+    const active = result.ai.activeProvider;
+    result.ai.providers[active]!.model = 'polluted';
+    expect(DEFAULT_SETTINGS.ai.providers[DEFAULT_SETTINGS.ai.activeProvider]!.model).not.toBe('polluted');
   });
 });
 

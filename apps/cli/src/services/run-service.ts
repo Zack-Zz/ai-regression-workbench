@@ -1,6 +1,7 @@
 import type { Db, RunRow } from '@zarb/storage';
-import { RunRepository, RunEventRepository, TestResultRepository, FindingRepository, ExecutionReportRepository, CodeTaskDraftRepository, CodeTaskRepository, SelectorCacheRepository, ProjectRepository, SiteRepository, LocalRepoRepository, SiteCredentialRepository, FlowStepRepository, UiActionRepository, ApiCallRepository } from '@zarb/storage';
+import { RunRepository, RunEventRepository, TestResultRepository, FindingRepository, ExecutionReportRepository, CodeTaskDraftRepository, CodeTaskRepository, SelectorCacheRepository, ProjectRepository, SiteRepository, LocalRepoRepository, SiteCredentialRepository, FlowStepRepository, UiActionRepository, ApiCallRepository, AgentSessionRepository, agentPromptSamplesPath } from '@zarb/storage';
 import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import type {
   RunSummary, RunDetail, RunSummaryPage, RunEventPage, ActionResult,
   StartRunInput, StartRunResult, ListRunsQuery, RunEventsQuery, RunStatus,
@@ -102,6 +103,29 @@ function getOrderedStages(runMode: 'regression' | 'exploration' | 'hybrid'): Run
   ];
 }
 
+function inferFailedStage(row: RunRow, orderedStages: RunStatus[]): RunStatus {
+  if (row.run_mode === 'exploration') {
+    if (row.summary === 'EXPLORATION_PROVIDER_NOT_CONFIGURED') return 'PLANNING_EXPLORATION';
+    return 'RUNNING_EXPLORATION';
+  }
+  if (row.run_mode === 'hybrid') {
+    if (row.summary === 'EXPLORATION_PROVIDER_NOT_CONFIGURED') return 'PLANNING_EXPLORATION';
+    if (row.summary?.startsWith('LOGIN_') || row.summary?.startsWith('EXPLORATION_') || row.summary === 'AUTH_RETRY_EXCEEDED') {
+      return 'RUNNING_EXPLORATION';
+    }
+  }
+  if (orderedStages.includes('RUNNING_TESTS')) return 'RUNNING_TESTS';
+  return orderedStages[0] ?? 'COMPLETED';
+}
+
+function resolveCurrentStageForReport(row: RunRow, orderedStages: RunStatus[]): RunStatus {
+  const candidate = (row.current_stage ?? row.status) as RunStatus;
+  if (orderedStages.includes(candidate)) return candidate;
+  if (row.status === 'COMPLETED') return 'COMPLETED';
+  if (row.status === 'FAILED' || row.status === 'CANCELLED') return inferFailedStage(row, orderedStages);
+  return orderedStages[0] ?? 'COMPLETED';
+}
+
 function stageMessage(stage: RunStatus, context: {
   total: number;
   failed: number;
@@ -145,6 +169,19 @@ function summarizeFlowDuration(startedAt?: string | null, endedAt?: string | nul
   return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
 }
 
+interface PromptSampleEntry {
+  sessionId: string;
+  stepIndex: number;
+  timestamp: string;
+  phase: string;
+  templateVersion: string;
+  prompt: string;
+  response?: string;
+  promptContextSummary?: string;
+  sampledBy: 'first-step' | 'interval' | 'forced';
+  metadata?: Record<string, unknown>;
+}
+
 export class RunService {
   private readonly runs: RunRepository;
   private readonly events: RunEventRepository;
@@ -157,6 +194,7 @@ export class RunService {
   private readonly flowSteps: FlowStepRepository;
   private readonly uiActions: UiActionRepository;
   private readonly apiCalls: ApiCallRepository;
+  private readonly agentSessions: AgentSessionRepository;
   private readonly projects: ProjectRepository;
   private readonly sites: SiteRepository;
   private readonly credentials: SiteCredentialRepository;
@@ -177,6 +215,7 @@ export class RunService {
     this.flowSteps = new FlowStepRepository(db);
     this.uiActions = new UiActionRepository(db);
     this.apiCalls = new ApiCallRepository(db);
+    this.agentSessions = new AgentSessionRepository(db);
     this.projects = new ProjectRepository(db);
     this.sites = new SiteRepository(db);
     this.credentials = new SiteCredentialRepository(db);
@@ -294,7 +333,7 @@ export class RunService {
         const endedAt = new Date().toISOString();
         if (runResult.startupFailure) {
           log.error('playwright startup failure', { runId, error: runResult.startupError });
-          this.runs.update(runId, { status: 'FAILED', currentStage: 'FAILED', endedAt, updatedAt: endedAt });
+          this.runs.update(runId, { status: 'FAILED', currentStage: 'RUNNING_TESTS', endedAt, updatedAt: endedAt });
           this.emitRun(runId);
         } else {
           log.info('playwright execution completed', { runId, total: runResult.total, passed: runResult.passed, failed: runResult.failed, skipped: runResult.skipped });
@@ -377,7 +416,7 @@ export class RunService {
       if (!providerAdapter.isConfigured()) {
         const nowErr = new Date().toISOString();
         this.runs.update(runId, {
-          status: 'FAILED', currentStage: 'FAILED', endedAt: nowErr, updatedAt: nowErr,
+          status: 'FAILED', currentStage: 'PLANNING_EXPLORATION', endedAt: nowErr, updatedAt: nowErr,
           summary: 'EXPLORATION_PROVIDER_NOT_CONFIGURED',
         });
         this.emitRun(runId);
@@ -414,7 +453,7 @@ export class RunService {
           const nowErr = new Date().toISOString();
           this.runs.update(runId, {
             status: 'FAILED',
-            currentStage: 'FAILED',
+            currentStage: 'RUNNING_EXPLORATION',
             endedAt: nowErr,
             updatedAt: nowErr,
             summary: summaryCode,
@@ -547,11 +586,60 @@ export class RunService {
     this.tasks.update(taskId, { status, updatedAt: now });
   }
 
-  getRunFilePath(runId: string, filename: 'steps.ndjson' | 'network.jsonl' | 'prompt-samples.jsonl'): string {
+  getRunFilePath(runId: string, filename: 'steps.ndjson' | 'network.jsonl'): string {
     // We don't know projectId here without a DB lookup, so use the run row
     const row = this.runs.findById(runId);
     const projectId = row?.project_id ?? 'project-default';
     return join(this.opts.dataRoot, '..', 'projects', projectId, 'runs', runId, filename);
+  }
+
+  getRunPromptSamples(runId: string): PromptSampleEntry[] {
+    const row = this.runs.findById(runId);
+    if (!row) return [];
+
+    const projectId = row.project_id ?? 'project-default';
+    const projectDataRoot = join(this.opts.dataRoot, '..', 'projects', projectId);
+    const sessions = this.agentSessions.findByRun(runId);
+    const result: PromptSampleEntry[] = [];
+
+    for (const session of sessions) {
+      const absPath = join(projectDataRoot, agentPromptSamplesPath(session.session_id));
+      if (!existsSync(absPath)) continue;
+      const lines = readFileSync(absPath, 'utf8').split('\n').filter(Boolean);
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line) as Partial<PromptSampleEntry>;
+          if (
+            typeof parsed.stepIndex !== 'number' ||
+            typeof parsed.timestamp !== 'string' ||
+            typeof parsed.phase !== 'string' ||
+            typeof parsed.templateVersion !== 'string' ||
+            typeof parsed.prompt !== 'string'
+          ) {
+            continue;
+          }
+          const sampledBy = parsed.sampledBy === 'first-step' || parsed.sampledBy === 'interval' || parsed.sampledBy === 'forced'
+            ? parsed.sampledBy
+            : 'forced';
+          result.push({
+            sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId ? parsed.sessionId : session.session_id,
+            stepIndex: parsed.stepIndex,
+            timestamp: parsed.timestamp,
+            phase: parsed.phase,
+            templateVersion: parsed.templateVersion,
+            prompt: parsed.prompt,
+            ...(typeof parsed.response === 'string' ? { response: parsed.response } : {}),
+            ...(typeof parsed.promptContextSummary === 'string' ? { promptContextSummary: parsed.promptContextSummary } : {}),
+            sampledBy,
+            ...(parsed.metadata && typeof parsed.metadata === 'object' ? { metadata: parsed.metadata as Record<string, unknown> } : {}),
+          });
+        } catch {
+          // Ignore malformed jsonl entries; keep route resilient.
+        }
+      }
+    }
+
+    return result.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   }
 
   listRuns(query: ListRunsQuery = {}): RunSummaryPage {
@@ -627,7 +715,7 @@ export class RunService {
     const reviewPendingTasks = codeTasks.filter((task) => task.status === 'SUCCEEDED').length;
     const commitPendingTasks = codeTasks.filter((task) => task.status === 'COMMIT_PENDING').length;
     const orderedStages = getOrderedStages(row.run_mode);
-    const currentStage = row.current_stage ?? row.status;
+    const currentStage = resolveCurrentStageForReport(row, orderedStages);
     const currentStageIndex = orderedStages.indexOf(currentStage as RunStatus);
     const buildStageContext = (stage: RunStatus) => ({
       total: row.total ?? 0,
@@ -672,7 +760,6 @@ export class RunService {
       ...(failedResults.length > 0 ? [`存在 ${String(failedResults.length)} 个失败用例`] : []),
       ...(criticalFindings > 0 ? [`存在 ${String(criticalFindings)} 个 critical findings`] : []),
       ...(highFindings > 0 ? [`存在 ${String(highFindings)} 个 high findings`] : []),
-      ...(row.status === 'FAILED' && row.summary ? [row.summary] : []),
     ]));
     const recommendations = Array.from(new Set([
       ...(failedResults.length > 0 ? ['优先查看失败报告，并核对 trace/log/network 产物。'] : []),
@@ -778,7 +865,7 @@ export class RunService {
       runId,
       status: row.status,
       runMode: row.run_mode,
-      ...(row.current_stage ? { currentStage: row.current_stage } : {}),
+      ...(currentStage ? { currentStage } : {}),
       startedAt: row.started_at,
       ...(row.ended_at ? { endedAt: row.ended_at } : {}),
       ...(row.ended_at ? { durationMs: Math.max(0, new Date(row.ended_at).getTime() - new Date(row.started_at).getTime()) } : {}),

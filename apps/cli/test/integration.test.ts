@@ -7,8 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdirSync, rmSync, readdirSync, readFileSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository, ProjectRepository, LocalRepoRepository, FindingRepository, DiagnosticFetchRepository } from '@zarb/storage';
+import { mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository, ProjectRepository, LocalRepoRepository, FindingRepository, DiagnosticFetchRepository, AgentSessionRepository, agentPromptSamplesPath } from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -240,7 +240,7 @@ describe('Run lifecycle flow', () => {
     const detail = svc.getRun(runId);
     expect(detail?.summary.status).toBe('FAILED');
     expect(detail?.summary.summary).toBe('LOGIN_FAILED');
-    expect(detail?.summary.currentStage).toBe('FAILED');
+    expect(detail?.summary.currentStage).toBe('RUNNING_EXPLORATION');
   });
 
   it('start run rejects project-scoped execution without explicit repo selection', async () => {
@@ -353,6 +353,101 @@ describe('Run lifecycle flow', () => {
     expect(report?.warnings).toContain('存在 1 个 high findings');
     expect(report?.recommendations).toContain('优先查看失败报告，并核对 trace/log/network 产物。');
     expect(report?.recommendations).toContain('检查降级步骤涉及的外部依赖、凭据或诊断服务。');
+  });
+
+  it('execution report normalizes terminal currentStage and avoids duplicating fatal reason in warnings', () => {
+    new RunRepository(db).create({
+      runId: 'r-explore-failed',
+      runMode: 'exploration',
+      scopeType: 'exploration',
+      workspacePath: '/ws',
+      startedAt: new Date().toISOString(),
+    });
+    new RunRepository(db).update('r-explore-failed', {
+      status: 'FAILED',
+      currentStage: 'FAILED',
+      summary: 'LOGIN_AI_FAILED',
+      endedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const report = runSvc.getExecutionReport('r-explore-failed');
+    expect(report).not.toBeNull();
+    expect(report?.currentStage).toBe('RUNNING_EXPLORATION');
+    expect(report?.stageResults.find((item) => item.stage === 'RUNNING_EXPLORATION')?.status).toBe('failed');
+    expect(report?.warnings ?? []).not.toContain('LOGIN_AI_FAILED');
+    expect(report?.fatalReason).toBe('LOGIN_AI_FAILED');
+  });
+
+  it('run prompt samples are loaded from agent session traces', () => {
+    const projectId = 'project-prompt';
+    const dataRoot = join(dir, '.zarb', 'data');
+    const svc = new RunService(db, { dataRoot });
+    const runId = 'r-prompt-samples';
+    const now = new Date().toISOString();
+
+    new RunRepository(db).create({
+      runId,
+      runMode: 'exploration',
+      scopeType: 'exploration',
+      workspacePath: '/ws',
+      projectId,
+      startedAt: now,
+    });
+
+    const sessions = new AgentSessionRepository(db);
+    sessions.save({
+      sessionId: 'session-a',
+      runId,
+      kind: 'exploration',
+      status: 'completed',
+      contextRefsJson: '{}',
+      startedAt: now,
+      updatedAt: now,
+      endedAt: now,
+    });
+    sessions.save({
+      sessionId: 'session-b',
+      runId,
+      kind: 'exploration',
+      status: 'completed',
+      contextRefsJson: '{}',
+      startedAt: now,
+      updatedAt: now,
+      endedAt: now,
+    });
+
+    const sessionADir = join(dataRoot, '..', 'projects', projectId, 'agent-traces', 'session-a');
+    const sessionBDir = join(dataRoot, '..', 'projects', projectId, 'agent-traces', 'session-b');
+    mkdirSync(sessionADir, { recursive: true });
+    mkdirSync(sessionBDir, { recursive: true });
+
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentPromptSamplesPath('session-a')), `${JSON.stringify({
+      sessionId: 'session-a',
+      stepIndex: 3,
+      timestamp: '2026-03-19T10:00:05.000Z',
+      phase: 'llm.decide',
+      templateVersion: 'exploration-login/default@v1',
+      prompt: 'p1',
+      response: '{"action":"fill"}',
+      sampledBy: 'interval',
+    })}\n`, 'utf8');
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentPromptSamplesPath('session-b')), `${JSON.stringify({
+      sessionId: 'session-b',
+      stepIndex: 1,
+      timestamp: '2026-03-19T10:00:01.000Z',
+      phase: 'llm.decide',
+      templateVersion: 'exploration-login/default@v1',
+      prompt: 'p0',
+      sampledBy: 'first-step',
+    })}\n`, 'utf8');
+
+    const samples = svc.getRunPromptSamples(runId);
+    expect(samples).toHaveLength(2);
+    expect(samples[0]?.sessionId).toBe('session-b');
+    expect(samples[0]?.prompt).toBe('p0');
+    expect(samples[1]?.sessionId).toBe('session-a');
+    expect(samples[1]?.response).toBe('{"action":"fill"}');
   });
 });
 

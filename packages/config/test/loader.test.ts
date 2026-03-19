@@ -20,7 +20,8 @@ describe('loadSettingsFromFile', () => {
   it('returns defaults when file does not exist', () => {
     const result = loadSettingsFromFile(join(dir, 'nonexistent.yaml'));
     expect(result.report.port).toBe(DEFAULT_SETTINGS.report.port);
-    expect(result.ai.model).toBe(DEFAULT_SETTINGS.ai.model);
+    expect(result.ai.activeProvider).toBe(DEFAULT_SETTINGS.ai.activeProvider);
+    expect(result.ai.providers[result.ai.activeProvider]?.model).toBe(DEFAULT_SETTINGS.ai.providers[DEFAULT_SETTINGS.ai.activeProvider]?.model);
   });
   it('merges user values over defaults', () => {
     const file = join(dir, 'config.yaml');
@@ -28,7 +29,7 @@ describe('loadSettingsFromFile', () => {
     const result = loadSettingsFromFile(file);
     expect(result.report.port).toBe(4000);
     // other defaults preserved
-    expect(result.ai.model).toBe(DEFAULT_SETTINGS.ai.model);
+    expect(result.ai.providers[result.ai.activeProvider]?.model).toBe(DEFAULT_SETTINGS.ai.providers[DEFAULT_SETTINGS.ai.activeProvider]?.model);
   });
 
   it('deep-merges nested objects', () => {

@@ -59,6 +59,7 @@ export class ConfigManager implements SettingsService {
   validateSettings(input: UpdateSettingsInput): Promise<SettingsValidationResult> {
     const errors: string[] = [];
     const patch = input.patch;
+    const merged = this.mergeIntoSettings(this.snapshot.values, patch);
 
     if (patch.report?.port !== undefined) {
       if (!Number.isInteger(patch.report.port) || patch.report.port < 1 || patch.report.port > 65535) {
@@ -70,6 +71,16 @@ export class ConfigManager implements SettingsService {
     }
     if (patch.exploration?.maxPages !== undefined && patch.exploration.maxPages < 1) {
       errors.push('exploration.maxPages must be >= 1');
+    }
+    if (merged.ai.activeProvider && !merged.ai.providers[merged.ai.activeProvider]) {
+      errors.push(`ai.activeProvider '${merged.ai.activeProvider}' not found in ai.providers`);
+    }
+    const sceneProviders = merged.ai.sceneProviders ?? {};
+    for (const [scene, providerKey] of Object.entries(sceneProviders)) {
+      if (!providerKey) continue;
+      if (!merged.ai.providers[providerKey]) {
+        errors.push(`ai.sceneProviders.${scene} '${providerKey}' not found in ai.providers`);
+      }
     }
 
     return Promise.resolve({ valid: errors.length === 0, errors });

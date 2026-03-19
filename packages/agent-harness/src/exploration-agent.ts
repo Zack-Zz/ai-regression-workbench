@@ -13,10 +13,77 @@ import { HARNESS_TEMPLATE_VERSIONS, renderHarnessTemplate } from './prompt-loade
 const log = appLogger.child('ExplorationAgent');
 
 export interface AIProvider {
-  complete(prompt: string): Promise<string>;
+  complete(prompt: string, options?: AICompletionOptions): Promise<string>;
   isConfigured(): boolean;
   readonly model?: string;
 }
+
+interface AICompletionOptions {
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  responseFormat?: { type: 'json_object' };
+  tools?: Array<{
+    type: 'function';
+    function: {
+      name: string;
+      description?: string;
+      parameters: Record<string, unknown>;
+      strict?: boolean;
+    };
+  }>;
+  toolChoice?: 'auto' | 'required' | { type: 'function'; function: { name: string } };
+  retry?: {
+    maxAttempts?: number;
+    retryOnEmpty?: boolean;
+  };
+  scene?: 'explorationDecision' | 'explorationLogin';
+}
+
+const EXPLORATION_DECIDE_SYSTEM_PROMPT = 'You are an exploration decision agent. Return only structured JSON for the next action.';
+const LOGIN_DECIDE_SYSTEM_PROMPT = 'You are a login decision agent. Return only structured JSON for the next login action.';
+
+const EXPLORATION_DECIDE_TOOL: NonNullable<AICompletionOptions['tools']>[number] = {
+  type: 'function',
+  function: {
+    name: 'decide_exploration_action',
+    description: 'Choose the next exploration action.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['click', 'fill', 'navigate', 'done'] },
+        selector: { type: 'string' },
+        value: { type: 'string' },
+        targetUrl: { type: 'string' },
+        reasoning: { type: 'string' },
+      },
+      required: ['action', 'reasoning'],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+};
+
+const LOGIN_DECIDE_TOOL: NonNullable<AICompletionOptions['tools']>[number] = {
+  type: 'function',
+  function: {
+    name: 'decide_login_action',
+    description: 'Choose the next login action.',
+    parameters: {
+      type: 'object',
+      properties: {
+        isLoginPage: { type: 'boolean' },
+        action: { type: 'string', enum: ['fill', 'click', 'done'] },
+        selector: { type: 'string' },
+        value: { type: 'string' },
+        reasoning: { type: 'string' },
+      },
+      required: ['isLoginPage', 'action', 'reasoning'],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+};
 
 export interface PageProbe {
   url: string;
@@ -322,10 +389,20 @@ export class ExplorationAgent {
           if (visitedUrls.has(url)) continue;
 
           const navStart = Date.now();
+          const navActionId = `pw-nav-${String(stepIndex)}-${String(navStart)}`;
           if (activePwProvider) {
+            stepLogger.log({
+              component: 'ExplorationAgent',
+              action: 'navigate',
+              status: 'pending',
+              detail: url,
+              toolInput: { url },
+              actionId: navActionId,
+              tool: 'playwright',
+            });
             const result = await registry.call<PageProbe>('playwright.navigate', { url }, { sessionId: session.session_id, stepIndex });
             if (!result.ok) {
-              stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, tool: 'playwright' });
+              stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'error', durationMs: Date.now() - navStart, toolInput: { url }, actionId: navActionId, toolOutput: { error: result.error }, tool: 'playwright' });
               continue;
             }
             pageState = result.value!;
@@ -338,7 +415,7 @@ export class ExplorationAgent {
 
           visitedUrls.add(pageState.url);
           const navDuration = Date.now() - navStart;
-          stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, toolOutput: pageState, pageState: buildPageSnapshot(pageState), tool: activePwProvider ? 'playwright' : 'fetch' });
+          stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', detail: url, status: 'ok', durationMs: navDuration, toolInput: { url }, toolOutput: pageState, ...(activePwProvider ? { actionId: navActionId } : {}), pageState: buildPageSnapshot(pageState), tool: activePwProvider ? 'playwright' : 'fetch' });
           pushRecent(recentSteps, `navigate ${pageState.url}`);
           pushRecent(recentToolResults, `navigate => ${pageState.title || pageState.url} forms=${String(pageState.formCount)} links=${String(pageState.linkCount)}`);
           if (activePwProvider) {
@@ -433,45 +510,88 @@ export class ExplorationAgent {
           log.warn('LLM error during exploration, stopping early', { runId, llmError });
           break;
         }
-        if (nextStep.action !== 'done') {
-          stepLogger.log({
-            component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
-            detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
-            toolInput: { currentUrl: pageState.url, formCount: pageState.formCount, linkCount: pageState.linkCount },
-            toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl, selector: nextStep.selector },
-            reason: nextStep.reasoning,
-            actionId: llmActionId,
-            promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
-            promptContextSummary,
-            ...(this.provider.model ? { model: this.provider.model } : {}),
-          });
-        }
+        stepLogger.log({
+          component: 'ExplorationAgent', action: 'llm.decide', status: 'ok', durationMs: Date.now() - llmStart,
+          detail: `action=${nextStep.action}${nextStep.targetUrl ? ` url=${nextStep.targetUrl}` : ''}`,
+          toolInput: { currentUrl: pageState.url, formCount: pageState.formCount, linkCount: pageState.linkCount },
+          toolOutput: { action: nextStep.action, targetUrl: nextStep.targetUrl, selector: nextStep.selector },
+          reason: nextStep.reasoning,
+          actionId: llmActionId,
+          promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationDecision,
+          promptContextSummary,
+          ...(this.provider.model ? { model: this.provider.model } : {}),
+        });
         if (nextStep.action === 'done') break;
         if (nextStep.action === 'navigate' && nextStep.targetUrl) {
           if (!visitedUrls.has(nextStep.targetUrl)) pendingUrls.unshift(nextStep.targetUrl);
           currentPage = undefined;
         } else if ((nextStep.action === 'click' || nextStep.action === 'fill') && activePwProvider && nextStep.selector) {
           const actionStart = Date.now();
+          const actionId = `pw-${nextStep.action}-${String(stepIndex)}-${String(actionStart)}`;
           const toolName = nextStep.action === 'click' ? 'playwright.click' : 'playwright.fill';
           const toolInput = nextStep.action === 'click'
             ? { selector: nextStep.selector }
             : { selector: nextStep.selector, value: nextStep.value ?? '' };
+          stepLogger.log({
+            component: 'ExplorationAgent',
+            action: nextStep.action,
+            detail: nextStep.selector,
+            status: 'pending',
+            toolInput,
+            actionId,
+            ...(nextStep.reasoning ? { reason: nextStep.reasoning } : {}),
+            tool: 'playwright',
+          });
           const actionResult = await registry.call<Record<string, unknown>>(toolName, toolInput, { sessionId: session.session_id, stepIndex });
           if (!actionResult.ok) {
-            stepLogger.log({ component: 'ExplorationAgent', action: nextStep.action, detail: nextStep.selector, status: 'error', durationMs: Date.now() - actionStart, toolInput, toolOutput: { error: actionResult.error }, reason: nextStep.reasoning, tool: 'playwright' });
+            stepLogger.log({ component: 'ExplorationAgent', action: nextStep.action, detail: nextStep.selector, status: 'error', durationMs: Date.now() - actionStart, toolInput, toolOutput: { error: actionResult.error }, reason: nextStep.reasoning, actionId, tool: 'playwright' });
             currentPage = undefined;
             break;
           }
           pushRecent(recentSteps, `${nextStep.action} ${nextStep.selector}`);
+          const stateStart = Date.now();
+          const stateActionId = `pw-get-state-${String(stepIndex)}-${String(stateStart)}`;
+          stepLogger.log({
+            component: 'ExplorationAgent',
+            action: 'state.capture',
+            status: 'pending',
+            detail: 'playwright.getState',
+            toolInput: {},
+            actionId: stateActionId,
+            tool: 'playwright',
+          });
           const stateResult = await registry.call<PageProbe>('playwright.getState', {}, { sessionId: session.session_id, stepIndex });
           if (!stateResult.ok) {
             currentPage = undefined;
             pushRecent(recentToolResults, `${nextStep.action} ${nextStep.selector} => state unavailable`);
+            stepLogger.log({
+              component: 'ExplorationAgent',
+              action: 'state.capture',
+              status: 'error',
+              detail: 'playwright.getState',
+              durationMs: Date.now() - stateStart,
+              toolInput: {},
+              toolOutput: { error: stateResult.error },
+              actionId: stateActionId,
+              tool: 'playwright',
+            });
           } else {
             currentPage = stateResult.value!;
             if (!visitedUrls.has(currentPage.url) && visitedUrls.size < maxPages) visitedUrls.add(currentPage.url);
             pushRecent(recentToolResults, `${nextStep.action} ${nextStep.selector} => ${currentPage.title || currentPage.url}`);
             for (const highlight of activePwProvider.getRecentNetworkHighlights(3)) pushRecent(recentNetworkHighlights, highlight, 6);
+            stepLogger.log({
+              component: 'ExplorationAgent',
+              action: 'state.capture',
+              status: 'ok',
+              detail: currentPage.url,
+              durationMs: Date.now() - stateStart,
+              toolInput: {},
+              toolOutput: currentPage,
+              pageState: buildPageSnapshot(currentPage),
+              actionId: stateActionId,
+              tool: 'playwright',
+            });
           }
           stepLogger.log({
             component: 'ExplorationAgent',
@@ -483,6 +603,7 @@ export class ExplorationAgent {
             toolOutput: actionResult.value,
             ...(currentPage ? { pageState: buildPageSnapshot(currentPage) } : {}),
             ...(nextStep.reasoning ? { reason: nextStep.reasoning } : {}),
+            actionId,
             tool: 'playwright',
           });
         } else {
@@ -605,7 +726,16 @@ export class ExplorationAgent {
       ...(domSnapshot ? { domSnapshot } : {}),
     });
     try {
-      raw = await this.provider.complete(prompt);
+      raw = await this.provider.complete(prompt, {
+        scene: 'explorationDecision',
+        systemPrompt: EXPLORATION_DECIDE_SYSTEM_PROMPT,
+        responseFormat: { type: 'json_object' },
+        tools: [EXPLORATION_DECIDE_TOOL],
+        toolChoice: 'required',
+        temperature: 0,
+        maxTokens: 360,
+        retry: { maxAttempts: 2, retryOnEmpty: true },
+      });
     } catch (e) {
       this.sessionManager.appendPromptSample(sessionId, {
         sessionId,
@@ -708,17 +838,25 @@ export class ExplorationAgent {
     if (!pw) return 'LOGIN_AI_FAILED';
 
     const MAX_LOGIN_STEPS = 10;
+    const MAX_SAME_ACTION_STREAK = 2;
     const loginUrl = cred.login_url ?? startUrl;
     const t0 = Date.now();
     const loginActionId = `login-ai-${String(t0)}`;
     const aiInput = { strategy: 'ai', url: loginUrl };
+    const recentLoginActions: string[] = [];
+    let lastDecisionSig = '';
+    let sameDecisionStreak = 0;
 
     stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'pending', detail: `strategy=ai url=${loginUrl}`, toolInput: aiInput, actionId: loginActionId, tool: 'playwright' });
 
+    const loginNavigateActionId = `login-nav-${String(t0)}`;
     try {
       const page = pw.getPage();
+      stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', status: 'pending', detail: loginUrl, toolInput: { url: loginUrl }, actionId: loginNavigateActionId, tool: 'playwright' });
       await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', status: 'ok', detail: loginUrl, durationMs: Date.now() - t0, toolInput: { url: loginUrl }, actionId: loginNavigateActionId, tool: 'playwright' });
     } catch (e) {
+      stepLogger.log({ component: 'ExplorationAgent', action: 'navigate', status: 'error', detail: String(e), durationMs: Date.now() - t0, toolInput: { url: loginUrl }, toolOutput: { error: String(e) }, actionId: loginNavigateActionId, tool: 'playwright' });
       stepLogger.log({ component: 'ExplorationAgent', action: 'login.start', status: 'error', detail: String(e), durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright' });
       return 'LOGIN_AI_FAILED';
     }
@@ -733,17 +871,58 @@ export class ExplorationAgent {
       }
 
       const promptContextSummary = `login url=${snapshot.url} inputs=${String(snapshot.inputs.length)} buttons=${String(snapshot.buttons.length)} forms=${String(snapshot.forms.length)}`;
+      const inputFillState = snapshot.inputs
+        .map((input) => `${input.selector}:${input.filled ? 'filled' : 'empty'}`)
+        .join(' | ') || 'none';
+      const actionHistory = recentLoginActions.join(' | ') || 'none';
       const prompt = renderHarnessTemplate(HARNESS_TEMPLATE_VERSIONS.explorationLogin, {
         currentPage: `${snapshot.url} (title: "${snapshot.title}")`,
-        inputs: JSON.stringify(snapshot.inputs.map(({ type, name, placeholder, label, selector }) => ({ type, name, placeholder, label, selector }))),
+        inputs: JSON.stringify(snapshot.inputs.map(({ type, name, placeholder, label, selector, filled }) => ({ type, name, placeholder, label, selector, filled }))),
+        inputFillState,
         buttons: JSON.stringify(snapshot.buttons.map(({ text, type, selector }) => ({ text, type, selector }))),
         forms: JSON.stringify(snapshot.forms),
+        actionHistory,
         username: cred.username ?? '',
       });
 
       let raw = '';
+      const llmStart = Date.now();
+      const llmActionId = `login-llm-${String(i)}-${String(llmStart)}`;
+      stepLogger.log({
+        component: 'ExplorationAgent',
+        action: 'llm.decide',
+        status: 'pending',
+        detail: `login step ${String(i + 1)}`,
+        toolInput: { currentUrl: snapshot.url, inputs: snapshot.inputs.length, buttons: snapshot.buttons.length, forms: snapshot.forms.length },
+        actionId: llmActionId,
+        promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+        promptContextSummary,
+        ...(this.provider.model ? { model: this.provider.model } : {}),
+      });
       try {
-        raw = await this.provider.complete(prompt);
+        raw = await this.provider.complete(prompt, {
+          scene: 'explorationLogin',
+          systemPrompt: LOGIN_DECIDE_SYSTEM_PROMPT,
+          responseFormat: { type: 'json_object' },
+          tools: [LOGIN_DECIDE_TOOL],
+          toolChoice: 'required',
+          temperature: 0,
+          maxTokens: 320,
+          retry: { maxAttempts: 2, retryOnEmpty: true },
+        });
+        stepLogger.log({
+          component: 'ExplorationAgent',
+          action: 'llm.decide',
+          status: 'ok',
+          detail: `login step ${String(i + 1)} action candidate`,
+          durationMs: Date.now() - llmStart,
+          toolInput: { currentUrl: snapshot.url, inputs: snapshot.inputs.length, buttons: snapshot.buttons.length, forms: snapshot.forms.length },
+          toolOutput: { responsePreview: raw.slice(0, 240) },
+          actionId: llmActionId,
+          promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+          promptContextSummary,
+          ...(this.provider.model ? { model: this.provider.model } : {}),
+        });
       } catch (e) {
         this.sessionManager.appendPromptSample(sessionId, {
           sessionId,
@@ -762,6 +941,19 @@ export class ExplorationAgent {
             forms: snapshot.forms.length,
           },
         }, dataRoot);
+        stepLogger.log({
+          component: 'ExplorationAgent',
+          action: 'llm.decide',
+          status: 'error',
+          detail: `LLM call failed: ${String(e)}`,
+          durationMs: Date.now() - llmStart,
+          toolInput: { currentUrl: snapshot.url, inputs: snapshot.inputs.length, buttons: snapshot.buttons.length, forms: snapshot.forms.length },
+          toolOutput: { error: String(e) },
+          actionId: llmActionId,
+          promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin,
+          promptContextSummary,
+          ...(this.provider.model ? { model: this.provider.model } : {}),
+        });
         stepLogger.log({ component: 'ExplorationAgent', action: 'login.failed', status: 'error', detail: `LLM call failed: ${String(e)}`, durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { error: String(e) }, actionId: loginActionId, tool: 'playwright', promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationLogin, promptContextSummary });
         return 'LOGIN_AI_FAILED';
       }
@@ -787,7 +979,53 @@ export class ExplorationAgent {
         }, dataRoot);
       }
 
-      const decision = parseJson<{ isLoginPage?: boolean; action?: string; selector?: string; value?: string; reasoning?: string }>(raw, {});
+      let decision = parseJson<{ isLoginPage?: boolean; action?: string; selector?: string; value?: string; reasoning?: string }>(raw, {});
+
+      const decisionSig = `${decision.action ?? 'unknown'}::${decision.selector ?? ''}::${decision.value ?? ''}`;
+      if (decisionSig === lastDecisionSig) sameDecisionStreak++;
+      else sameDecisionStreak = 0;
+      lastDecisionSig = decisionSig;
+
+      if (sameDecisionStreak >= MAX_SAME_ACTION_STREAK) {
+        const passwordInput = snapshot.inputs.find((input) => input.type === 'password');
+        if (passwordInput && decision.selector !== passwordInput.selector) {
+          stepLogger.log({
+            component: 'ExplorationAgent',
+            action: 'login.retry',
+            status: 'warn',
+            detail: `LLM repeated action, forcing password fill selector=${passwordInput.selector}`,
+            toolInput: { repeatedAction: decisionSig, streak: sameDecisionStreak + 1 },
+            toolOutput: { forcedAction: 'fill', selector: passwordInput.selector, value: '__PASSWORD__' },
+            tool: 'playwright',
+          });
+          decision = {
+            ...decision,
+            action: 'fill',
+            selector: passwordInput.selector,
+            value: '__PASSWORD__',
+            reasoning: decision.reasoning ?? 'fallback: avoid repeated username fill',
+          };
+        } else {
+          const submit = snapshot.buttons[0];
+          if (submit?.selector) {
+            stepLogger.log({
+              component: 'ExplorationAgent',
+              action: 'login.retry',
+              status: 'warn',
+              detail: `LLM repeated action, forcing submit click selector=${submit.selector}`,
+              toolInput: { repeatedAction: decisionSig, streak: sameDecisionStreak + 1 },
+              toolOutput: { forcedAction: 'click', selector: submit.selector },
+              tool: 'playwright',
+            });
+            decision = {
+              ...decision,
+              action: 'click',
+              selector: submit.selector,
+              reasoning: decision.reasoning ?? 'fallback: avoid repeated fill loop',
+            };
+          }
+        }
+      }
 
       if (!decision.isLoginPage || decision.action === 'done') {
         stepLogger.log({ component: 'ExplorationAgent', action: 'login.verify', status: 'ok', detail: decision.reasoning ?? 'LLM says done', durationMs: Date.now() - t0, toolInput: aiInput, toolOutput: { url: snapshot.url, reasoning: decision.reasoning }, actionId: loginActionId, tool: 'playwright' });
@@ -802,6 +1040,7 @@ export class ExplorationAgent {
         try {
           const page = pw.getPage();
           await page.fill(decision.selector, actualValue, { timeout: 10_000 });
+          pushRecent(recentLoginActions, `fill ${decision.selector} value=${isPassword ? '[REDACTED]' : (decision.value ?? '')}`, 10);
           stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'ok', detail: `selector=${decision.selector} value=${logValue}`, durationMs: Date.now() - fillStart, toolInput: { selector: decision.selector, value: logValue }, toolOutput: { ok: true }, tool: 'playwright', ...(decision.reasoning ? { reason: decision.reasoning } : {}) });
         } catch (e) {
           stepLogger.log({ component: 'ExplorationAgent', action: 'login.fill', status: 'error', detail: String(e), durationMs: Date.now() - fillStart, toolInput: { selector: decision.selector, value: logValue }, toolOutput: { error: String(e) }, tool: 'playwright' });
@@ -815,6 +1054,7 @@ export class ExplorationAgent {
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => undefined),
             page.click(decision.selector, { timeout: 10_000 }),
           ]);
+          pushRecent(recentLoginActions, `click ${decision.selector}`, 10);
           stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'ok', detail: `selector=${decision.selector}`, durationMs: Date.now() - clickStart, toolInput: { selector: decision.selector }, toolOutput: { ok: true }, tool: 'playwright', ...(decision.reasoning ? { reason: decision.reasoning } : {}) });
         } catch (e) {
           stepLogger.log({ component: 'ExplorationAgent', action: 'login.click', status: 'error', detail: String(e), durationMs: Date.now() - clickStart, toolInput: { selector: decision.selector }, toolOutput: { error: String(e) }, tool: 'playwright' });

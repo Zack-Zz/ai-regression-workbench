@@ -6,6 +6,7 @@ import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, KV, Button, Table, StageResultsList } from '../components/ui.js';
 import { StepLogPanel } from '../components/StepLog.js';
 import { fmtDatetime } from '../utils.js';
+import type { SSEEvent } from '../types.js';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -22,18 +23,38 @@ export function RunDetailPage(): React.ReactElement {
     reloadTasks();
     reloadReport();
   }, [reload, reloadTasks, reloadReport]);
-  const { connected } = useServerEvents(['run.updated', 'run.step.updated'], () => { refreshAll(); }, (e) => !e.id || e.id === id, () => { refreshAll(); });
-  usePoll(refreshAll, 2500, isActive);
+
+  const handleRunEvent = React.useCallback((event: SSEEvent) => {
+    if (event.type === 'run.step.updated') {
+      reload();
+      reloadReport();
+      return;
+    }
+    refreshAll();
+  }, [reload, reloadReport, refreshAll]);
+
+  const { connected } = useServerEvents(
+    ['run.updated', 'run.step.updated'],
+    handleRunEvent,
+    (e) => e.id === id,
+    () => {
+      reload();
+      reloadReport();
+    },
+  );
+  usePoll(refreshAll, 2500, isActive && !connected);
 
   async function doAction(fn: () => Promise<unknown>): Promise<void> {
-    try { await fn(); reload(); } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); }
+    try { await fn(); refreshAll(); } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); }
   }
 
-  if (loading) return <Loading />;
+  if (loading && !data) return <Loading />;
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
   const { summary, testResults, findings, events, explorationConfig } = data;
+  const displayStage = report?.currentStage ?? summary.currentStage;
+  const showTopSummaryBanner = Boolean(summary.summary && (!report?.fatalReason || report.fatalReason !== summary.summary));
 
   return (
     <div>
@@ -56,9 +77,9 @@ export function RunDetailPage(): React.ReactElement {
         {summary.credLabel && <KV label="身份" value={summary.credLabel} />}
         <KV label={t('run.startedAt')} value={fmtDatetime(summary.startedAt)} />
         {summary.endedAt && <KV label={t('run.endedAt')} value={fmtDatetime(summary.endedAt)} />}
-        {summary.currentStage && <KV label={t('run.stage')} value={summary.currentStage} />}
+        {displayStage && <KV label={t('run.stage')} value={displayStage} />}
         <KV label="统计" value={`✓${String(summary.passed)} ✗${String(summary.failed)} ↷${String(summary.skipped)} / ${String(summary.total)}`} />
-        {summary.summary && (
+        {showTopSummaryBanner && summary.summary && (
           <div style={{ marginTop: 8, padding: '8px 12px', background: summary.status === 'FAILED' ? '#fff1f0' : '#f6ffed', border: `1px solid ${summary.status === 'FAILED' ? '#ffa39e' : '#b7eb8f'}`, borderRadius: 4, fontSize: 13, color: '#333' }}>
             {t(`run.summary.${summary.summary}`)}
           </div>
@@ -78,7 +99,7 @@ export function RunDetailPage(): React.ReactElement {
             </div>
             {report.fatalReason && (
               <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.8rem', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, color: '#be123c', fontSize: '0.9em' }}>
-                {report.fatalReason}
+                {t(`run.summary.${report.fatalReason}`)}
               </div>
             )}
             {report.warnings && report.warnings.length > 0 && (
@@ -95,7 +116,7 @@ export function RunDetailPage(): React.ReactElement {
 
           {report.stageResults.length > 0 && (
             <Card title="阶段结果">
-              <StageResultsList stages={report.stageResults} currentStage={summary.currentStage} live={isActive || connected} />
+              <StageResultsList stages={report.stageResults} currentStage={displayStage} live={isActive || connected} />
             </Card>
           )}
         </>

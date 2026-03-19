@@ -253,6 +253,10 @@ export interface PersonalSettings {
     activeProvider: string;
     enabled: boolean;
     promptTemplatesDir?: string;
+    sceneProviders?: Partial<Record<
+      'explorationDecision' | 'explorationLogin' | 'failureAnalysis' | 'findingSummary' | 'testDraft' | 'codeTaskDraft',
+      string
+    >>;
     providers: {
       [key: string]: {
         baseUrl: string;

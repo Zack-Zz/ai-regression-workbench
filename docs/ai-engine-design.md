@@ -97,6 +97,18 @@ AI provider 的差异应由 adapter 处理，不应污染上层领域模型。
 - 分析失败不得覆盖原始测试结果
 - Prompt 模板版本、裁剪规则版本必须可追溯
 
+## 6.1 模型分工与调用选项
+
+`LocalAIEngine` 的 provider 调用支持 `AICompletionOptions`，用于按场景施加约束：
+
+- `scene`：`failureAnalysis | findingSummary | testDraft | codeTaskDraft`
+- `responseFormat`：结构化场景使用 `{ type: 'json_object' }`
+- `temperature`：默认低温（0.1）提升稳定性
+- `maxTokens`：每类任务设定上限，避免长尾输出
+- `retry`：空响应重试（`maxAttempts=2`）
+
+场景模型选择由 `ai.sceneProviders` 决定；未配置时回退 `ai.activeProvider`。
+
 ## 7. 与 Exploration 的关系
 
 AI 参与站点自主探测时，应通过 harness 中的 `ExplorationAgent` 运行。

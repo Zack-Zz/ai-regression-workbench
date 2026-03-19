@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { useAsync, usePoll, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, Card, KV, Button, Table, StageResultsList } from '../components/ui.js';
+import type { SSEEvent } from '../types.js';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -13,10 +14,18 @@ export function ExecutionReportPage(): React.ReactElement {
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getExecutionReport(id), [id]);
   const isActive = data ? !TERMINAL.has(data.status) : false;
-  const { connected } = useServerEvents(['run.updated', 'run.step.updated'], () => { reload(); }, (e) => !e.id || e.id === id, () => { reload(); });
-  usePoll(reload, 2500, isActive);
+  const handleRunEvent = React.useCallback((event: SSEEvent) => {
+    if (event.type === 'run.updated' || event.type === 'run.step.updated') reload();
+  }, [reload]);
+  const { connected } = useServerEvents(
+    ['run.updated', 'run.step.updated'],
+    handleRunEvent,
+    (e) => e.id === id,
+    () => { reload(); },
+  );
+  usePoll(reload, 2500, isActive && !connected);
 
-  if (loading) return <Loading />;
+  if (loading && !data) return <Loading />;
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
@@ -45,7 +54,7 @@ export function ExecutionReportPage(): React.ReactElement {
         </div>
         {data.fatalReason && (
           <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.8rem', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, color: '#be123c', fontSize: '0.9em' }}>
-            {data.fatalReason}
+            {t(`run.summary.${data.fatalReason}`)}
           </div>
         )}
       </Card>
