@@ -52,6 +52,12 @@ Regression run / AI exploration
 - Human-in-the-loop: no implicit code execution or commit.
 - Platform-ready: modular interfaces for runner, trace, logs, AI, storage, and code agents.
 
+## Runtime Notes
+
+- Exploration runs now use a Playwright-backed harness path when the local browser toolchain is available, and fall back only when that path cannot be started.
+- Fatal exploration failures such as `LOGIN_FAILED`, `LOGIN_AI_FAILED`, and `AUTH_RETRY_EXCEEDED` set the overall Run status to `FAILED`; the machine-readable failure code is still preserved on the run summary field for UI i18n.
+- Execution reports expose both `status` and `currentStage`, and the local UI renders stage results as a live progress view instead of a static table snapshot.
+
 ## Repository Layout
 
 ```text
@@ -124,20 +130,18 @@ Module design docs (implemented):
   [app-services](./docs/app-services-design.md),
   [storage-mapping](./docs/storage-mapping-design.md)
 
-Future feature specs (not yet implemented):
+Future feature specs / remaining expansion areas:
   [project & site management](./docs/project-site-design.md),
-  [real exploration](./docs/exploration-design.md),
   [codetask automation](./docs/codetask-automation-design.md)
 
 - Chinese README: [README.zh-CN.md](./README.zh-CN.md)
 
 ## Current Status
 
-Phase 0-16 is complete: the repository includes the local workbench baseline, API/UI flow, AI provider integration (OpenAI + DeepSeek with runtime switching), doctor checks, and hardening coverage.
+Phase 0-16 is complete: the repository includes the local workbench baseline, API/UI flow, AI provider integration (OpenAI + DeepSeek with runtime switching), doctor checks, Playwright-backed exploration, execution-report aggregation, and hardening coverage.
 
-Active design work (spec phase, not yet implemented):
+Active design work / next-step spec work:
 - Project & site management — multi-project, multi-domain, per-project code repos and data directories
-- Real exploration — Playwright-backed browser exploration replacing the current `fetch` stub
 - CodeTask automation — auto-trigger on regression failure and exploration findings
 
 See [docs/development-completed.md](./docs/development-completed.md) for the full phase-by-phase delivery summary.

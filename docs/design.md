@@ -3325,7 +3325,7 @@ zarb ui
 
 执行报告（Execution Report）建议至少包含：
 
-- `runId`、`status`、`startedAt`、`endedAt`、`durationMs`
+- `runId`、`status`、`currentStage`、`startedAt`、`endedAt`、`durationMs`
 - `scopeType`、`scopeValue`、`selector`
 - `summary`（`total/passed/failed/skipped`）
 - `totals`（`flowStepCount/uiActionCount/apiCallCount/failedApiCount`）
@@ -3343,6 +3343,7 @@ zarb ui
 
 - Run 进入 `COMPLETED` / `FAILED` / `CANCELLED` 时自动生成
 - 若在中途被用户取消，报告中需明确标记“用户取消”与已完成阶段
+- 若 exploration 因登录失败、AI 登录失败或认证重试超限提前终止，Run 必须进入 `FAILED`，并保留机器可读 failure code 供 UI 文案映射
 
 持久化策略：
 

@@ -19,8 +19,11 @@
 ## 3. 页面结构
 
 - `HomePage`
+- `CodeTaskListPage`
 - `RunListPage`
 - `RunDetailPage`
+- `ExecutionReportPage`
+- `TestcaseExecutionPage`
 - `FailureReportPage`
 - `CodeTaskDetailPage`
 - `ReviewCommitPanel`
@@ -95,9 +98,12 @@
 
 - run 模式（`regression / exploration / hybrid`）
 - run 范围（scopeType / scopeValue）
+- 当前执行阶段（`currentStage`）
 - 总量统计（流程步骤数、点击数、接口数、失败接口数）
 - exploration findings 摘要与 candidate tests 入口
-- 阶段结果（success / degraded / failed / skipped + duration）
+- 阶段结果（success / degraded / failed / skipped）
+- 阶段结果必须以进度视图呈现，明确高亮当前阶段，而不是只显示静态表格
+- 活跃 run 页面中，执行报告与阶段结果需要跟随 SSE / 轮询自动刷新
 - degraded 步骤与原因
 - 最终失败原因（若存在）
 - 报告与产物链接（trace、logs、diff、patch、verify）

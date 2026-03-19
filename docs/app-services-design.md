@@ -515,6 +515,7 @@ interface ExecutionReport {
   runId: string;
   status: string;
   runMode: RunMode;
+  currentStage?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
@@ -567,6 +568,10 @@ interface ExecutionReport {
 ```
 
 说明：
+
+- `status` 表示 Run 总体状态，`currentStage` 表示当前或最后停留的执行阶段
+- exploration 致命错误会让 `status=FAILED`，同时保留 `summary` 中的机器可读 failure code，供 UI 做多语言提示
+- `stageResults` 是面向 UI 的阶段快照，不是静态常量；服务端会根据当前 `status/currentStage`、degraded 事件、CodeTask 聚合状态动态计算
 
 - `ExecutionReport` 的完整内容默认从 `report_path` 指向的 JSON 文件读取
 - `execution_reports` 表只保存索引字段与 `totals_json`，不要求把完整报告展开到 SQLite 列
