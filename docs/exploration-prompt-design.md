@@ -34,6 +34,8 @@ packages/agent-harness/
     exploration-agent.ts
     playwright-tool-provider.ts
   prompts/
+    exploration-plan/
+      default@v1.txt
     exploration-decision/
       default@v1.txt
     exploration-login/
@@ -119,6 +121,46 @@ packages/agent-harness/
 - 空响应自动重试（最多 2 次）
 
 密码值不直接写入 prompt，只允许返回 `__PASSWORD__` 占位符。
+
+### 4.3 exploration-plan
+
+用途：为 executor 生成短期阶段计划和 guardrails。
+
+输入变量（核心）：
+
+- `startUrls`
+- `allowedHosts`
+- `stepIndex`
+- `remainingBudget`
+- `authEstablished`
+- `noScriptSignal`
+- `currentPage`
+- `observedCounts`
+- `visitedPages`
+- `recentSteps`
+- `recentFindings`
+- `recentToolResults`
+- `recentNetworkHighlights`
+
+输出 JSON：
+
+```json
+{
+  "phase": "bootstrap|post-login|explore|recover",
+  "objective": "...",
+  "candidateUrls": ["..."],
+  "avoidUrls": ["..."],
+  "preferredActions": ["click|fill|navigate|done"],
+  "reasoning": "..."
+}
+```
+
+运行时约束：
+
+- 使用 `response_format: { type: "json_object" }`
+- 使用 function tool schema（`plan_exploration_phase`），`tool_choice: "required"`
+- 空响应自动重试（最多 2 次）
+- planner 失败时降级到 deterministic fallback plan（不阻断探索）
 
 ---
 

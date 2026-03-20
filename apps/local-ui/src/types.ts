@@ -38,6 +38,11 @@ export interface ExplorationConfig {
   startUrls: string[];
   maxSteps?: number;
   maxPages?: number;
+  browserMode?: 'headless' | 'headed';
+  captchaAutoSolve?: boolean;
+  captchaAutoSolveAttempts?: number;
+  manualInterventionOnCaptcha?: boolean;
+  manualLoginTimeoutMs?: number;
   focusAreas?: string[];
   allowedHosts?: string[];
   persistAsCandidateTests?: boolean;
@@ -229,7 +234,20 @@ export interface StartRunInput {
   repoId?: string;
   siteId?: string;
   credentialId?: string;
-  exploration?: { startUrls: string[]; allowedHosts?: string[]; maxSteps: number; maxPages: number; focusAreas?: string[]; persistAsCandidateTests?: boolean; credentialId?: string };
+  exploration?: {
+    startUrls: string[];
+    allowedHosts?: string[];
+    maxSteps: number;
+    maxPages: number;
+    browserMode?: 'headless' | 'headed';
+    captchaAutoSolve?: boolean;
+    captchaAutoSolveAttempts?: number;
+    manualInterventionOnCaptcha?: boolean;
+    manualLoginTimeoutMs?: number;
+    focusAreas?: string[];
+    persistAsCandidateTests?: boolean;
+    credentialId?: string;
+  };
 }
 
 export interface StartRunResult extends ActionResult { run?: RunSummary; }

@@ -127,6 +127,11 @@ export function RunDetailPage(): React.ReactElement {
           <KV label={t('run.startUrls')} value={explorationConfig.startUrls.join(', ')} />
           {explorationConfig.maxSteps !== undefined && <KV label={t('run.maxSteps')} value={String(explorationConfig.maxSteps)} />}
           {explorationConfig.maxPages !== undefined && <KV label={t('run.maxPages')} value={String(explorationConfig.maxPages)} />}
+          {explorationConfig.browserMode && <KV label={t('run.browserMode')} value={explorationConfig.browserMode === 'headed' ? t('run.browserMode.headed') : t('run.browserMode.headless')} />}
+          {explorationConfig.captchaAutoSolve !== undefined && <KV label={t('run.captchaAutoSolve')} value={explorationConfig.captchaAutoSolve ? t('common.enabled') : t('common.disabled')} />}
+          {explorationConfig.captchaAutoSolveAttempts !== undefined && <KV label={t('run.captchaAutoSolveAttempts')} value={String(explorationConfig.captchaAutoSolveAttempts)} />}
+          {explorationConfig.manualInterventionOnCaptcha !== undefined && <KV label={t('run.manualInterventionOnCaptcha')} value={explorationConfig.manualInterventionOnCaptcha ? t('common.enabled') : t('common.disabled')} />}
+          {explorationConfig.manualLoginTimeoutMs !== undefined && <KV label={t('run.manualLoginTimeoutSec')} value={String(Math.floor(explorationConfig.manualLoginTimeoutMs / 1000))} />}
           {explorationConfig.focusAreas && explorationConfig.focusAreas.length > 0 && <KV label={t('run.focusAreas')} value={explorationConfig.focusAreas.join(', ')} />}
           {explorationConfig.allowedHosts && explorationConfig.allowedHosts.length > 0 && <KV label={t('run.allowedHosts')} value={explorationConfig.allowedHosts.join(', ')} />}
         </Card>

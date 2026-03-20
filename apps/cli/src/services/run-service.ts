@@ -260,6 +260,11 @@ export class RunService {
         maxPages: input.exploration.maxPages,
         persistAsCandidateTests: input.exploration.persistAsCandidateTests ?? defExp?.persistAsCandidateTests ?? false,
       };
+      if (input.exploration.browserMode !== undefined) merged.browserMode = input.exploration.browserMode;
+      if (input.exploration.captchaAutoSolve !== undefined) merged.captchaAutoSolve = input.exploration.captchaAutoSolve;
+      if (input.exploration.captchaAutoSolveAttempts !== undefined) merged.captchaAutoSolveAttempts = input.exploration.captchaAutoSolveAttempts;
+      if (input.exploration.manualInterventionOnCaptcha !== undefined) merged.manualInterventionOnCaptcha = input.exploration.manualInterventionOnCaptcha;
+      if (input.exploration.manualLoginTimeoutMs !== undefined) merged.manualLoginTimeoutMs = input.exploration.manualLoginTimeoutMs;
       const allowedHosts = input.exploration.allowedHosts ?? defExp?.allowedHosts;
       if (allowedHosts !== undefined) merged.allowedHosts = allowedHosts;
       const focusAreas = input.exploration.focusAreas as ExplorationConfig['focusAreas'] | undefined;
@@ -446,6 +451,7 @@ export class RunService {
         if (exploreResult.llmError) {
           const summaryCode = exploreResult.llmError === 'LOGIN_FAILED' ? 'LOGIN_FAILED'
             : exploreResult.llmError === 'LOGIN_AI_FAILED' ? 'LOGIN_AI_FAILED'
+            : exploreResult.llmError === 'LOGIN_CAPTCHA_REQUIRED' ? 'LOGIN_CAPTCHA_REQUIRED'
             : exploreResult.llmError === 'LOGIN_AI_STEP_EXCEEDED' ? 'LOGIN_AI_STEP_EXCEEDED'
             : exploreResult.llmError === 'AUTH_RETRY_EXCEEDED' ? 'AUTH_RETRY_EXCEEDED'
             : 'EXPLORATION_LLM_ERROR';

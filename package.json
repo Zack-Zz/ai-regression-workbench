@@ -14,6 +14,11 @@
     ]
   },
   "scripts": {
+    "dev:api": "pnpm -s tsc -b apps/cli && node apps/cli/dist/bin.js",
+    "dev:api:debug": "pnpm -s tsc -b apps/cli && node --inspect=9229 apps/cli/dist/bin.js",
+    "dev:api:watch": "node scripts/dev-api.mjs",
+    "dev:api:watch:debug": "node scripts/dev-api.mjs --inspect=9229",
+    "dev:ui": "pnpm --filter @zarb/local-ui dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",

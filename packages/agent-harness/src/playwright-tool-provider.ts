@@ -24,6 +24,8 @@ const log = appLogger.child('PlaywrightTool');
 export interface PlaywrightToolProviderOptions {
   /** Milliseconds to wait after navigation before collecting state. Default 500. */
   waitAfterNavigateMs?: number;
+  /** Launch browser in headless mode. Default true. */
+  headless?: boolean;
 }
 
 export interface NetworkEntry {
@@ -40,10 +42,23 @@ export interface NetworkEntry {
   error?: string;
 }
 
+export interface VerificationChallenge {
+  backImage: string;
+  slidingImage: string;
+  originalWidth: number;
+  originalHeight: number;
+  sliderWidth: number;
+  sliderHeight: number;
+  randomY: number;
+  effectiveTime: number;
+  key?: string;
+}
+
 export class PlaywrightToolProvider {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
+  private launchedHeadless = true;
   private readonly networkLog: NetworkEntry[] = [];
   private readonly consoleErrorLog: Array<{ ts: string; url: string; text: string }> = [];
   private readonly requestStartTimes = new Map<string, number>();
@@ -51,7 +66,11 @@ export class PlaywrightToolProvider {
 
   async launch(opts?: PlaywrightToolProviderOptions): Promise<void> {
     const { chromium } = await import('playwright');
-    this.browser = await chromium.launch({ headless: true });
+    const envHeadless = parseBooleanEnv(process.env['ZARB_PLAYWRIGHT_HEADLESS']);
+    const envHeaded = parseBooleanEnv(process.env['ZARB_PLAYWRIGHT_HEADED']);
+    const headless = opts?.headless ?? envHeadless ?? (envHeaded !== undefined ? !envHeaded : true);
+    this.launchedHeadless = headless;
+    this.browser = await chromium.launch({ headless });
     this.context = await this.browser.newContext({
       userAgent: 'zarb-exploration-agent/1.0',
     });
@@ -80,7 +99,7 @@ export class PlaywrightToolProvider {
       if (type === 'xhr' || type === 'fetch') {
         const postData = req.postData();
         if (postData) entry.requestBody = postData;
-        res.text().then(body => { entry.responseBody = body.slice(0, 4096); }).catch(() => undefined);
+        res.text().then(body => { entry.responseBody = body; }).catch(() => undefined);
       }
       this.networkLog.push(entry);
     });
@@ -245,9 +264,25 @@ export class PlaywrightToolProvider {
     const raw = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const win = globalThis as any;
       const escAttr = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const unique = (selector: string): boolean => {
         try { return doc.querySelectorAll(selector).length === 1; } catch { return false; }
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const textOf = (el: any): string => {
+        const rawText = ((el?.innerText ?? el?.textContent ?? '') as string).trim().replace(/\s+/g, ' ');
+        return rawText.slice(0, 120);
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isVisible = (el: any): boolean => {
+        if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+        if (el.closest?.('[hidden], [aria-hidden="true"]')) return false;
+        const style = win.getComputedStyle ? win.getComputedStyle(el) : undefined;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity ?? '1') < 0.03)) return false;
+        const rect = el.getBoundingClientRect();
+        return Number(rect.width) > 1 && Number(rect.height) > 1;
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const getLabelText = (el: any): string => {
@@ -303,6 +338,34 @@ export class PlaywrightToolProvider {
         return `xpath=((//button)|(//input[@type='submit']))[${index + 1}]`;
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const buildClickableSelector = (el: any, index: number): string => {
+        const id = el.getAttribute?.('id') as string | null;
+        if (id) return `#${id}`;
+        for (const attr of ['data-testid', 'data-test', 'data-qa']) {
+          const v = el.getAttribute?.(attr) as string | null;
+          if (!v) continue;
+          const byAttr = `[${attr}="${escAttr(v)}"]`;
+          if (unique(byAttr)) return byAttr;
+        }
+        const tag = String(el.tagName ?? '').toLowerCase();
+        if (tag === 'a') {
+          const href = el.getAttribute?.('href') as string | null;
+          if (href) {
+            const byHref = `a[href="${escAttr(href)}"]`;
+            if (unique(byHref)) return byHref;
+          }
+        }
+        const role = el.getAttribute?.('role') as string | null;
+        const label = (el.getAttribute?.('aria-label') as string | null)?.trim() ?? '';
+        if (label) return `[aria-label="${escAttr(label)}"]`;
+        const text = textOf(el);
+        if (role && text) return `[role="${escAttr(role)}"]:has-text("${escAttr(text)}")`;
+        if (tag === 'a' && text) return `a:has-text("${escAttr(text)}")`;
+        if (tag === 'button' && text) return `button:has-text("${escAttr(text)}")`;
+        if (text) return `text="${escAttr(text)}"`;
+        return `xpath=(//*[self::a or self::button or @role='button' or @role='menuitem' or @role='tab' or @onclick])[${index + 1}]`;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inputs = Array.from(doc.querySelectorAll('input:not([type=hidden]):not([type=submit])')).slice(0, 20).map((el: any, i: number) => {
         const id = el.getAttribute('id') as string | null;
         const name = el.getAttribute('name') as string | null;
@@ -320,17 +383,64 @@ export class PlaywrightToolProvider {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const buttons = Array.from(doc.querySelectorAll('button, input[type=submit]')).slice(0, 10).map((el: any, i: number) => {
         return {
-          text: ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim(),
+          text: ((el.textContent ?? el.getAttribute('value') ?? '') as string).trim().replace(/\s+/g, ' '),
           type: (el.getAttribute('type') as string | null) ?? undefined,
           selector: buildButtonSelector(el, i),
         };
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const forms = Array.from(doc.querySelectorAll('form')).slice(0, 5).map((f: any) => ({ action: (f.getAttribute('action') as string | null) ?? undefined, method: (f.getAttribute('method') as string | null) ?? undefined, inputCount: f.querySelectorAll('input').length as number }));
-      return { inputs, buttons, forms };
-    }).catch(() => ({ inputs: [], buttons: [], forms: [] }));
+      const clickableSelectors = [
+        'a[href]',
+        'button',
+        'input[type=button]',
+        'input[type=submit]',
+        '[role="button"]',
+        '[role="menuitem"]',
+        '[role="tab"]',
+        '.ivu-menu-item',
+        '.el-menu-item',
+        '.ant-menu-item',
+        '[class*="menu-item"]',
+        '[class*="nav-item"]',
+        '[class*="sidebar"] [class*="item"]',
+        '[onclick]',
+      ];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clickableNodeSet = new Set<any>();
+      for (const selector of clickableSelectors) {
+        for (const node of Array.from(doc.querySelectorAll(selector))) clickableNodeSet.add(node);
+      }
+      const seenClickableSelector = new Set<string>();
+      const clickables = Array.from(clickableNodeSet)
+        .filter((el) => isVisible(el))
+        .map((el, i) => {
+          const text = textOf(el);
+          const role = (el.getAttribute('role') as string | null) ?? undefined;
+          const selector = buildClickableSelector(el, i);
+          const area = el.closest('nav,aside,header,[role="navigation"],[class*="menu"],[class*="nav"],[class*="sidebar"]') ? 'nav' : 'content';
+          return {
+            text: text || (el.getAttribute('aria-label') ?? '').trim(),
+            selector,
+            role,
+            area,
+          };
+        })
+        .filter((item) => item.text && item.selector)
+        .filter((item) => {
+          if (seenClickableSelector.has(item.selector)) return false;
+          seenClickableSelector.add(item.selector);
+          return true;
+        })
+        .slice(0, 30);
+      return { inputs, buttons, forms, clickables };
+    }).catch(() => ({ inputs: [], buttons: [], forms: [], clickables: [] }));
 
-    return { url, title, ...(raw as { inputs: DomSnapshot['inputs']; buttons: DomSnapshot['buttons']; forms: DomSnapshot['forms'] }) };
+    return {
+      url,
+      title,
+      ...(raw as { inputs: DomSnapshot['inputs']; buttons: DomSnapshot['buttons']; forms: DomSnapshot['forms']; clickables: NonNullable<DomSnapshot['clickables']> }),
+    };
   }
 
   /** Write collected network entries as NDJSON to the given path. */
@@ -359,6 +469,11 @@ export class PlaywrightToolProvider {
     return this.requirePage();
   }
 
+  /** Whether the current browser is running with visible UI. */
+  isHeaded(): boolean {
+    return !this.launchedHeadless;
+  }
+
   getRecentNetworkHighlights(limit = 5): string[] {
     return this.networkLog
       .filter((entry) =>
@@ -371,6 +486,28 @@ export class PlaywrightToolProvider {
         const status = entry.error ? `error=${entry.error}` : `status=${String(entry.status)}`;
         return `${entry.method} ${entry.resourceType} ${status} ${entry.url} (${String(entry.durationMs)}ms)`;
       });
+  }
+
+  async getLatestVerificationChallenge(timeoutMs = 1500): Promise<VerificationChallenge | undefined> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (Date.now() <= deadline) {
+      const challenge = this.findLatestVerificationChallenge();
+      if (challenge) return challenge;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return this.findLatestVerificationChallenge();
+  }
+
+  private findLatestVerificationChallenge(): VerificationChallenge | undefined {
+    for (let i = this.networkLog.length - 1; i >= 0; i--) {
+      const entry = this.networkLog[i];
+      if (!entry) continue;
+      if (!entry.url.includes('/gateway/auth/verification/')) continue;
+      if (!entry.responseBody) continue;
+      const parsed = parseVerificationChallengeResponse(entry.responseBody);
+      if (parsed) return parsed;
+    }
+    return undefined;
   }
 
   private async collectState(page: Page, url: string): Promise<PageProbe> {
@@ -387,8 +524,44 @@ export class PlaywrightToolProvider {
     const title = await page.title().catch(() => '');
 
     const snapshot = await page.evaluate(() => {
-      const doc = ((globalThis as unknown) as { document: { querySelectorAll: (selector: string) => ArrayLike<{ textContent?: string | null }>; querySelector: (selector: string) => { textContent?: string | null } | null; body?: { textContent?: string | null } | null } }).document;
-      const textOf = (el: { textContent?: string | null } | null): string => (el?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+      const doc = ((globalThis as unknown) as {
+        document: {
+          querySelectorAll: (selector: string) => ArrayLike<{
+            textContent?: string | null;
+            innerText?: string | null;
+            getBoundingClientRect?: () => { width: number; height: number };
+            closest?: (selector: string) => unknown;
+          }>;
+          querySelector: (selector: string) => {
+            textContent?: string | null;
+            innerText?: string | null;
+            getBoundingClientRect?: () => { width: number; height: number };
+            closest?: (selector: string) => unknown;
+          } | null;
+          body?: {
+            textContent?: string | null;
+            innerText?: string | null;
+            getBoundingClientRect?: () => { width: number; height: number };
+            closest?: (selector: string) => unknown;
+          } | null;
+        };
+        getComputedStyle?: (el: unknown) => { display?: string; visibility?: string; opacity?: string };
+      }).document;
+      const g = globalThis as unknown as { getComputedStyle?: (el: unknown) => { display?: string; visibility?: string; opacity?: string } };
+      const textOf = (el: { textContent?: string | null; innerText?: string | null } | null): string =>
+        (el?.innerText ?? el?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+      const isVisible = (el: {
+        getBoundingClientRect?: () => { width: number; height: number };
+        closest?: (selector: string) => unknown;
+      } | null): boolean => {
+        if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+        if (el.closest?.('[hidden], [aria-hidden="true"]')) return false;
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.width <= 1 || rect.height <= 1) return false;
+        const style = g.getComputedStyle?.(el);
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity ?? '1') < 0.03)) return false;
+        return true;
+      };
       const scoreText = (text: string): number => {
         const normalized = text.toLowerCase();
         let score = 0;
@@ -398,22 +571,35 @@ export class PlaywrightToolProvider {
         return score;
       };
       const headings = Array.from(doc.querySelectorAll('h1, h2, h3')).slice(0, 5).map((el) => textOf(el)).filter(Boolean);
-      const primaryButtons = Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]')).slice(0, 8).map((el) => textOf(el)).filter(Boolean);
-      const navLinks = Array.from(doc.querySelectorAll('nav a[href], aside a[href], header a[href]')).slice(0, 8).map((el) => textOf(el)).filter(Boolean);
+      const primaryButtons = Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]'))
+        .filter((el) => isVisible(el))
+        .slice(0, 10)
+        .map((el) => textOf(el))
+        .filter(Boolean);
+      const navLinks = Array.from(doc.querySelectorAll('nav a[href], aside a[href], header a[href], [role="menuitem"], .ivu-menu-item, .el-menu-item, .ant-menu-item, [class*="menu-item"], [class*="nav-item"]'))
+        .filter((el) => isVisible(el))
+        .slice(0, 12)
+        .map((el) => textOf(el))
+        .filter(Boolean);
       const ctaCandidates = [
-        ...Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]')).map((el) => ({ kind: 'button', text: textOf(el) })),
-        ...Array.from(doc.querySelectorAll('a[href]')).slice(0, 20).map((el) => ({ kind: 'link', text: textOf(el) })),
+        ...Array.from(doc.querySelectorAll('button, input[type=submit], [role="button"]')).filter((el) => isVisible(el)).map((el) => ({ kind: 'button', text: textOf(el) })),
+        ...Array.from(doc.querySelectorAll('a[href]')).filter((el) => isVisible(el)).slice(0, 24).map((el) => ({ kind: 'link', text: textOf(el) })),
+        ...Array.from(doc.querySelectorAll('[role="menuitem"], .ivu-menu-item, .el-menu-item, .ant-menu-item, [class*="menu-item"], [class*="nav-item"]'))
+          .filter((el) => isVisible(el))
+          .slice(0, 20)
+          .map((el) => ({ kind: 'menu', text: textOf(el) })),
       ]
         .filter((item) => item.text)
         .map((item) => ({ ...item, score: scoreText(item.text) }))
         .sort((a, b) => b.score - a.score)
-        .slice(0, 6)
+        .slice(0, 12)
         .map((item) => `${item.kind}:${item.text} (score=${String(item.score)})`);
       const inputHints = Array.from(doc.querySelectorAll('input:not([type=hidden]), textarea, select')).slice(0, 8).map((el) => {
         const htmlEl = el as { getAttribute: (name: string) => string | null };
         return [htmlEl.getAttribute('name'), htmlEl.getAttribute('placeholder'), htmlEl.getAttribute('aria-label')].filter(Boolean).join(' / ');
       }).filter(Boolean);
       const textSnippet = textOf(doc.querySelector('main')) || textOf(doc.body ?? null);
+      const noScriptWarningVisible = /doesn'?t work properly without javascript enabled/i.test(textSnippet);
       return {
         formCount: doc.querySelectorAll('form').length,
         linkCount: doc.querySelectorAll('a[href]').length,
@@ -423,8 +609,9 @@ export class PlaywrightToolProvider {
         ctaCandidates,
         inputHints,
         textSnippet,
+        noScriptWarningVisible,
       };
-    }).catch(() => ({ formCount: 0, linkCount: 0, headings: [], primaryButtons: [], navLinks: [], ctaCandidates: [], inputHints: [], textSnippet: '' }));
+    }).catch(() => ({ formCount: 0, linkCount: 0, headings: [], primaryButtons: [], navLinks: [], ctaCandidates: [], inputHints: [], textSnippet: '', noScriptWarningVisible: false }));
 
     return {
       url,
@@ -440,6 +627,7 @@ export class PlaywrightToolProvider {
         ctaCandidates: snapshot.ctaCandidates ?? [],
         inputHints: snapshot.inputHints ?? [],
         ...(snapshot.textSnippet ? { textSnippet: snapshot.textSnippet } : {}),
+        ...(snapshot.noScriptWarningVisible ? { noScriptWarningVisible: true } : {}),
       },
     };
   }
@@ -484,6 +672,7 @@ export interface DomSnapshot {
   inputs: Array<{ type: string; name?: string; id?: string; placeholder?: string; label?: string; selector: string; filled?: boolean }>;
   buttons: Array<{ text: string; type?: string; selector: string }>;
   forms: Array<{ action?: string; method?: string; inputCount: number }>;
+  clickables?: Array<{ text: string; selector: string; role?: string; area?: 'nav' | 'content' }>;
 }
 
 /** Thrown when login verification fails after applyCredential(). */
@@ -503,4 +692,55 @@ export function isLoginUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
+export function parseVerificationChallengeResponse(responseBody: string): VerificationChallenge | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseBody);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const result = (parsed as { result?: unknown }).result;
+  if (!result || typeof result !== 'object') return undefined;
+  const record = result as Record<string, unknown>;
+  const backImage = typeof record['backImage'] === 'string' ? record['backImage'] : '';
+  const slidingImage = typeof record['slidingImage'] === 'string' ? record['slidingImage'] : '';
+  const originalWidth = toPositiveNumber(record['originalWidth']);
+  const originalHeight = toPositiveNumber(record['originalHeight']);
+  const sliderWidth = toPositiveNumber(record['sliderWidth']);
+  const sliderHeight = toPositiveNumber(record['sliderHeight']);
+  if (!backImage || !slidingImage || originalWidth <= 0 || originalHeight <= 0 || sliderWidth <= 0 || sliderHeight <= 0) return undefined;
+  return {
+    backImage,
+    slidingImage,
+    originalWidth,
+    originalHeight,
+    sliderWidth,
+    sliderHeight,
+    randomY: toNonNegativeNumber(record['randomY']),
+    effectiveTime: Math.max(100, toPositiveNumber(record['effectiveTime']) || 300),
+    ...(typeof record['key'] === 'string' ? { key: record['key'] } : {}),
+  };
+}
+
+function toPositiveNumber(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n;
+}
+
+function toNonNegativeNumber(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
 }

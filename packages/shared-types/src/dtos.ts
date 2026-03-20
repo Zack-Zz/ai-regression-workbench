@@ -34,6 +34,16 @@ export interface ExplorationConfig {
   allowedHosts?: string[];
   maxSteps: number;
   maxPages: number;
+  /** Browser mode for exploration run. Default 'headless'. */
+  browserMode?: 'headless' | 'headed';
+  /** Try solving slider/captcha automatically before manual fallback. Default true. */
+  captchaAutoSolve?: boolean;
+  /** Max auto slider attempts per captcha event. Default 1, range 1-3. */
+  captchaAutoSolveAttempts?: number;
+  /** Allow manual takeover in headed mode when captcha persists. Default true. */
+  manualInterventionOnCaptcha?: boolean;
+  /** Manual takeover timeout in milliseconds. Default 180000. */
+  manualLoginTimeoutMs?: number;
   focusAreas?: Array<'smoke' | 'navigation' | 'forms' | 'console-errors' | 'network-errors' | 'auth'>;
   persistAsCandidateTests?: boolean;
   credentialId?: string;

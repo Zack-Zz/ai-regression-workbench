@@ -38,6 +38,7 @@ export function renderHarnessTemplate(key: string, vars: Record<string, string>)
 }
 
 export const HARNESS_TEMPLATE_VERSIONS = {
+  explorationPlan: 'exploration-plan/default@v1',
   explorationDecision: 'exploration-decision/default@v1',
   explorationLogin: 'exploration-login/default@v1',
 } as const;

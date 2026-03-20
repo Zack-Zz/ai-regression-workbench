@@ -115,19 +115,21 @@ open http://127.0.0.1:3910
 
 **终端 1 — API 服务**
 ```bash
-# 构建 CLI（每次修改 src/ 后重新执行）
-pnpm --filter @zarb/cli build
+# 默认模式（非热更新）：启动前构建一次，然后单进程运行
+pnpm dev:api
 
-# 启动 API（端口 3910）
-node apps/cli/dist/bin.js
+# 可选：热更新模式（增量编译 + 自动重启）
+# pnpm dev:api:watch
 ```
 
 **终端 2 — UI 开发服务器**
 ```bash
-cd apps/local-ui
-pnpm dev
+pnpm dev:ui
 # 访问 http://localhost:5173（自动代理 /api → localhost:3910）
 ```
+
+> 默认 `pnpm dev:api` 为单进程模式，不做自动重启。  
+> 需要热更新时显式使用 `pnpm dev:api:watch`（增量编译成功后自动重启 API）。
 
 ---
 
@@ -137,20 +139,49 @@ pnpm dev
 
 ### WebStorm — 配置 Run/Debug Configuration
 
-**步骤**：Run → Edit Configurations → 点 `+` → 选 **Node.js**
-
-#### zarb server（调试模式）
+#### 推荐：单进程调试（默认，稳定）
 
 | 字段 | 值 |
 |---|---|
-| Name | `zarb server` |
+| Name | `zarb server (single)` |
 | Node interpreter | 系统 Node（≥22） |
-| Node parameters | `--inspect` |
+| Node parameters | `--inspect=9229` |
 | JavaScript file | `apps/cli/dist/bin.js` |
 | Working directory | 项目根目录 |
-| Environment variables | `OPENAI_API_KEY=sk-xxx;DEEPSEEK_API_KEY=sk-xxx`（可选，也可写在 config.local.yaml） |
+| Environment variables | `OPENAI_API_KEY=...;DEEPSEEK_API_KEY=...`（可选） |
 
-配置好后点**虫子图标**启动，可在 `apps/cli/src/` 任意 `.ts` 源文件打断点（sourceMap 已在 `tsconfig.base.json` 全局开启）。
+启动前先执行一次：
+```bash
+pnpm -s tsc -b apps/cli
+```
+
+#### 可选：热更新调试（按需开启）
+
+先创建两个配置：
+
+1) `zarb dev-api (watch)`（Node.js）
+
+| 字段 | 值 |
+|---|---|
+| Name | `zarb dev-api (watch)` |
+| Node interpreter | 系统 Node（≥22） |
+| JavaScript file | `scripts/dev-api.mjs` |
+| Application parameters | `--inspect=9229` |
+| Working directory | 项目根目录 |
+| Environment variables | `OPENAI_API_KEY=...;DEEPSEEK_API_KEY=...`（可选） |
+
+2) `Attach 9229`（Attach to Node.js/Chrome）
+
+| 字段 | 值 |
+|---|---|
+| Host | `127.0.0.1` |
+| Port | `9229` |
+| Reconnect automatically | 勾选（建议） |
+
+使用方式：
+1. 先运行 `zarb dev-api (watch)`，等价于执行 `pnpm dev:api:watch`（`tsc -b apps/cli -w` + 自动重启 API）。
+2. 再运行 `Attach 9229` 挂载调试器。
+3. 在 `apps/cli/src/`、`packages/*/src/` 打断点即可；保存代码后会自动增量编译并重启 API。
 
 #### vitest（全量测试）
 
@@ -178,17 +209,38 @@ pnpm dev
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "zarb server",
+      "name": "zarb server (single)",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/apps/cli/dist/bin.js",
       "cwd": "${workspaceFolder}",
       "sourceMaps": true,
       "outFiles": ["${workspaceFolder}/apps/cli/dist/**/*.js"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
       "env": {
         "OPENAI_API_KEY": "${env:OPENAI_API_KEY}",
         "DEEPSEEK_API_KEY": "${env:DEEPSEEK_API_KEY}"
       }
+    },
+    {
+      "name": "zarb dev-api (watch)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/dev-api.mjs",
+      "args": ["--inspect=9229"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Attach zarb 9229",
+      "type": "node",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**"]
     },
     {
       "name": "vitest (current file)",
@@ -212,16 +264,23 @@ pnpm dev
 }
 ```
 
+调试顺序：
+1. 默认单进程：先执行 `pnpm -s tsc -b apps/cli`，再启动 `zarb server (single)`。
+2. 需要热更新：启动 `zarb dev-api (watch)` 后，再启动 `Attach zarb 9229`。
+
 ---
 
 ### 命令行调试（不依赖 IDE）
 
 ```bash
-# 启动并等待 debugger 连接（适合 Chrome DevTools 或任意支持 CDP 的调试器）
-node --inspect-brk apps/cli/dist/bin.js
+# 默认：单进程调试（非热更新）
+pnpm dev:api:debug
 
-# 启动后立即运行，随时可连接
-node --inspect apps/cli/dist/bin.js
+# 可选：热更新调试（自动重启）
+pnpm dev:api:watch:debug
+
+# 热更新模式下自定义 inspect 端口
+node scripts/dev-api.mjs --inspect=9230
 ```
 
 连接方式：
@@ -297,7 +356,7 @@ pnpm install
 ```
 
 **Q：UI 访问 5173 但 API 请求 404**
-- 确认 `node apps/cli/dist/bin.js` 已在 3910 端口启动
+- 确认 API 已启动（推荐 `pnpm dev:api`，或 `node apps/cli/dist/bin.js`）
 - 检查 `vite.config.ts` 的 proxy 目标端口是否匹配
 
 **Q：`zarb init` 后 doctor 报 `workspace.targetProjectPath` 不存在**

@@ -26,6 +26,11 @@ export function QuickRunPanel(): React.ReactElement {
   // Step 3: exploration config (auto-populated from site.baseUrl)
   const [startUrls, setStartUrls] = useState('');
   const [credentialId, setCredentialId] = useState('');
+  const [browserMode, setBrowserMode] = useState<'headless' | 'headed'>('headless');
+  const [captchaAutoSolve, setCaptchaAutoSolve] = useState(true);
+  const [captchaAutoSolveAttempts, setCaptchaAutoSolveAttempts] = useState(2);
+  const [manualInterventionOnCaptcha, setManualInterventionOnCaptcha] = useState(true);
+  const [manualLoginTimeoutSec, setManualLoginTimeoutSec] = useState(180);
   const [maxSteps, setMaxSteps] = useState(80);
   const [maxPages, setMaxPages] = useState(20);
   const [allowedHosts, setAllowedHosts] = useState('');
@@ -125,6 +130,11 @@ export function QuickRunPanel(): React.ReactElement {
           startUrls: startUrls.split('\n').map(s => s.trim()).filter(Boolean),
           maxSteps,
           maxPages,
+          browserMode,
+          captchaAutoSolve,
+          captchaAutoSolveAttempts,
+          manualInterventionOnCaptcha,
+          manualLoginTimeoutMs: manualLoginTimeoutSec * 1000,
         };
         if (credentialId) input.exploration.credentialId = credentialId;
         if (allowedHosts) input.exploration.allowedHosts = allowedHosts.split(',').map(s => s.trim()).filter(Boolean);
@@ -252,6 +262,50 @@ export function QuickRunPanel(): React.ReactElement {
               {t('run.maxPages')}
               <input type="number" value={maxPages} onChange={e => { setMaxPages(Number(e.target.value)); }} min={1} style={sel({ width: 80 })} />
             </label>
+            <label style={label()}>
+              {t('run.browserMode')}
+              <select value={browserMode} onChange={e => { setBrowserMode(e.target.value as 'headless' | 'headed'); }} style={sel({ minWidth: 120 })}>
+                <option value="headless">{t('run.browserMode.headless')}</option>
+                <option value="headed">{t('run.browserMode.headed')}</option>
+              </select>
+            </label>
+            <label style={label()}>
+              {t('run.captchaAutoSolve')}
+              <select value={captchaAutoSolve ? 'on' : 'off'} onChange={e => { setCaptchaAutoSolve(e.target.value === 'on'); }} style={sel({ minWidth: 120 })}>
+                <option value="on">{t('common.enabled')}</option>
+                <option value="off">{t('common.disabled')}</option>
+              </select>
+            </label>
+            <label style={label()}>
+              {t('run.captchaAutoSolveAttempts')}
+              <input
+                type="number"
+                value={captchaAutoSolveAttempts}
+                onChange={e => { setCaptchaAutoSolveAttempts(Math.max(1, Math.min(3, Number(e.target.value) || 1))); }}
+                min={1}
+                max={3}
+                disabled={!captchaAutoSolve}
+                style={sel({ width: 80 })}
+              />
+            </label>
+            <label style={label()}>
+              {t('run.manualInterventionOnCaptcha')}
+              <select value={manualInterventionOnCaptcha ? 'on' : 'off'} onChange={e => { setManualInterventionOnCaptcha(e.target.value === 'on'); }} style={sel({ minWidth: 120 })}>
+                <option value="on">{t('common.enabled')}</option>
+                <option value="off">{t('common.disabled')}</option>
+              </select>
+            </label>
+            <label style={label()}>
+              {t('run.manualLoginTimeoutSec')}
+              <input
+                type="number"
+                value={manualLoginTimeoutSec}
+                onChange={e => { setManualLoginTimeoutSec(Math.max(10, Number(e.target.value) || 10)); }}
+                min={10}
+                disabled={!manualInterventionOnCaptcha}
+                style={sel({ width: 90 })}
+              />
+            </label>
             <label style={label({ flex: 1, minWidth: 160 })}>
               {t('run.allowedHosts')} ({t('run.allowedHosts.hint')})
               <input value={allowedHosts} onChange={e => { setAllowedHosts(e.target.value); }} style={sel({})} />
@@ -266,6 +320,9 @@ export function QuickRunPanel(): React.ReactElement {
           <div>项目：{projects?.find(p => p.id === projectId)?.name ?? '—'}</div>
           <div>站点：{sites?.find(s => s.id === siteId)?.name ?? '—'}</div>
           <div>凭据：{creds?.find(c => c.id === credentialId)?.label ?? '—'}</div>
+          {needsExploration && <div>浏览器模式：{browserMode === 'headed' ? t('run.browserMode.headed') : t('run.browserMode.headless')}</div>}
+          {needsExploration && <div>滑块自动尝试：{captchaAutoSolve ? `${String(captchaAutoSolveAttempts)} 次` : t('common.disabled')}</div>}
+          {needsExploration && <div>人工兜底：{manualInterventionOnCaptcha ? `${t('common.enabled')} (${String(manualLoginTimeoutSec)}s)` : t('common.disabled')}</div>}
           <div>仓库：{selectedRepo?.name ?? (requiresRepoSelection ? '未选择' : '—')}</div>
           <div style={{ wordBreak: 'break-all' }}>路径：{projectPath || '—'}</div>
           {projectId && sites && sites.length > 0 && !siteId && (

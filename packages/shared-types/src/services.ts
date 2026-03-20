@@ -76,6 +76,11 @@ export interface StartRunInput {
     allowedHosts?: string[];
     maxSteps: number;
     maxPages: number;
+    browserMode?: 'headless' | 'headed';
+    captchaAutoSolve?: boolean;
+    captchaAutoSolveAttempts?: number;
+    manualInterventionOnCaptcha?: boolean;
+    manualLoginTimeoutMs?: number;
     focusAreas?: string[];
     persistAsCandidateTests?: boolean;
   };

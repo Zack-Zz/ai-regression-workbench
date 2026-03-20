@@ -29,6 +29,8 @@ Recent steps: {{recentSteps}}
 Recent findings: {{recentFindings}}
 Recent tool results: {{recentToolResults}}
 Recent network highlights: {{recentNetworkHighlights}}
+Brain plan:
+{{brainPlan}}
 
 Respond with JSON only:
 {"action":{{supportedActions}},"selector":"...","value":"...","targetUrl":"...","reasoning":"..."}

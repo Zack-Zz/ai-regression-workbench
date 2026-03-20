@@ -30,6 +30,9 @@ vi.mock('@zarb/agent-harness', async () => {
       if (firstUrl.includes('mock-login-fail')) {
         return { findingCount: 0, stepsExecuted: 0, pagesVisited: 0, llmError: 'LOGIN_FAILED' };
       }
+      if (firstUrl.includes('mock-login-captcha')) {
+        return { findingCount: 0, stepsExecuted: 0, pagesVisited: 0, llmError: 'LOGIN_CAPTCHA_REQUIRED' };
+      }
       return { findingCount: 0, stepsExecuted: 1, pagesVisited: 1 };
     }
   }
@@ -240,6 +243,31 @@ describe('Run lifecycle flow', () => {
     const detail = svc.getRun(runId);
     expect(detail?.summary.status).toBe('FAILED');
     expect(detail?.summary.summary).toBe('LOGIN_FAILED');
+    expect(detail?.summary.currentStage).toBe('RUNNING_EXPLORATION');
+  });
+
+  it('exploration captcha challenge is surfaced as LOGIN_CAPTCHA_REQUIRED', async () => {
+    const aiEngine = {
+      getProvider: () => ({
+        isConfigured: () => true,
+        complete: async () => '',
+        model: 'mock-model',
+      }),
+    } as const;
+    const svc = new RunService(db, { dataRoot: dir, aiEngine: aiEngine as never });
+
+    const started = svc.startRun({
+      runMode: 'exploration',
+      exploration: { startUrls: ['https://mock-login-captcha.local/login'], maxSteps: 10, maxPages: 5 },
+    });
+    expect(started.success).toBe(true);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const runId = started.run?.runId as string;
+    const detail = svc.getRun(runId);
+    expect(detail?.summary.status).toBe('FAILED');
+    expect(detail?.summary.summary).toBe('LOGIN_CAPTCHA_REQUIRED');
     expect(detail?.summary.currentStage).toBe('RUNNING_EXPLORATION');
   });
 

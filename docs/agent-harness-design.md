@@ -135,6 +135,18 @@
 - 调用 `playwright.*`、`diagnostics.*` 等工具
 - 输出 finding 和候选测试线索
 
+`Brain v1`（短期规划编排）：
+
+- `planner`：生成 `phase/objective/candidateUrls/avoidUrls/preferredActions`
+- `executor`：在当前页面产出具体动作（`click/fill/navigate/done`）
+- `policy guard`：在工具调用前执行硬约束（例如“已登录且无认证错误时禁止回 `/login`”）
+
+可观测要求：
+
+- `steps.ndjson` 必须显式记录 `brain.plan` / `brain.replan` / `policy.guard`
+- `prompt-samples.jsonl` 必须包含 `exploration-plan` 与 `exploration-decision` 样本
+- session `contextRefs.promptTemplates` 必须带上 `explorationPlan` 模板版本
+
 停止条件要求：
 
 - 先满足硬预算约束：`sessionBudgetMs / maxSteps / maxPages`

@@ -3,7 +3,7 @@ import { openDb, runMigrations } from '@zarb/storage';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync } from 'node:fs';
-import { ExplorationAgent, buildExplorationDecisionPrompt } from '../src/exploration-agent.js';
+import { ExplorationAgent, buildExplorationDecisionPrompt, buildExplorationPlanPrompt, estimateSliderDragDistance, isCaptchaChallengeError, looksLoggedInBySnapshot, resolveAuthGateMode } from '../src/exploration-agent.js';
 import type { PageProbe } from '../src/exploration-agent.js';
 import type { DomSnapshot } from '../src/playwright-tool-provider.js';
 
@@ -41,6 +41,7 @@ describe('buildExplorationDecisionPrompt', () => {
       inputs: [{ type: 'text', name: 'email', label: 'Email', selector: 'input[name="email"]' }],
       buttons: [{ text: 'Save', selector: 'button[type="submit"]' }],
       forms: [{ action: '/save', method: 'post', inputCount: 2 }],
+      clickables: [{ text: '订单管理', selector: '[role="menuitem"]:has-text("订单管理")', role: 'menuitem', area: 'nav' }],
     };
 
     const prompt = buildExplorationDecisionPrompt({
@@ -73,6 +74,7 @@ describe('buildExplorationDecisionPrompt', () => {
     expect(prompt).toContain('Available controls');
     expect(prompt).toContain('button[type="submit"]');
     expect(prompt).toContain('input[name="email"]');
+    expect(prompt).toContain('[role="menuitem"]:has-text("订单管理")');
     expect(prompt).toContain('CTA candidates');
     expect(prompt).toContain('button:Save (score=4)');
     expect(prompt).toContain('GET fetch status=500 https://example.com/api/users (320ms)');
@@ -107,6 +109,183 @@ describe('buildExplorationDecisionPrompt', () => {
 
     expect(prompt).toContain('"action":"navigate"|"done"');
   });
+
+  it('embeds brain plan context into decision prompt', () => {
+    const prompt = buildExplorationDecisionPrompt({
+      page: {
+        url: 'https://example.com/home',
+        title: 'Home',
+        consoleErrors: [],
+        networkErrors: [],
+        formCount: 0,
+        linkCount: 2,
+      },
+      config: {
+        startUrls: ['https://example.com/home'],
+        maxSteps: 6,
+        maxPages: 3,
+      },
+      stepIndex: 1,
+      visited: ['https://example.com/home'],
+      recentSteps: [],
+      recentFindings: [],
+      recentToolResults: [],
+      recentNetworkHighlights: [],
+      supportedActions: '"click"|"fill"|"navigate"|"done"',
+      remainingSteps: 5,
+      remainingPages: 2,
+      brainPlan: {
+        phase: 'post-login',
+        objective: 'Explore authenticated pages without returning to login.',
+        reasoning: 'Auth established.',
+        requiresLogin: false,
+        loginReason: '',
+        candidateUrls: ['https://example.com/dashboard'],
+        avoidUrls: ['https://example.com/login'],
+        preferredActions: ['click', 'navigate', 'done'],
+      },
+    });
+
+    expect(prompt).toContain('Brain plan');
+    expect(prompt).toContain('phase=post-login');
+    expect(prompt).toContain('avoidUrls=https://example.com/login');
+  });
+});
+
+describe('buildExplorationPlanPrompt', () => {
+  it('includes auth/no-script signals and recent context', () => {
+    const prompt = buildExplorationPlanPrompt({
+      page: {
+        url: 'https://example.com/home',
+        title: 'Home',
+        consoleErrors: [],
+        networkErrors: [],
+        formCount: 0,
+        linkCount: 1,
+        domSummary: {
+          headings: [],
+          primaryButtons: [],
+          navLinks: [],
+          inputHints: [],
+          textSnippet: "We're sorry but admin doesn't work properly without JavaScript enabled.",
+        },
+      },
+      config: {
+        startUrls: ['https://example.com/login', 'https://example.com/home'],
+        allowedHosts: ['example.com'],
+        maxSteps: 20,
+        maxPages: 10,
+      },
+      visited: ['https://example.com/home'],
+      stepIndex: 2,
+      remainingSteps: 18,
+      remainingPages: 9,
+      recentSteps: ['navigate https://example.com/home'],
+      recentFindings: [],
+      recentToolResults: ['state.capture => Home'],
+      recentNetworkHighlights: [],
+      authEstablished: true,
+    });
+
+    expect(prompt).toContain('Auth established: yes');
+    expect(prompt).toContain('No-script signal: yes');
+    expect(prompt).toContain('Login detected:');
+    expect(prompt).toContain('Recent tool results: state.capture => Home');
+  });
+});
+
+describe('isCaptchaChallengeError', () => {
+  it('detects slider/captcha related login errors', () => {
+    const err = 'TimeoutError: page.click: Timeout 10000ms exceeded. <span class="text">拖动滑块解锁</span> intercepts pointer events';
+    expect(isCaptchaChallengeError(err)).toBe(true);
+  });
+
+  it('does not mark generic click timeout as captcha challenge', () => {
+    const err = 'TimeoutError: page.click: Timeout 10000ms exceeded while waiting for selector ".submit-btn"';
+    expect(isCaptchaChallengeError(err)).toBe(false);
+  });
+});
+
+describe('looksLoggedInBySnapshot', () => {
+  it('returns true when URL is non-login and no password input exists', () => {
+    const snapshot: DomSnapshot = {
+      url: 'https://example.com/dashboard',
+      title: 'Dashboard',
+      inputs: [{ type: 'text', name: 'q', selector: 'input[name="q"]' }],
+      buttons: [],
+      forms: [],
+    };
+    expect(looksLoggedInBySnapshot(snapshot)).toBe(true);
+  });
+
+  it('returns false when still on login URL even without password input', () => {
+    const snapshot: DomSnapshot = {
+      url: 'https://example.com/login',
+      title: 'Login',
+      inputs: [],
+      buttons: [],
+      forms: [],
+    };
+    expect(looksLoggedInBySnapshot(snapshot)).toBe(false);
+  });
+});
+
+describe('resolveAuthGateMode', () => {
+  it('returns replan-plan for unauthenticated login page', () => {
+    expect(resolveAuthGateMode({
+      authEstablished: false,
+      hasAuthError: false,
+      isOnLoginPage: true,
+    })).toBe('replan-plan');
+  });
+
+  it('returns replan-continue for authenticated auth failure', () => {
+    expect(resolveAuthGateMode({
+      authEstablished: true,
+      hasAuthError: true,
+      isOnLoginPage: false,
+    })).toBe('replan-continue');
+  });
+
+  it('returns skip for authenticated login page without auth errors', () => {
+    expect(resolveAuthGateMode({
+      authEstablished: true,
+      hasAuthError: false,
+      isOnLoginPage: true,
+    })).toBe('skip');
+  });
+});
+
+describe('estimateSliderDragDistance', () => {
+  it('maps gapX to track travel by movable width ratio', () => {
+    const distance = estimateSliderDragDistance({
+      gapX: 100,
+      originalWidth: 300,
+      sliderWidth: 50,
+      travelWidth: 200,
+    });
+    expect(distance).toBeCloseTo(80, 5);
+  });
+
+  it('clamps out-of-range gapX to valid drag range', () => {
+    const distance = estimateSliderDragDistance({
+      gapX: 999,
+      originalWidth: 280,
+      sliderWidth: 60,
+      travelWidth: 180,
+    });
+    expect(distance).toBe(180);
+  });
+
+  it('returns 0 for invalid dimensions', () => {
+    const distance = estimateSliderDragDistance({
+      gapX: 50,
+      originalWidth: 0,
+      sliderWidth: 40,
+      travelWidth: 150,
+    });
+    expect(distance).toBe(0);
+  });
 });
 
 describe('ExplorationAgent.decideNextStep', () => {
@@ -124,7 +303,7 @@ describe('ExplorationAgent.decideNextStep', () => {
       });
 
       const step = await (agent as unknown as {
-        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], domSnapshot?: DomSnapshot) => Promise<{ action: string; selector?: string; reasoning: string }>;
+        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], brainPlan?: unknown, domSnapshot?: DomSnapshot) => Promise<{ action: string; selector?: string; reasoning: string }>;
       }).decideNextStep(
         {
           url: 'https://example.com/admin',
@@ -145,6 +324,7 @@ describe('ExplorationAgent.decideNextStep', () => {
         [],
         [],
         [],
+        undefined,
         {
           url: 'https://example.com/admin',
           title: 'Admin',
@@ -174,7 +354,7 @@ describe('ExplorationAgent.decideNextStep', () => {
       });
 
       const step = await (agent as unknown as {
-        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], domSnapshot?: DomSnapshot) => Promise<{ action: string; reasoning: string }>;
+        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], brainPlan?: unknown, domSnapshot?: DomSnapshot) => Promise<{ action: string; reasoning: string }>;
       }).decideNextStep(
         {
           url: 'https://example.com/status',
@@ -195,6 +375,7 @@ describe('ExplorationAgent.decideNextStep', () => {
         [],
         [],
         [],
+        undefined,
       );
 
       expect(step.action).toBe('done');
