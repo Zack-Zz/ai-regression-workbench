@@ -67,9 +67,9 @@ export function CodeTaskDetailPage(): React.ReactElement {
         <KV label={t('task.mode')} value={summary.mode} />
         <KV label={t('task.target')} value={summary.target} />
         {summary.agentName && <KV label={t('task.agent')} value={summary.agentName} />}
-        {summary.verifyPassed !== undefined && <KV label={t('task.verifyResult')} value={summary.verifyPassed ? '✓ 通过' : '✗ 失败'} />}
-        {summary.parentTaskId && <KV label="父任务" value={summary.parentTaskId} />}
-        <KV label="版本" value={`v${String(summary.taskVersion)}`} />
+        {summary.verifyPassed !== undefined && <KV label={t('task.verifyResult')} value={summary.verifyPassed ? t('codeTaskDetail.verifyPassed') : t('codeTaskDetail.verifyFailed')} />}
+        {summary.parentTaskId && <KV label={t('codeTaskDetail.parentTask')} value={summary.parentTaskId} />}
+        <KV label={t('codeTaskDetail.version')} value={`v${String(summary.taskVersion)}`} />
       </Card>
 
       {changedFiles.length > 0 && (
@@ -81,16 +81,16 @@ export function CodeTaskDetailPage(): React.ReactElement {
       )}
 
       {(diffUrl ?? patchUrl ?? rawOutputUrl ?? verifyOutputUrl) && (
-        <Card title="产物">
-          {diffUrl && <KV label="Diff" value={<a href={diffUrl} target="_blank" rel="noreferrer">查看</a>} />}
-          {patchUrl && <KV label="Patch" value={<a href={patchUrl} target="_blank" rel="noreferrer">下载</a>} />}
-          {rawOutputUrl && <KV label="Raw Output" value={<a href={rawOutputUrl} target="_blank" rel="noreferrer">查看</a>} />}
-          {verifyOutputUrl && <KV label="Verify Output" value={<a href={verifyOutputUrl} target="_blank" rel="noreferrer">查看</a>} />}
+        <Card title={t('codeTaskDetail.artifacts')}>
+          {diffUrl && <KV label="Diff" value={<a href={diffUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+          {patchUrl && <KV label="Patch" value={<a href={patchUrl} target="_blank" rel="noreferrer">{t('common.download')}</a>} />}
+          {rawOutputUrl && <KV label={t('codeTaskDetail.rawOutput')} value={<a href={rawOutputUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+          {verifyOutputUrl && <KV label={t('codeTaskDetail.verifyOutput')} value={<a href={verifyOutputUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
         </Card>
       )}
 
       {verificationCommands.length > 0 && (
-        <Card title="验证命令">
+        <Card title={t('codeTaskDetail.verifyCommands')}>
           <code style={{ fontSize: '0.85em' }}>{verificationCommands.join(' && ')}</code>
         </Card>
       )}
@@ -125,7 +125,7 @@ export function CodeTaskDetailPage(): React.ReactElement {
         <Card title={t('review.createCommit')}>
           {summary.verifyPassed === false && (
             <div style={{ padding: '0.5rem 0.75rem', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4, marginBottom: '0.5rem', fontSize: '0.9em' }}>
-              ⚠ verify 失败后提交属于 override，请确认已知晓风险。
+              {t('codeTaskDetail.overrideWarning')}
             </div>
           )}
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -134,7 +134,7 @@ export function CodeTaskDetailPage(): React.ReactElement {
               {t('review.createCommit')}
             </Button>
           </div>
-          <div style={{ fontSize: '0.8em', color: '#888', marginTop: 4 }}>expectedTaskVersion: {String(summary.taskVersion)}</div>
+          <div style={{ fontSize: '0.8em', color: '#888', marginTop: 4 }}>{t('codeTaskDetail.expectedTaskVersion')}: {String(summary.taskVersion)}</div>
         </Card>
       )}
 
@@ -153,11 +153,11 @@ export function CodeTaskDetailPage(): React.ReactElement {
 
       {commit && (
         <Card title={t('task.commit')}>
-          <KV label="状态" value={commit.status} />
+          <KV label={t('codeTaskDetail.status')} value={commit.status} />
           {commit.commitSha && <KV label="SHA" value={<code>{commit.commitSha}</code>} />}
-          {commit.branchName && <KV label="分支" value={commit.branchName} />}
-          {commit.commitMessage && <KV label="信息" value={commit.commitMessage} />}
-          {commit.errorMessage && <KV label="错误" value={<span style={{ color: '#c33' }}>{commit.errorMessage}</span>} />}
+          {commit.branchName && <KV label={t('codeTaskDetail.branch')} value={commit.branchName} />}
+          {commit.commitMessage && <KV label={t('codeTaskDetail.message')} value={commit.commitMessage} />}
+          {commit.errorMessage && <KV label={t('codeTaskDetail.error')} value={<span style={{ color: '#c33' }}>{commit.errorMessage}</span>} />}
         </Card>
       )}
     </div>

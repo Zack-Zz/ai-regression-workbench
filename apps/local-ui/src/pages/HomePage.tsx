@@ -2,12 +2,9 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAsync, useServerEvents } from '../hooks.js';
+import { Button, Card, ErrorBanner, Loading, RunStatusBadge, TaskStatusBadge } from '../components/ui.js';
 import { t } from '../i18n.js';
-import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, Button } from '../components/ui.js';
-import { QuickRunPanel } from '../components/QuickRunPanel.js';
 import type { CodeTaskSummary, RunSummary } from '../types.js';
-
-const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
 export function HomePage(): React.ReactElement {
   const navigate = useNavigate();
@@ -18,75 +15,113 @@ export function HomePage(): React.ReactElement {
   const { data: projects } = useAsync(() => api.listProjects(), []);
   useServerEvents(['run.created', 'run.updated'], () => reload());
 
+  const statCards = [
+    { label: t('home.stat.projects'), value: String(projects?.length ?? 0), detail: t('home.stat.projects.detail') },
+    { label: t('home.stat.pendingApproval'), value: String(pendingTasks?.items.length ?? 0), detail: t('home.stat.pendingApproval.detail') },
+    { label: t('home.stat.pendingReview'), value: String(reviewTasks?.items.length ?? 0), detail: t('home.stat.pendingReview.detail') },
+    { label: t('home.stat.pendingCommit'), value: String(commitTasks?.items.length ?? 0), detail: t('home.stat.pendingCommit.detail') },
+  ];
+
   return (
-    <div>
-      <Card title={t('run.start')}>
-        <QuickRunPanel />
-      </Card>
-      <Card title="工作台概览">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-          <SummaryStat label="项目数" value={String(projects?.length ?? 0)} />
-          <SummaryStat label="待批准" value={String(pendingTasks?.items.length ?? 0)} />
-          <SummaryStat label="待审查" value={String(reviewTasks?.items.length ?? 0)} />
-          <SummaryStat label="待提交" value={String(commitTasks?.items.length ?? 0)} />
+    <div className="page-stack">
+      <section className="page-intro">
+        <div>
+          <span className="page-intro__eyebrow">{t('home.eyebrow')}</span>
+          <h1 className="page-intro__title">{t('home.title')}</h1>
+          <p className="page-intro__description">
+            {t('home.description')}
+          </p>
         </div>
-      </Card>
-      <Card title="待处理动作">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <ActionSection
-            title="待批准"
-            items={pendingTasks?.items ?? []}
-            emptyText="当前没有待批准的代码任务"
-            onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
-          />
-          <ActionSection
-            title="待审查"
-            items={reviewTasks?.items ?? []}
-            emptyText="当前没有待审查的代码任务"
-            onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
-          />
-          <ActionSection
-            title="待提交"
-            items={commitTasks?.items ?? []}
-            emptyText="当前没有待提交的代码任务"
-            onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
-          />
-        </div>
-      </Card>
-      {pendingTasks && pendingTasks.items.length > 0 && (
-        <Card title={`待审批任务 (${String(pendingTasks.items.length)})`}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {pendingTasks.items.map(task => (
-              <div key={task.taskId} onClick={() => { navigate(`/code-tasks/${task.taskId}`); }}
-                style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.5rem', border: '1px solid #ffc107', borderRadius: 4, cursor: 'pointer', background: '#fffbf0' }}>
-                <TaskStatusBadge status={task.status} />
-                <span style={{ fontSize: '0.85em', flex: 1 }}>{task.goal}</span>
-                <span style={{ fontSize: '0.8em', color: '#888', fontFamily: 'monospace' }}>{task.taskId}</span>
-              </div>
-            ))}
+      </section>
+
+      <section className="summary-grid" aria-label={t('home.summary.aria')}>
+        {statCards.map((item) => (
+          <SummaryStat key={item.label} label={item.label} value={item.value} detail={item.detail} />
+        ))}
+      </section>
+
+      <section className="home-grid">
+        <Card
+          title={t('home.actions.title')}
+          subtitle={t('home.actions.subtitle')}
+        >
+          <div className="action-group">
+            <ActionSection
+              title={t('home.actions.pendingApproval')}
+              items={pendingTasks?.items ?? []}
+              emptyText={t('home.actions.pendingApproval.empty')}
+              onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
+            />
+            <ActionSection
+              title={t('home.actions.pendingReview')}
+              items={reviewTasks?.items ?? []}
+              emptyText={t('home.actions.pendingReview.empty')}
+              onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
+            />
+            <ActionSection
+              title={t('home.actions.pendingCommit')}
+              items={commitTasks?.items ?? []}
+              emptyText={t('home.actions.pendingCommit.empty')}
+              onOpen={(taskId) => { navigate(`/code-tasks/${taskId}`); }}
+            />
           </div>
         </Card>
-      )}
-      <Card title={t('nav.runs')}>
+
+        <div className="sidebar-stack">
+          <Card
+            title={t('home.shortcuts.title')}
+            subtitle={t('home.shortcuts.subtitle')}
+          >
+            <div className="shortcut-list">
+              <button type="button" className="shortcut-item" onClick={() => { navigate('/start-run'); }}>
+                <div className="shortcut-item__title">{t('home.shortcuts.startRun.title')}</div>
+                <div className="shortcut-item__body">{t('home.shortcuts.startRun.body')}</div>
+              </button>
+              <button type="button" className="shortcut-item" onClick={() => { navigate('/runs'); }}>
+                <div className="shortcut-item__title">{t('home.shortcuts.runs.title')}</div>
+                <div className="shortcut-item__body">{t('home.shortcuts.runs.body')}</div>
+              </button>
+              <button type="button" className="shortcut-item" onClick={() => { navigate('/code-tasks'); }}>
+                <div className="shortcut-item__title">{t('home.shortcuts.codeTasks.title')}</div>
+                <div className="shortcut-item__body">{t('home.shortcuts.codeTasks.body')}</div>
+              </button>
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      <Card
+        title={t('home.recentRuns.title')}
+        subtitle={t('home.recentRuns.subtitle')}
+      >
         {loading && <Loading />}
         {error && <ErrorBanner message={error} onRetry={reload} />}
         {data && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {data.items.map(r => <RunRow key={r.runId} run={r} onClick={() => { navigate(`/runs/${r.runId}`); }} />)}
-            {data.items.length === 0 && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无运行记录</span>}
-            <Button onClick={() => { navigate('/runs'); }}>{t('nav.runs')} →</Button>
-          </div>
+          <>
+            <div className="run-list">
+              {data.items.map((run) => (
+                <RunRow key={run.runId} run={run} onClick={() => { navigate(`/runs/${run.runId}`); }} />
+              ))}
+              {data.items.length === 0 && <p className="empty-state">{t('home.recentRuns.empty')}</p>}
+            </div>
+            <div className="section-footer">
+              <Button onClick={() => { navigate('/runs'); }}>
+                {t('home.recentRuns.viewAll')}
+              </Button>
+            </div>
+          </>
         )}
       </Card>
     </div>
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }): React.ReactElement {
+function SummaryStat({ label, value, detail }: { label: string; value: string; detail: string }): React.ReactElement {
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '0.75rem', background: '#fafafa' }}>
-      <div style={{ fontSize: '0.8em', color: '#666' }}>{label}</div>
-      <div style={{ fontSize: '1.4em', fontWeight: 700 }}>{value}</div>
+    <div className="summary-card">
+      <div className="summary-card__label">{label}</div>
+      <div className="summary-card__value">{value}</div>
+      <div className="summary-card__detail">{detail}</div>
     </div>
   );
 }
@@ -98,18 +133,37 @@ function ActionSection({ title, items, emptyText, onOpen }: {
   onOpen: (taskId: string) => void;
 }): React.ReactElement {
   return (
-    <div>
-      <div style={{ fontSize: '0.9em', fontWeight: 700, marginBottom: '0.5rem' }}>{title}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        {items.length === 0 && <span style={{ color: '#888', fontSize: '0.9em' }}>{emptyText}</span>}
-        {items.map(task => (
-          <div key={`${title}-${task.taskId}`} onClick={() => { onOpen(task.taskId); }}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem', border: '1px solid #e5e7eb', borderRadius: 4, cursor: 'pointer' }}>
-            <TaskStatusBadge status={task.status} />
-            <span style={{ flex: 1, fontSize: '0.85em' }}>{task.goal}</span>
-            <span style={{ fontSize: '0.75em', color: '#666' }}>{task.target}</span>
-          </div>
+    <section className="action-section">
+      <div className="action-section__header">
+        <h3 className="action-section__title">{title}</h3>
+        <span className="action-section__count">{String(items.length)}</span>
+      </div>
+      <div className="task-list">
+        {items.length === 0 && <p className="empty-state">{emptyText}</p>}
+        {items.map((task) => (
+          <TaskRow key={`${title}-${task.taskId}`} task={task} onOpen={() => { onOpen(task.taskId); }} />
         ))}
+      </div>
+    </section>
+  );
+}
+
+function TaskRow({ task, onOpen }: { task: CodeTaskSummary; onOpen: () => void }): React.ReactElement {
+  return (
+    <div className="task-row" onClick={onOpen} role="button" tabIndex={0} onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onOpen();
+      }
+    }}>
+      <TaskStatusBadge status={task.status} />
+      <div className="task-row__content">
+        <p className="task-row__title">{task.goal}</p>
+        <div className="task-row__meta">{task.taskId}</div>
+      </div>
+      <div className="task-row__tail">
+        <span>{task.target || t('home.task.targetFallback')}</span>
+        <span>{t('common.viewDetail')}</span>
       </div>
     </div>
   );
@@ -117,14 +171,41 @@ function ActionSection({ title, items, emptyText, onOpen }: {
 
 function RunRow({ run, onClick }: { run: RunSummary; onClick: () => void }): React.ReactElement {
   return (
-    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.5rem', border: '1px solid #eee', borderRadius: 4, cursor: 'pointer' }}>
-      <RunStatusBadge status={run.status} />
-      <span style={{ fontSize: '0.85em', color: '#555' }}>{run.runMode}</span>
-      <span style={{ fontSize: '0.85em', flex: 1 }}>{run.scopeType}{run.scopeValue ? `: ${run.scopeValue}` : ''}</span>
-      {(run.projectName ?? run.projectId) && <span style={{ fontSize: '0.8em', color: '#666', background: '#f5f5f5', padding: '1px 5px', borderRadius: 3 }}>{run.projectName ?? run.projectId!.slice(0, 8)}</span>}
-      {(run.siteName ?? run.siteId) && <span style={{ fontSize: '0.8em', color: '#666', background: '#eef5ff', padding: '1px 5px', borderRadius: 3 }}>{run.siteName ?? run.siteId!.slice(0, 8)}</span>}
-      <span style={{ fontSize: '0.8em', color: '#888' }}>{run.startedAt.slice(0, 16).replace('T', ' ')}</span>
-      <span style={{ fontSize: '0.85em' }}>✓{run.passed} ✗{run.failed}</span>
+    <div className="run-row" onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClick();
+      }
+    }}>
+      <div className="run-row__primary">
+        <div className="run-row__stack">
+          <RunStatusBadge status={run.status} />
+          <span className="run-row__label">{run.runMode}</span>
+        </div>
+        <div className="run-row__scope">
+          {run.scopeType}
+          {run.scopeValue ? `: ${run.scopeValue}` : ''}
+        </div>
+        <div className="run-row__meta">{t('run.detail.id')}: {run.runId}</div>
+      </div>
+
+      <div className="run-row__secondary">
+        {(run.projectName ?? run.projectId) && (
+          <div className="run-row__stack">
+            <span className="run-row__pill">{t('run.detail.project', { name: run.projectName ?? run.projectId!.slice(0, 8) })}</span>
+          </div>
+        )}
+        {(run.siteName ?? run.siteId) && (
+          <div className="run-row__stack" style={{ marginTop: 8 }}>
+            <span className="run-row__pill">{t('run.detail.site', { name: run.siteName ?? run.siteId!.slice(0, 8) })}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="run-row__tail">
+        <div className="run-row__stats">✓ {run.passed} · ✗ {run.failed}</div>
+        <div className="run-row__time">{run.startedAt.slice(0, 16).replace('T', ' ')}</div>
+      </div>
     </div>
   );
 }

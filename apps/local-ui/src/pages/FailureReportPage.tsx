@@ -50,17 +50,17 @@ export function FailureReportPage(): React.ReactElement {
         <h2 style={{ margin: 0 }}>{r.testcaseName}</h2>
       </div>
 
-      <Card title="失败信息">
-        <KV label="Testcase" value={r.testcaseId} />
-        {r.errorType && <KV label="错误类型" value={r.errorType} />}
-        {r.errorMessage && <KV label="错误信息" value={<span style={{ color: '#c33' }}>{r.errorMessage}</span>} />}
+      <Card title={t('failureReport.failureInfo')}>
+        <KV label={t('failureReport.testcase')} value={r.testcaseId} />
+        {r.errorType && <KV label={t('failureReport.errorType')} value={r.errorType} />}
+        {r.errorMessage && <KV label={t('failureReport.errorMessage')} value={<span style={{ color: '#c33' }}>{r.errorMessage}</span>} />}
       </Card>
 
       {Object.values(r.artifacts).some(Boolean) && (
-        <Card title="产物">
+        <Card title={t('failureReport.artifacts')}>
           {screenshotUrl && (
             <div style={{ marginBottom: '1rem' }}>
-              <div style={{ color: '#666', minWidth: 140, fontSize: '0.9em', marginBottom: '0.5rem' }}>截图</div>
+              <div style={{ color: '#666', minWidth: 140, fontSize: '0.9em', marginBottom: '0.5rem' }}>{t('failureReport.screenshot')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 <button
                   onClick={() => { setPreviewImage(screenshotUrl); }}
@@ -69,49 +69,49 @@ export function FailureReportPage(): React.ReactElement {
                   <img src={screenshotUrl} alt={`${r.testcaseName} screenshot`} style={{ display: 'block', width: 'min(420px, 100%)', maxWidth: '100%', maxHeight: 240, objectFit: 'cover', background: '#f8fafc' }} />
                 </button>
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <a href={screenshotUrl} target="_blank" rel="noreferrer">查看原图</a>
-                  <button onClick={() => { setPreviewImage(screenshotUrl); }} style={{ border: 'none', background: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}>放大预览</button>
+                  <a href={screenshotUrl} target="_blank" rel="noreferrer">{t('failureReport.viewOriginal')}</a>
+                  <button onClick={() => { setPreviewImage(screenshotUrl); }} style={{ border: 'none', background: 'none', padding: 0, color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}>{t('failureReport.preview')}</button>
                 </div>
               </div>
             </div>
           )}
-          {videoUrl && <KV label="视频" value={<a href={videoUrl} target="_blank" rel="noreferrer">查看</a>} />}
-          {traceUrl && <KV label="Trace" value={<a href={traceUrl} target="_blank" rel="noreferrer">下载</a>} />}
-          {htmlReportUrl && <KV label="HTML Report" value={<a href={htmlReportUrl} target="_blank" rel="noreferrer">查看</a>} />}
-          {networkUrl && <KV label="网络日志" value={<a href={networkUrl} target="_blank" rel="noreferrer">查看</a>} />}
+          {videoUrl && <KV label={t('failureReport.video')} value={<a href={videoUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+          {traceUrl && <KV label="Trace" value={<a href={traceUrl} target="_blank" rel="noreferrer">{t('common.download')}</a>} />}
+          {htmlReportUrl && <KV label={t('failureReport.htmlReport')} value={<a href={htmlReportUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+          {networkUrl && <KV label={t('failureReport.networkLog')} value={<a href={networkUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
         </Card>
       )}
 
-      <Card title="关联上下文">
-        <KV label="Trace IDs" value={r.correlationContext.traceIds.join(', ') || '-'} />
-        <KV label="Request IDs" value={r.correlationContext.requestIds.join(', ') || '-'} />
-        <KV label="Session IDs" value={r.correlationContext.sessionIds.join(', ') || '-'} />
+      <Card title={t('failureReport.relatedContext')}>
+        <KV label={t('failureReport.traceIds')} value={r.correlationContext.traceIds.join(', ') || '-'} />
+        <KV label={t('failureReport.requestIds')} value={r.correlationContext.requestIds.join(', ') || '-'} />
+        <KV label={t('failureReport.sessionIds')} value={r.correlationContext.sessionIds.join(', ') || '-'} />
       </Card>
 
-      <Card title="诊断抓取">
+      <Card title={t('failureReport.diagnostics')}>
         {diagnostics.loading && <Loading />}
         {diagnostics.error && <ErrorBanner message={diagnostics.error} />}
         {!diagnostics.loading && diagnostics.data && diagnostics.data.diagnosticFetches.length === 0 && (
-          <span style={{ color: '#888', fontSize: '0.9em' }}>暂无诊断抓取记录</span>
+          <span style={{ color: '#888', fontSize: '0.9em' }}>{t('failureReport.noDiagnostics')}</span>
         )}
         {diagnostics.data && diagnostics.data.diagnosticFetches.length > 0 && (
           <Table
-            headers={['类型', '状态', 'Provider', '时间', '原始链接']}
+            headers={[t('common.type'), t('common.status'), t('failureReport.provider'), t('common.time'), t('failureReport.rawLink')]}
             rows={diagnostics.data.diagnosticFetches.map((fetch) => [
               fetch.type,
               <span key="status" style={{ color: fetch.status === 'succeeded' ? '#2a7' : fetch.status === 'degraded' ? '#b45309' : fetch.status === 'pending' ? '#6b7280' : '#c33' }}>{fetch.status}</span>,
               fetch.provider ?? '-',
               fetch.createdAt,
-              fetch.rawLink ? <a key="link" href={fetch.rawLink} target="_blank" rel="noreferrer">查看</a> : '-',
+              fetch.rawLink ? <a key="link" href={fetch.rawLink} target="_blank" rel="noreferrer">{t('common.view')}</a> : '-',
             ])}
           />
         )}
       </Card>
 
-      <Card title="Trace 摘要">
+      <Card title={t('failureReport.traceSummary')}>
         {trace.loading && <Loading />}
         {trace.error && <ErrorBanner message={trace.error} />}
-        {!trace.loading && !trace.data && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无 trace 数据</span>}
+        {!trace.loading && !trace.data && <span style={{ color: '#888', fontSize: '0.9em' }}>{t('failureReport.noTrace')}</span>}
         {trace.data && trace.data.unavailableReason && (
           <div style={{ color: '#b45309', fontSize: '0.9em', padding: '0.5rem', background: '#fffbeb', borderRadius: 4, border: '1px solid #fde68a' }}>
             ⚠ {trace.data.unavailableReason}
@@ -119,18 +119,18 @@ export function FailureReportPage(): React.ReactElement {
         )}
         {trace.data && !trace.data.unavailableReason && (
           <>
-            <KV label="Trace ID" value={trace.data.summary.traceId} />
-            <KV label="有错误" value={trace.data.summary.hasError ? '是' : '否'} />
-            {trace.data.summary.rawLink && <KV label="原始链接" value={<a href={trace.data.summary.rawLink} target="_blank" rel="noreferrer">查看</a>} />}
-            {trace.data.summary.errorSpans.length > 0 && <KV label="错误 Span 数" value={String(trace.data.summary.errorSpans.length)} />}
+            <KV label={t('failureReport.traceId')} value={trace.data.summary.traceId} />
+            <KV label={t('failureReport.hasError')} value={trace.data.summary.hasError ? t('failureReport.yes') : t('failureReport.no')} />
+            {trace.data.summary.rawLink && <KV label={t('failureReport.rawLink')} value={<a href={trace.data.summary.rawLink} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+            {trace.data.summary.errorSpans.length > 0 && <KV label={t('failureReport.errorSpanCount')} value={String(trace.data.summary.errorSpans.length)} />}
           </>
         )}
       </Card>
 
-      <Card title="日志摘要">
+      <Card title={t('failureReport.logSummary')}>
         {logs.loading && <Loading />}
         {logs.error && <ErrorBanner message={logs.error} />}
-        {!logs.loading && !logs.data && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无日志数据</span>}
+        {!logs.loading && !logs.data && <span style={{ color: '#888', fontSize: '0.9em' }}>{t('failureReport.noLogs')}</span>}
         {logs.data && logs.data.unavailableReason && (
           <div style={{ color: '#b45309', fontSize: '0.9em', padding: '0.5rem', background: '#fffbeb', borderRadius: 4, border: '1px solid #fde68a' }}>
             ⚠ {logs.data.unavailableReason}
@@ -138,11 +138,11 @@ export function FailureReportPage(): React.ReactElement {
         )}
         {logs.data && !logs.data.unavailableReason && (
           <>
-            <KV label="命中" value={logs.data.summary.matched ? '是' : '否'} />
-            {logs.data.summary.rawLink && <KV label="原始链接" value={<a href={logs.data.summary.rawLink} target="_blank" rel="noreferrer">查看</a>} />}
+            <KV label={t('failureReport.matched')} value={logs.data.summary.matched ? t('failureReport.yes') : t('failureReport.no')} />
+            {logs.data.summary.rawLink && <KV label={t('failureReport.rawLink')} value={<a href={logs.data.summary.rawLink} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
             {logs.data.summary.highlights.length > 0 && (
               <div>
-                <div style={{ color: '#666', fontSize: '0.85em', marginBottom: 4 }}>高亮</div>
+                <div style={{ color: '#666', fontSize: '0.85em', marginBottom: 4 }}>{t('failureReport.highlights')}</div>
                 <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9em' }}>
                   {logs.data.summary.highlights.map((h, i) => <li key={i}>{h}</li>)}
                 </ul>
@@ -152,72 +152,72 @@ export function FailureReportPage(): React.ReactElement {
         )}
       </Card>
 
-      <Card title="AI 分析">
+      <Card title={t('failureReport.aiAnalysis')}>
         {analysis.loading && <Loading />}
         {analysis.error && <ErrorBanner message={analysis.error} />}
         {!analysis.loading && !analysis.data && (
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <span style={{ color: '#888', fontSize: '0.9em' }}>暂无分析结果</span>
-            <Button onClick={() => { void retryAnalysis(); }}>触发分析</Button>
+            <span style={{ color: '#888', fontSize: '0.9em' }}>{t('failureReport.noAnalysis')}</span>
+            <Button onClick={() => { void retryAnalysis(); }}>{t('failureReport.triggerAnalysis')}</Button>
           </div>
         )}
         {analysis.data && (
           <>
-            {analysis.data.summary && <KV label="摘要" value={analysis.data.summary} />}
-            {analysis.data.probableCause && <KV label="可能原因" value={analysis.data.probableCause} />}
-            {analysis.data.suspectedLayer && <KV label="疑似层" value={analysis.data.suspectedLayer} />}
-            {analysis.data.confidence !== undefined && <KV label="置信度" value={`${String(analysis.data.confidence)}%`} />}
+            {analysis.data.summary && <KV label={t('failureReport.summary')} value={analysis.data.summary} />}
+            {analysis.data.probableCause && <KV label={t('failureReport.probableCause')} value={analysis.data.probableCause} />}
+            {analysis.data.suspectedLayer && <KV label={t('failureReport.suspectedLayer')} value={analysis.data.suspectedLayer} />}
+            {analysis.data.confidence !== undefined && <KV label={t('failureReport.confidence')} value={`${String(analysis.data.confidence)}%`} />}
             {analysis.data.suggestions && analysis.data.suggestions.length > 0 && (
               <div>
-                <div style={{ color: '#666', fontSize: '0.85em', marginBottom: 4 }}>建议</div>
+                <div style={{ color: '#666', fontSize: '0.85em', marginBottom: 4 }}>{t('failureReport.suggestions')}</div>
                 <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9em' }}>
                   {analysis.data.suggestions.map((s, i) => <li key={i}>{s}</li>)}
                 </ul>
               </div>
             )}
             <div style={{ marginTop: '0.5rem' }}>
-              <Button onClick={() => { void retryAnalysis(); }}>重新分析</Button>
+              <Button onClick={() => { void retryAnalysis(); }}>{t('failureReport.retryAnalysis')}</Button>
             </div>
           </>
         )}
       </Card>
 
       {drafts.data && drafts.data.length > 0 && (
-        <Card title={`AI 修复建议 (${String(drafts.data.length)})`}>
+        <Card title={t('failureReport.aiDrafts', { count: drafts.data.length })}>
           {drafts.data.map(d => (
             <div key={d.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 500, marginBottom: 2 }}>{d.goal}</div>
                 <div style={{ fontSize: '0.85em', color: '#888' }}>{d.target} · {d.created_at.slice(0, 16).replace('T', ' ')}</div>
               </div>
-              <Button variant="primary" onClick={() => { void promote(d.id); }}>创建代码任务</Button>
+              <Button variant="primary" onClick={() => { void promote(d.id); }}>{t('failureReport.createCodeTask')}</Button>
             </div>
           ))}
         </Card>
       )}
 
-      <Card title="执行画像">
+      <Card title={t('failureReport.executionProfile')}>
         {profile.loading && <Loading />}
         {profile.error && <ErrorBanner message={profile.error} />}
         {profile.data && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-            <MiniStat label="流程步骤" value={String(profile.data.summary.flowStepCount)} />
-            <MiniStat label="UI 操作" value={String(profile.data.summary.uiActionCount)} />
-            <MiniStat label="接口调用" value={String(profile.data.summary.apiCallCount)} />
-            <MiniStat label="失败接口" value={String(profile.data.summary.failedApiCount)} tone={profile.data.summary.failedApiCount > 0 ? 'warn' : 'neutral'} />
+            <MiniStat label={t('executionReport.flowSteps')} value={String(profile.data.summary.flowStepCount)} />
+            <MiniStat label={t('executionReport.uiActions')} value={String(profile.data.summary.uiActionCount)} />
+            <MiniStat label={t('executionReport.apiCalls')} value={String(profile.data.summary.apiCallCount)} />
+            <MiniStat label={t('executionReport.failedApis')} value={String(profile.data.summary.failedApiCount)} tone={profile.data.summary.failedApiCount > 0 ? 'warn' : 'neutral'} />
           </div>
         )}
-        {!profile.loading && !profile.data && <span style={{ color: '#888', fontSize: '0.9em' }}>暂无执行画像</span>}
+        {!profile.loading && !profile.data && <span style={{ color: '#888', fontSize: '0.9em' }}>{t('failureReport.noExecutionProfile')}</span>}
       </Card>
 
       {profile.data && profile.data.flowSteps.length > 0 && (
-        <Card title={`流程步骤 (${String(profile.data.flowSteps.length)})`}>
+        <Card title={t('testcaseExecution.flowSteps', { count: profile.data.flowSteps.length })}>
           <Table
-            headers={['Step', 'Flow', '状态', '开始时间', '耗时']}
+            headers={[t('testcaseExecution.step'), t('testcaseExecution.flow'), t('common.status'), t('run.startedAt'), t('common.duration')]}
             rows={profile.data.flowSteps.map((step) => [
               step.stepName,
               step.flowId,
-              <span key="success" style={{ color: step.success ? '#2a7' : '#c33' }}>{step.success ? 'success' : 'failed'}</span>,
+              <span key="success" style={{ color: step.success ? '#2a7' : '#c33' }}>{step.success ? t('testcaseExecution.success') : t('testcaseExecution.failed')}</span>,
               step.startedAt,
               step.durationMs !== undefined ? `${String(step.durationMs)}ms` : '-',
             ])}
@@ -226,12 +226,12 @@ export function FailureReportPage(): React.ReactElement {
       )}
 
       {profile.data && profile.data.uiActions.length > 0 && (
-        <Card title={`UI 操作 (${String(profile.data.uiActions.length)})`}>
+        <Card title={t('testcaseExecution.uiActions', { count: profile.data.uiActions.length })}>
           <Table
-            headers={['Type', '状态', '页面', '开始时间', '耗时']}
+            headers={[t('common.type'), t('common.status'), t('testcaseExecution.page'), t('run.startedAt'), t('common.duration')]}
             rows={profile.data.uiActions.map((action) => [
               action.actionType,
-              <span key="success" style={{ color: action.success ? '#2a7' : '#c33' }}>{action.success ? 'success' : 'failed'}</span>,
+              <span key="success" style={{ color: action.success ? '#2a7' : '#c33' }}>{action.success ? t('testcaseExecution.success') : t('testcaseExecution.failed')}</span>,
               <span key="page" style={{ fontSize: '0.8em', wordBreak: 'break-all' }}>{action.pageUrl ?? '-'}</span>,
               action.startedAt,
               action.durationMs !== undefined ? `${String(action.durationMs)}ms` : '-',
@@ -241,9 +241,9 @@ export function FailureReportPage(): React.ReactElement {
       )}
 
       {profile.data && profile.data.apiCalls.length > 0 && (
-        <Card title={`接口调用 (${String(profile.data.apiCalls.length)})`}>
+        <Card title={t('testcaseExecution.apiCalls', { count: profile.data.apiCalls.length })}>
           <Table
-            headers={['Method', 'URL', 'Status', '耗时', '响应摘要 / 错误']}
+            headers={[t('common.method'), t('common.url'), t('common.status'), t('common.duration'), t('failureReport.responseSummaryOrError')]}
             rows={profile.data.apiCalls.map(c => [
               c.method ?? '-',
               <span key="u" style={{ fontSize: '0.8em', wordBreak: 'break-all' }}>{c.url}</span>,
@@ -255,7 +255,7 @@ export function FailureReportPage(): React.ReactElement {
         </Card>
       )}
 
-      {previewImage && <ImagePreviewModal src={previewImage} title={`${r.testcaseName} 截图预览`} onClose={() => { setPreviewImage(null); }} />}
+      {previewImage && <ImagePreviewModal src={previewImage} title={t('failureReport.screenshotPreview', { name: r.testcaseName })} onClose={() => { setPreviewImage(null); }} />}
     </div>
   );
 }

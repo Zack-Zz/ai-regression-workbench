@@ -4,10 +4,8 @@ import { api } from '../api.js';
 import { useAsync, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, Button, Table } from '../components/ui.js';
-import type { RunSummary } from '../types.js';
+import type { RunMode, RunSummary } from '../types.js';
 import { fmtDatetime } from '../utils.js';
-
-const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
 export function RunListPage(): React.ReactElement {
   const navigate = useNavigate();
@@ -25,7 +23,7 @@ export function RunListPage(): React.ReactElement {
     r.siteName ?? r.siteId?.slice(0, 8) ?? '—',
     `✓${String(r.passed)} ✗${String(r.failed)} ↷${String(r.skipped)}`,
     fmtDatetime(r.startedAt),
-    <Button key="v" onClick={() => { navigate(`/runs/${r.runId}`); }}>查看</Button>,
+    <Button key="v" onClick={() => { navigate(`/runs/${r.runId}`); }}>{t('common.view')}</Button>,
   ]);
 
   return (
@@ -33,20 +31,20 @@ export function RunListPage(): React.ReactElement {
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{t('nav.runs')}</h2>
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); }} style={{ padding: '4px 8px' }}>
-          <option value="">全部状态</option>
+          <option value="">{t('runList.allStatuses')}</option>
           {['CREATED','RUNNING_TESTS','COMPLETED','FAILED','CANCELLED','PAUSED'].map(s => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
         </select>
         <select value={modeFilter} onChange={e => { setModeFilter(e.target.value); }} style={{ padding: '4px 8px' }}>
-          <option value="">全部模式</option>
-          <option value="regression">regression</option>
-          <option value="exploration">exploration</option>
-          <option value="hybrid">hybrid</option>
+          <option value="">{t('runList.allModes')}</option>
+          {(['regression', 'exploration', 'hybrid'] as RunMode[]).map((mode) => (
+            <option key={mode} value={mode}>{t(`run.mode.${mode}`)}</option>
+          ))}
         </select>
         <Button onClick={reload}>{t('common.retry')}</Button>
       </div>
       {loading && <Loading />}
       {error && <ErrorBanner message={error} onRetry={reload} />}
-      {data && <Table headers={[t('common.status'), t('run.mode'), t('run.scope'), '项目', '站点', '统计', t('run.startedAt'), t('common.actions')]} rows={rows} />}
+      {data && <Table headers={[t('common.status'), t('run.mode'), t('run.scope'), t('runList.project'), t('runList.site'), t('runList.stats'), t('run.startedAt'), t('common.actions')]} rows={rows} />}
     </div>
   );
 }

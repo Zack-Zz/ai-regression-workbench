@@ -4,15 +4,34 @@ import type { RunStatus, CodeTaskStatus } from '../types.js';
 
 type StageResultStatus = 'success' | 'degraded' | 'failed' | 'skipped';
 
+function hexToRgba(color: string, alpha: number): string {
+  const hex = color.replace('#', '');
+  const normalized = hex.length === 3
+    ? hex.split('').map((value) => value + value).join('')
+    : hex;
+
+  if (normalized.length !== 6) return color;
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+  return `rgba(${String(red)}, ${String(green)}, ${String(blue)}, ${String(alpha)})`;
+}
+
 export function Loading(): React.ReactElement {
-  return <div style={{ padding: '1rem', color: '#888' }}>{t('common.loading')}</div>;
+  return <div className="loading-indicator">{t('common.loading')}</div>;
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }): React.ReactElement {
   return (
-    <div style={{ padding: '0.75rem 1rem', background: '#fee', border: '1px solid #fcc', borderRadius: 4, color: '#c00' }}>
+    <div className="error-banner">
       <strong>{t('common.error')}:</strong> {message}
-      {onRetry && <button onClick={onRetry} style={{ marginLeft: '1rem' }}>{t('common.retry')}</button>}
+      {onRetry && (
+        <Button onClick={onRetry} size="sm">
+          {t('common.retry')}
+        </Button>
+      )}
     </div>
   );
 }
@@ -53,7 +72,14 @@ const TASK_STATUS_COLOR: Record<string, string> = {
 export function StatusBadge({ status, type = 'run' }: { status: string; type?: 'run' | 'task' }): React.ReactElement {
   const color = (type === 'task' ? TASK_STATUS_COLOR[status] : RUN_STATUS_COLOR[status]) ?? '#555';
   return (
-    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 12, background: color, color: '#fff', fontSize: '0.8em', fontWeight: 600 }}>
+    <span
+      className="status-badge"
+      style={{
+        borderColor: hexToRgba(color, 0.18),
+        background: hexToRgba(color, 0.12),
+        color,
+      }}
+    >
       {t(`status.${status}`)}
     </span>
   );
@@ -67,28 +93,60 @@ export function TaskStatusBadge({ status }: { status: CodeTaskStatus }): React.R
   return <StatusBadge status={status} type="task" />;
 }
 
-export function Button({ children, onClick, disabled, variant = 'default', type = 'button', style }: {
+export function Button({ children, onClick, disabled, variant = 'default', type = 'button', size = 'md', style, className, title }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean;
   variant?: 'default' | 'primary' | 'danger';
   type?: 'button' | 'submit' | 'reset';
+  size?: 'sm' | 'md';
   style?: React.CSSProperties;
-
+  className?: string;
+  title?: string;
 }): React.ReactElement {
-  const bg = variant === 'primary' ? '#36c' : variant === 'danger' ? '#c33' : '#eee';
-  const fg = variant === 'default' ? '#333' : '#fff';
+  const classes = [
+    'ui-button',
+    variant !== 'default' ? `ui-button--${variant}` : '',
+    size === 'sm' ? 'ui-button--sm' : '',
+    className ?? '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
-      style={{ padding: '6px 14px', background: bg, color: fg, border: 'none', borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1, ...style }}>
+    <button type={type} onClick={onClick} disabled={disabled} className={classes} style={style} title={title}>
       {children}
     </button>
   );
 }
 
-export function Card({ children, title }: { children: React.ReactNode; title?: string }): React.ReactElement {
+export function Card({
+  children,
+  title,
+  subtitle,
+  actions,
+  className,
+  bodyClassName,
+}: {
+  children: React.ReactNode;
+  title?: React.ReactNode;
+  subtitle?: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}): React.ReactElement {
+  const cardClassName = ['ui-card', className ?? ''].filter(Boolean).join(' ');
+  const headerClassName = ['ui-card__header', title || subtitle || actions ? 'ui-card__header--with-body' : ''].filter(Boolean).join(' ');
+  const contentClassName = ['ui-card__body', bodyClassName ?? ''].filter(Boolean).join(' ');
+
   return (
-    <div style={{ border: '1px solid #ddd', borderRadius: 6, marginBottom: '1rem', overflow: 'hidden' }}>
-      {title && <div style={{ padding: '0.5rem 1rem', background: '#f5f5f5', borderBottom: '1px solid #ddd', fontWeight: 600 }}>{title}</div>}
-      <div style={{ padding: '1rem' }}>{children}</div>
+    <div className={cardClassName}>
+      {(title || subtitle || actions) && (
+        <div className={headerClassName}>
+          <div>
+            {title && <h3 className="ui-card__title">{title}</h3>}
+            {subtitle && <p className="ui-card__subtitle">{subtitle}</p>}
+          </div>
+          {actions}
+        </div>
+      )}
+      <div className={contentClassName}>{children}</div>
     </div>
   );
 }
@@ -104,15 +162,15 @@ export function KV({ label, value }: { label: string; value: React.ReactNode }):
 
 export function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }): React.ReactElement {
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em' }}>
+    <div className="ui-table-scroll">
+      <table className="ui-table">
         <thead>
-          <tr>{headers.map(h => <th key={h} style={{ padding: '6px 10px', background: '#f5f5f5', borderBottom: '1px solid #ddd', textAlign: 'left' }}>{h}</th>)}</tr>
+          <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-              {row.map((cell, j) => <td key={j} style={{ padding: '6px 10px' }}>{cell}</td>)}
+            <tr key={i}>
+              {row.map((cell, j) => <td key={j}>{cell}</td>)}
             </tr>
           ))}
         </tbody>

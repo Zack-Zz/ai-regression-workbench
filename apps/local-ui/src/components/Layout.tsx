@@ -11,33 +11,56 @@ if (savedLocale === 'en-US' || savedLocale === 'zh-CN') setLocale(savedLocale);
 export function Layout(): React.ReactElement {
   const navigate = useNavigate();
   const [locale, setLocaleState] = React.useState(getLocale());
+  const navItems = [
+    { path: '/', label: t('nav.home') },
+    { path: '/start-run', label: t('nav.startRun') },
+    { path: '/runs', label: t('nav.runs') },
+    { path: '/code-tasks', label: t('nav.codeTasks') },
+    { path: '/projects', label: t('nav.projects') },
+  ] as const;
 
   function toggleLocale(): void {
     const next = locale === 'zh-CN' ? 'en-US' : 'zh-CN';
     setLocale(next);
     localStorage.setItem(LOCALE_KEY, next);
     setLocaleState(next);
-    window.location.reload();
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
-      <header style={{ display: 'flex', alignItems: 'center', padding: '0 1.5rem', height: 48, background: '#1a1a2e', color: '#fff', gap: '1.5rem' }}>
-        <span style={{ fontWeight: 700, fontSize: '1.1em', marginRight: '1rem' }}>ZARB</span>
-        {(['/', '/runs', '/code-tasks', '/projects'] as const).map((path, i) => (
-          <NavLink key={path} to={path} end={path === '/'} style={({ isActive }) => ({ color: isActive ? '#7af' : '#ccc', textDecoration: 'none', fontSize: '0.9em' })}>
-            {[t('nav.home'), t('nav.runs'), t('nav.codeTasks'), t('nav.projects')][i]}
-          </NavLink>
-        ))}
-        <div style={{ flex: 1 }} />
-        <button onClick={toggleLocale} style={{ background: 'none', border: '1px solid #555', color: '#ccc', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.85em' }}>
-          {locale === 'zh-CN' ? 'EN' : '中文'}
-        </button>
-        <button onClick={() => { navigate('/settings'); }} style={{ background: 'none', border: '1px solid #555', color: '#ccc', padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: '0.85em' }}>
-          {t('nav.settings')}
-        </button>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header__inner">
+          <div className="app-brand">
+            <span className="app-brand__mark">Z</span>
+            <div className="app-brand__meta">
+              <span className="app-brand__name">ZARB</span>
+              <span className="app-brand__tagline">{t('layout.tagline')}</span>
+            </div>
+          </div>
+          <nav className="app-nav" aria-label="Primary">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                end={item.path === '/'}
+                className={({ isActive }) => ['app-nav__link', isActive ? 'app-nav__link--active' : ''].filter(Boolean).join(' ')}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+          <div className="app-header__spacer" />
+          <div className="app-header__actions">
+            <button type="button" onClick={toggleLocale} className="app-header__button">
+              {locale === 'zh-CN' ? 'EN' : '中文'}
+            </button>
+            <button type="button" onClick={() => { navigate('/settings'); }} className="app-header__button">
+              {t('nav.settings')}
+            </button>
+          </div>
+        </div>
       </header>
-      <main style={{ flex: 1, padding: '1.5rem', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+      <main className="app-main" key={locale}>
         <Outlet />
       </main>
     </div>

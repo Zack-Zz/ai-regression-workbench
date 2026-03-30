@@ -14,9 +14,13 @@ import { test, expect } from '@playwright/test';
 // ---------------------------------------------------------------------------
 
 test('Quick Run: submit regression run and navigate to Run Detail', async ({ page }) => {
-  await page.goto('/');
+  await page.addInitScript(() => {
+    window.localStorage.setItem('zarb-locale', 'zh-CN');
+  });
+  await page.goto('/start-run');
 
-  // The QuickRunPanel form should be visible
+  // The QuickRunPanel form should be visible on the dedicated run-start page
+  await expect(page.getByRole('heading', { name: /启动运行|Start Run/ })).toBeVisible();
   await expect(page.locator('select').first()).toBeVisible();
 
   // Mode is already 'regression' by default — fill in selector value
@@ -42,22 +46,38 @@ test('Quick Run: submit regression run and navigate to Run Detail', async ({ pag
 // ---------------------------------------------------------------------------
 
 test('Settings: save a port change and see version increment', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('zarb-locale', 'zh-CN');
+  });
   await page.goto('/settings');
 
-  // Wait for settings to load — version label should appear
-  await expect(page.locator('text=版本')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole('heading', { name: /设置|Settings/ })).toBeVisible({ timeout: 5000 });
 
-  // SettingRow for "port": outer div > [div > [div("port"), div(desc)], input]
-  // XPath: find input inside a div that contains a nested div with text "port"
-  const portField = page.locator('xpath=//div[div/div[normalize-space(text())="port"]]/input');
+  const portField = page.getByLabel(/服务端口|Server Port/);
   await expect(portField).toBeVisible({ timeout: 5000 });
   await portField.fill('3912');
 
-  // Click the primary Save button (not "重置未保存")
-  await page.locator('button:has-text("保存")').filter({ hasNotText: '重置' }).click();
+  await page.getByRole('button', { name: /保存设置|Save Settings/ }).click();
 
-  // Success banner should appear with "已保存"
-  await expect(page.locator('text=已保存')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText(/已保存|Saved/)).toBeVisible({ timeout: 5000 });
+});
+
+test('Locale toggle: home, start run, and settings update together', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('zarb-locale', 'zh-CN');
+  });
+  await page.goto('/');
+
+  await expect(page.getByText('待处理动作')).toBeVisible();
+  await page.getByRole('button', { name: 'EN' }).click();
+
+  await expect(page.getByRole('button', { name: '中文' })).toBeVisible();
+  await expect(page.getByText('Pending Actions')).toBeVisible();
+  await page.getByRole('link', { name: 'Start Run' }).click();
+  await expect(page.getByRole('heading', { name: 'Run Target' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByLabel('Server Port')).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

@@ -72,13 +72,13 @@ export function RunDetailPage(): React.ReactElement {
       <Card>
         <KV label={t('run.mode')} value={summary.runMode} />
         <KV label={t('run.scope')} value={`${summary.scopeType ?? ''}${summary.scopeValue ? `: ${summary.scopeValue}` : ''}`} />
-        {summary.projectName && <KV label="项目" value={summary.projectName} />}
-        {summary.siteName && <KV label="站点" value={summary.siteBaseUrl ? `${summary.siteName} — ${summary.siteBaseUrl}` : summary.siteName} />}
-        {summary.credLabel && <KV label="身份" value={summary.credLabel} />}
+        {summary.projectName && <KV label={t('runDetail.project')} value={summary.projectName} />}
+        {summary.siteName && <KV label={t('runDetail.site')} value={summary.siteBaseUrl ? `${summary.siteName} — ${summary.siteBaseUrl}` : summary.siteName} />}
+        {summary.credLabel && <KV label={t('runDetail.identity')} value={summary.credLabel} />}
         <KV label={t('run.startedAt')} value={fmtDatetime(summary.startedAt)} />
         {summary.endedAt && <KV label={t('run.endedAt')} value={fmtDatetime(summary.endedAt)} />}
         {displayStage && <KV label={t('run.stage')} value={displayStage} />}
-        <KV label="统计" value={`✓${String(summary.passed)} ✗${String(summary.failed)} ↷${String(summary.skipped)} / ${String(summary.total)}`} />
+        <KV label={t('runDetail.stats')} value={`✓${String(summary.passed)} ✗${String(summary.failed)} ↷${String(summary.skipped)} / ${String(summary.total)}`} />
         {showTopSummaryBanner && summary.summary && (
           <div style={{ marginTop: 8, padding: '8px 12px', background: summary.status === 'FAILED' ? '#fff1f0' : '#f6ffed', border: `1px solid ${summary.status === 'FAILED' ? '#ffa39e' : '#b7eb8f'}`, borderRadius: 4, fontSize: 13, color: '#333' }}>
             {t(`run.summary.${summary.summary}`)}
@@ -88,14 +88,14 @@ export function RunDetailPage(): React.ReactElement {
 
       {report && (
         <>
-          <Card title="执行摘要">
+          <Card title={t('runDetail.executionSummary')}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
-              <MetricCard label="总用例" value={String(report.summary.total)} />
-              <MetricCard label="通过" value={String(report.summary.passed)} tone="ok" />
-              <MetricCard label="失败" value={String(report.summary.failed)} tone={report.summary.failed > 0 ? 'error' : 'neutral'} />
-              <MetricCard label="UI 操作" value={String(report.totals.uiActionCount)} />
-              <MetricCard label="接口调用" value={String(report.totals.apiCallCount)} />
-              <MetricCard label="失败接口" value={String(report.totals.failedApiCount)} tone={report.totals.failedApiCount > 0 ? 'warn' : 'neutral'} />
+              <MetricCard label={t('executionReport.totalCases')} value={String(report.summary.total)} />
+              <MetricCard label={t('executionReport.passed')} value={String(report.summary.passed)} tone="ok" />
+              <MetricCard label={t('executionReport.failed')} value={String(report.summary.failed)} tone={report.summary.failed > 0 ? 'error' : 'neutral'} />
+              <MetricCard label={t('executionReport.uiActions')} value={String(report.totals.uiActionCount)} />
+              <MetricCard label={t('executionReport.apiCalls')} value={String(report.totals.apiCallCount)} />
+              <MetricCard label={t('executionReport.failedApis')} value={String(report.totals.failedApiCount)} tone={report.totals.failedApiCount > 0 ? 'warn' : 'neutral'} />
             </div>
             {report.fatalReason && (
               <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.8rem', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, color: '#be123c', fontSize: '0.9em' }}>
@@ -115,7 +115,7 @@ export function RunDetailPage(): React.ReactElement {
           </Card>
 
           {report.stageResults.length > 0 && (
-            <Card title="阶段结果">
+            <Card title={t('executionReport.stageResults')}>
               <StageResultsList stages={report.stageResults} currentStage={displayStage} live={isActive || connected} />
             </Card>
           )}
@@ -138,12 +138,12 @@ export function RunDetailPage(): React.ReactElement {
       )}
 
       {testResults.length > 0 && (
-        <Card title={`测试结果 (${String(testResults.length)})`}>
+        <Card title={t('runDetail.testResults', { count: testResults.length })}>
           <Table
-            headers={['Testcase', t('common.status'), t('common.duration'), t('common.error'), '查看']}
+            headers={[t('executionReport.testcase'), t('common.status'), t('common.duration'), t('common.error'), t('runDetail.view')]}
             rows={testResults.map(r => [
               r.testcaseId,
-              <span key="s" style={{ color: r.status === 'passed' ? '#2a7' : r.status === 'failed' ? '#c33' : '#888' }}>{r.status}</span>,
+              <span key="s" style={{ color: r.status === 'passed' ? '#2a7' : r.status === 'failed' ? '#c33' : '#888' }}>{t(`runDetail.testStatus.${r.status}`)}</span>,
               r.durationMs !== undefined ? `${String(r.durationMs)}ms` : '-',
               r.errorMessage ?? '-',
               <button
@@ -155,7 +155,7 @@ export function RunDetailPage(): React.ReactElement {
                 }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline' }}
               >
-                {r.status === 'failed' ? '失败诊断' : '执行详情'}
+                {r.status === 'failed' ? t('runDetail.failureDiagnosis') : t('runDetail.executionDetail')}
               </button>,
             ])}
           />
@@ -163,7 +163,7 @@ export function RunDetailPage(): React.ReactElement {
       )}
 
       {findings && findings.length > 0 && (
-        <Card title={`Findings (${String(findings.length)})`}>
+        <Card title={t('runDetail.findings', { count: findings.length })}>
           {findings.map(f => (
             <div key={f.id} style={{ padding: '0.4rem 0', borderBottom: '1px solid #eee', fontSize: '0.9em' }}>
               <span style={{ color: f.severity === 'critical' ? '#c33' : f.severity === 'high' ? '#f60' : '#888', fontWeight: 600, marginRight: 8 }}>{f.severity}</span>
@@ -177,7 +177,7 @@ export function RunDetailPage(): React.ReactElement {
       {taskData && taskData.items.length > 0 && (
         <Card title={`${t('nav.codeTasks')} (${String(taskData.items.length)})`}>
           <Table
-            headers={['Task ID', t('common.status'), 'Goal']}
+            headers={[t('runDetail.taskId'), t('common.status'), t('runDetail.goal')]}
             rows={taskData.items.map(task => [
               <button key="id" onClick={() => { navigate(`/code-tasks/${task.taskId}`); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline', fontFamily: 'monospace' }}>

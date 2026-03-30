@@ -81,10 +81,10 @@ export function SettingsPage(): React.ReactElement {
         <div style={{ padding: '0.75rem 1rem', background: '#efe', border: '1px solid #cfc', borderRadius: 4, marginBottom: '1rem', fontSize: '0.9em', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           <div>✓ {t('settings.saved')} (v{applyResult.version !== undefined ? String(applyResult.version) : '?'})</div>
           {applyResult.reloadedModules && applyResult.reloadedModules.length > 0 && (
-            <div><strong>{t('settings.reloadedModules')}：</strong>{applyResult.reloadedModules.join(', ')}</div>
+            <div><strong>{t('settings.reloadedModules')}:</strong> {applyResult.reloadedModules.join(', ')}</div>
           )}
           {applyResult.nextRunOnlyKeys && applyResult.nextRunOnlyKeys.length > 0 && (
-            <div><strong>{t('settings.nextRunOnly')}：</strong>{applyResult.nextRunOnlyKeys.join(', ')}</div>
+            <div><strong>{t('settings.nextRunOnly')}:</strong> {applyResult.nextRunOnlyKeys.join(', ')}</div>
           )}
           {applyResult.requiresRestart && (
             <div style={{ color: '#b45309' }}>⚠ {t('settings.restartRequired')}</div>
@@ -101,12 +101,12 @@ export function SettingsPage(): React.ReactElement {
 
       <SettingsSection title={t('settings.workspace')}>
         <div style={{ padding: '0.75rem 1rem', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6, fontSize: '0.9em', color: '#9a3412' }}>
-          项目管理模式下，目标代码目录由“项目 / 仓库”决定。这里的 workspace 字段仅保留给旧运行路径和兼容场景使用，不再是主执行入口。
+          {t('settings.workspace.notice')}
         </div>
-        <SettingDisplayRow label={t('settings.field.targetProjectPath')} value={String(val('workspace', 'targetProjectPath') ?? '') || '—'} description="兼容字段：仅在未指定 project/repo 的旧运行路径下作为 fallback 使用" />
-        <SettingDisplayRow label={t('settings.field.gitRootStrategy')} value={String(val('workspace', 'gitRootStrategy') ?? '') || '—'} description="兼容字段：用于 legacy workspace 根目录识别" />
-        <SettingDisplayRow label={t('settings.field.allowOutsideToolWorkspace')} value={String(val('workspace', 'allowOutsideToolWorkspace') ?? '') || 'false'} description="兼容字段：项目管理模式下不再作为主控制项" />
-        <SettingRow label="Playwright 测试集根目录" value={String(val('workspace', 'testSuitesRoot') ?? '')} onChange={v => { set('workspace', 'testSuitesRoot', v); }} description="存放所有项目 Playwright 测试集的根目录" />
+        <SettingDisplayRow label={t('settings.field.targetProjectPath')} value={String(val('workspace', 'targetProjectPath') ?? '') || '—'} description={t('settings.workspace.targetProjectPath.compat')} />
+        <SettingDisplayRow label={t('settings.field.gitRootStrategy')} value={String(val('workspace', 'gitRootStrategy') ?? '') || '—'} description={t('settings.workspace.gitRootStrategy.compat')} />
+        <SettingDisplayRow label={t('settings.field.allowOutsideToolWorkspace')} value={String(val('workspace', 'allowOutsideToolWorkspace') ?? '') || 'false'} description={t('settings.workspace.allowOutsideToolWorkspace.compat')} />
+        <SettingRow label={t('settings.field.testSuitesRoot')} value={String(val('workspace', 'testSuitesRoot') ?? '')} onChange={v => { set('workspace', 'testSuitesRoot', v); }} description={t('settings.field.testSuitesRoot.desc')} />
       </SettingsSection>
 
       <SettingsSection title={t('settings.diagnostics')}>
@@ -218,8 +218,8 @@ export function SettingsPage(): React.ReactElement {
         })}
 
         <SettingRow label={t('settings.approvalRequired')} value={String(val('codeAgent', 'defaultApprovalRequired'))} onChange={v => { set('codeAgent', 'defaultApprovalRequired', v === 'true'); }} description={t('settings.approvalRequired')} />
-        <SettingRow label="自动审批 (autoApprove)" value={String(val('codeAgent', 'autoApprove') ?? false)} onChange={v => { set('codeAgent', 'autoApprove', v === 'true'); }} description="开启后 CodeTask 草稿自动晋升并审批，无需人工确认" />
-        <SettingRow label="自动审批最高风险级别" value={String(val('codeAgent', 'autoApproveMaxRiskLevel') ?? 'low')} onChange={v => { set('codeAgent', 'autoApproveMaxRiskLevel', v); }} description="low / medium / high，仅在 autoApprove=true 时生效" />
+        <SettingRow label={t('settings.autoApprove')} value={String(val('codeAgent', 'autoApprove') ?? false)} onChange={v => { set('codeAgent', 'autoApprove', v === 'true'); }} description={t('settings.autoApprove.desc')} />
+        <SettingRow label={t('settings.autoApproveMaxRiskLevel')} value={String(val('codeAgent', 'autoApproveMaxRiskLevel') ?? 'low')} onChange={v => { set('codeAgent', 'autoApproveMaxRiskLevel', v); }} description={t('settings.autoApproveMaxRiskLevel.desc')} />
       </SettingsSection>
 
       <SettingsSection title={t('settings.report')}>
@@ -246,10 +246,10 @@ function SettingRow({ label, value, onChange, description, type = 'text', resolv
         {description && <div style={{ color: '#888', fontSize: '0.8em' }}>{description}</div>}
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        <input type={type} value={value} onChange={e => { onChange(e.target.value); }} style={{ width: '100%', padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
+        <input aria-label={label} type={type} value={value} onChange={e => { onChange(e.target.value); }} style={{ width: '100%', padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4 }} />
         {resolvedPath && (
           <div style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 4, background: '#f9fafb', color: '#555', wordBreak: 'break-all', fontSize: '0.82em' }}>
-            <strong>{t('settings.field.resolvedPath')}：</strong>{resolvedPath}
+            <strong>{t('settings.field.resolvedPath')}:</strong> {resolvedPath}
           </div>
         )}
       </div>

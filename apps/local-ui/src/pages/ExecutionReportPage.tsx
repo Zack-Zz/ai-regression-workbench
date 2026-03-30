@@ -36,21 +36,21 @@ export function ExecutionReportPage(): React.ReactElement {
         <h2 style={{ margin: 0 }}>{t('run.executionReport')}</h2>
       </div>
 
-      <Card title="概览">
+      <Card title={t('executionReport.overview')}>
         <KV label={t('run.mode')} value={data.runMode} />
         <KV label={t('common.status')} value={data.status} />
         {data.currentStage && <KV label={t('run.stage')} value={data.currentStage} />}
         <KV label={t('run.startedAt')} value={data.startedAt} />
         {data.endedAt && <KV label={t('run.endedAt')} value={data.endedAt} />}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '0.75rem' }}>
-          <MetricCard label="总用例" value={String(data.summary.total)} />
-          <MetricCard label="通过" value={String(data.summary.passed)} tone="ok" />
-          <MetricCard label="失败" value={String(data.summary.failed)} tone={data.summary.failed > 0 ? 'error' : 'neutral'} />
-          <MetricCard label="跳过" value={String(data.summary.skipped)} />
-          <MetricCard label="流程步骤" value={String(data.totals.flowStepCount)} />
-          <MetricCard label="UI 操作" value={String(data.totals.uiActionCount)} />
-          <MetricCard label="接口调用" value={String(data.totals.apiCallCount)} />
-          <MetricCard label="失败接口" value={String(data.totals.failedApiCount)} tone={data.totals.failedApiCount > 0 ? 'warn' : 'neutral'} />
+          <MetricCard label={t('executionReport.totalCases')} value={String(data.summary.total)} />
+          <MetricCard label={t('executionReport.passed')} value={String(data.summary.passed)} tone="ok" />
+          <MetricCard label={t('executionReport.failed')} value={String(data.summary.failed)} tone={data.summary.failed > 0 ? 'error' : 'neutral'} />
+          <MetricCard label={t('executionReport.skipped')} value={String(data.summary.skipped)} />
+          <MetricCard label={t('executionReport.flowSteps')} value={String(data.totals.flowStepCount)} />
+          <MetricCard label={t('executionReport.uiActions')} value={String(data.totals.uiActionCount)} />
+          <MetricCard label={t('executionReport.apiCalls')} value={String(data.totals.apiCallCount)} />
+          <MetricCard label={t('executionReport.failedApis')} value={String(data.totals.failedApiCount)} tone={data.totals.failedApiCount > 0 ? 'warn' : 'neutral'} />
         </div>
         {data.fatalReason && (
           <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.8rem', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, color: '#be123c', fontSize: '0.9em' }}>
@@ -60,13 +60,13 @@ export function ExecutionReportPage(): React.ReactElement {
       </Card>
 
       {data.stageResults.length > 0 && (
-        <Card title="阶段结果">
+        <Card title={t('executionReport.stageResults')}>
           <StageResultsList stages={data.stageResults} currentStage={data.currentStage} live={isActive || connected} />
         </Card>
       )}
 
       {data.degradedSteps.length > 0 && (
-        <Card title="降级步骤">
+        <Card title={t('executionReport.degradedSteps')}>
           <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9em' }}>
             {data.degradedSteps.map((s, i) => <li key={i}>{s}</li>)}
           </ul>
@@ -74,9 +74,9 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.flowSummaries.length > 0 && (
-        <Card title="流程链路摘要">
+        <Card title={t('executionReport.flowSummary')}>
           <Table
-            headers={['Flow ID', '步骤', 'UI 操作', '接口', '失败接口', '耗时']}
+            headers={[t('executionReport.flowId'), t('executionReport.steps'), t('executionReport.uiActions'), t('executionReport.apiCalls'), t('executionReport.failedApis'), t('executionReport.durationMs')]}
             rows={data.flowSummaries.map((flow) => [
               flow.flowId,
               String(flow.stepCount),
@@ -90,9 +90,9 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.codeTaskSummaries.length > 0 && (
-        <Card title={`关联代码任务 (${String(data.codeTaskSummaries.length)})`}>
+        <Card title={t('executionReport.relatedCodeTasks', { count: data.codeTaskSummaries.length })}>
           <Table
-            headers={['Task', 'Testcase', '状态', '更新时间']}
+            headers={[t('executionReport.task'), t('executionReport.testcase'), t('common.status'), t('common.updatedAt')]}
             rows={data.codeTaskSummaries.map((task) => [
               <button key="task" onClick={() => { navigate(`/code-tasks/${task.taskId}`); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline', fontFamily: 'monospace' }}>
                 {task.taskId}
@@ -106,13 +106,13 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.testcaseProfiles.length > 0 && (
-        <Card title={`Testcase Profiles (${String(data.testcaseProfiles.length)})`}>
+        <Card title={t('executionReport.testcaseProfiles', { count: data.testcaseProfiles.length })}>
           <Table
-            headers={['Testcase', '查看', '入口']}
+            headers={[t('executionReport.testcase'), t('common.view'), t('executionReport.entryPath')]}
             rows={data.testcaseProfiles.map((profile) => [
               profile.testcaseId,
               <button key="open" onClick={() => { navigate(`/runs/${id}/testcases/${profile.testcaseId}/execution-profile`); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#36c', textDecoration: 'underline' }}>
-                执行详情
+                {t('executionReport.openDetail')}
               </button>,
               <span key="path" style={{ fontSize: '0.8em', wordBreak: 'break-all' }}>{`/runs/${id}/testcases/${profile.testcaseId}/execution-profile`}</span>,
             ])}
@@ -121,7 +121,7 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.artifactLinks.length > 0 && (
-        <Card title={`产物链接 (${String(data.artifactLinks.length)})`}>
+        <Card title={t('executionReport.artifactLinks', { count: data.artifactLinks.length })}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {data.artifactLinks.map((link, index) => (
               <a key={`${link}-${index}`} href={link} target="_blank" rel="noreferrer" style={{ color: '#36c', textDecoration: 'underline', wordBreak: 'break-all', fontSize: '0.9em' }}>
@@ -146,7 +146,7 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.warnings && data.warnings.length > 0 && (
-        <Card title="警告">
+        <Card title={t('executionReport.warnings')}>
           <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9em', color: '#f60' }}>
             {data.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
           </ul>
@@ -154,7 +154,7 @@ export function ExecutionReportPage(): React.ReactElement {
       )}
 
       {data.recommendations && data.recommendations.length > 0 && (
-        <Card title="建议动作">
+        <Card title={t('executionReport.recommendations')}>
           <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.9em', color: '#1d4ed8' }}>
             {data.recommendations.map((item, index) => <li key={index}>{item}</li>)}
           </ul>

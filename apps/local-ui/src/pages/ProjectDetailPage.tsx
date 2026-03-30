@@ -113,8 +113,8 @@ function SitesSection({ projectId, sites, reload, onManageCreds }: { projectId: 
       <Button onClick={() => { setCreating(v => !v); }} style={{ marginBottom: '0.75rem' }}>{t('site.add')}</Button>
       {creating && (
         <form onSubmit={(e) => { void create(e); }} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-          <input value={form.name} onChange={e => { setForm(f => ({ ...f, name: e.target.value })); }} placeholder="名称 *" required style={inputStyle} />
-          <input value={form.baseUrl} onChange={e => { setForm(f => ({ ...f, baseUrl: e.target.value })); }} placeholder="Base URL * (https://...)" required style={{ ...inputStyle, flex: '2 1 200px' }} />
+          <input value={form.name} onChange={e => { setForm(f => ({ ...f, name: e.target.value })); }} placeholder={t('site.name.placeholder')} required style={inputStyle} />
+          <input value={form.baseUrl} onChange={e => { setForm(f => ({ ...f, baseUrl: e.target.value })); }} placeholder={t('site.baseUrl.placeholder')} required style={{ ...inputStyle, flex: '2 1 200px' }} />
           <Button type="submit">{t('common.save')}</Button>
           <Button type="button" onClick={() => { setCreating(false); }}>{t('common.cancel')}</Button>
         </form>
@@ -131,7 +131,7 @@ function SitesSection({ projectId, sites, reload, onManageCreds }: { projectId: 
         <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
           <span style={{ fontWeight: 500, minWidth: 100 }}>{s.name}</span>
           <a href={s.baseUrl} target="_blank" rel="noreferrer" style={{ color: '#0070f3', fontSize: '0.85em', flex: 1 }}>{s.baseUrl}</a>
-          <Button onClick={() => { setEditId(s.id); setEditForm({ name: s.name, baseUrl: s.baseUrl, description: '' }); }}>{t('common.actions')}</Button>
+          <Button onClick={() => { setEditId(s.id); setEditForm({ name: s.name, baseUrl: s.baseUrl, description: '' }); }}>{t('common.edit')}</Button>
           <Button onClick={() => { onManageCreds(s.id); }}>{t('site.credentials')}</Button>
           <Button onClick={() => { void del(s); }} style={{ color: '#c00', borderColor: '#c00' }}>{t('common.delete')}</Button>
         </div>
@@ -170,16 +170,16 @@ function RepoForm({ f, setF, branches, onValidate, pathSt, onSubmit, onCancel }:
         <label style={repoLabelStyle}>{t('repo.baseBranch')} *</label>
         {branches.length > 0 ? (
           <select value={f.baseBranch} onChange={e => { setF(p => ({ ...p, baseBranch: e.target.value })); }} required style={repoFullInput}>
-            <option value="">— 选择基线分支 —</option>
+            <option value="">{t('repo.baseBranch.select')}</option>
             {branches.map(b => <option key={b} value={b}>{b}</option>)}
             {f.baseBranch && !branches.includes(f.baseBranch) && <option value={f.baseBranch}>{f.baseBranch}</option>}
           </select>
         ) : (
-          <input value={f.baseBranch} onChange={e => { setF(p => ({ ...p, baseBranch: e.target.value })); }} required placeholder="如 main（验证路径后可自动加载分支）" style={repoFullInput} />
+          <input value={f.baseBranch} onChange={e => { setF(p => ({ ...p, baseBranch: e.target.value })); }} required placeholder={t('repo.baseBranch.placeholder')} style={repoFullInput} />
         )}
       </div>
       <div style={repoFieldStyle}>
-        <label style={repoLabelStyle}>{t('project.description')}（选填，最多 500 字）</label>
+        <label style={repoLabelStyle}>{t('repo.description')} ({t('repo.description.hint')})</label>
         <textarea value={f.description} onChange={e => { setF(p => ({ ...p, description: e.target.value.slice(0, 500) })); }} rows={3} style={{ ...repoFullInput, resize: 'vertical' }} />
         <span style={{ fontSize: '0.75em', color: '#aaa', textAlign: 'right' }}>{f.description.length}/500</span>
       </div>
@@ -250,11 +250,11 @@ function ReposSection({ projectId, repos, reload }: { projectId: string; repos: 
     if (!path.trim()) return;
     try {
       const info = await api.validatePath(path.trim());
-      if (!info.isDir) { statusSetter({ ok: false, msg: t('repo.validatePath') + ': 路径不存在或不是目录' }); return; }
-      if (!info.isGit) { statusSetter({ ok: false, msg: '该目录不是 git 仓库' }); return; }
-      statusSetter({ ok: true, msg: '✓ 有效的 git 仓库' });
+      if (!info.isDir) { statusSetter({ ok: false, msg: t('repo.path.invalid') }); return; }
+      if (!info.isGit) { statusSetter({ ok: false, msg: t('repo.path.notGit') }); return; }
+      statusSetter({ ok: true, msg: t('repo.path.valid') });
       if (repoId) await loadRepoBranches(repoId, branchSetter);
-    } catch { statusSetter({ ok: false, msg: '验证失败' }); }
+    } catch { statusSetter({ ok: false, msg: t('repo.path.error') }); }
   }
 
   return (
@@ -319,34 +319,34 @@ function CredentialsSection({ projectId, siteId, siteName, onClose }: {
   }
 
   async function del(cred: SiteCredential): Promise<void> {
-    if (!confirm(`确认删除凭据「${cred.label}」？`)) return;
+    if (!confirm(t('cred.delete.confirm', { name: cred.label }))) return;
     await api.deleteCredential(projectId, siteId, cred.id); reload();
   }
 
   return (
-    <Card title={`凭据 — ${siteName}`}>
+    <Card title={t('cred.titleWithName', { name: siteName })}>
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
         <Button onClick={() => { setCreating(v => !v); }}>{t('cred.add')}</Button>
-        <Button onClick={onClose}>收起</Button>
+        <Button onClick={onClose}>{t('common.close')}</Button>
       </div>
       {creating && (
         <form onSubmit={(e) => { void create(e); }} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-          <input value={form.label} onChange={e => { setForm(f => ({ ...f, label: e.target.value })); }} placeholder="标签 *" required style={inputStyle} />
+          <input value={form.label} onChange={e => { setForm(f => ({ ...f, label: e.target.value })); }} placeholder={t('cred.label.placeholder')} required style={inputStyle} />
           <select value={form.authType} onChange={e => { setForm(f => ({ ...f, authType: e.target.value as 'userpass' | 'cookie' | 'token' })); }} style={inputStyle}>
-            <option value="userpass">用户名/密码</option>
-            <option value="cookie">Cookie</option>
-            <option value="token">Token/Header</option>
+            <option value="userpass">{t('cred.authType.userpass')}</option>
+            <option value="cookie">{t('cred.authType.cookie')}</option>
+            <option value="token">{t('cred.authType.token')}</option>
           </select>
           {form.authType === 'userpass' && <>
-            <input value={form.loginUrl} onChange={e => { setForm(f => ({ ...f, loginUrl: e.target.value })); }} placeholder="登录页 URL" style={inputStyle} />
-            <input value={form.username} onChange={e => { setForm(f => ({ ...f, username: e.target.value })); }} placeholder="用户名" style={inputStyle} />
-            <input type="password" value={form.password} onChange={e => { setForm(f => ({ ...f, password: e.target.value })); }} placeholder="密码" style={inputStyle} />
+            <input value={form.loginUrl} onChange={e => { setForm(f => ({ ...f, loginUrl: e.target.value })); }} placeholder={t('cred.loginUrl.placeholder')} style={inputStyle} />
+            <input value={form.username} onChange={e => { setForm(f => ({ ...f, username: e.target.value })); }} placeholder={t('cred.username')} style={inputStyle} />
+            <input type="password" value={form.password} onChange={e => { setForm(f => ({ ...f, password: e.target.value })); }} placeholder={t('cred.password')} style={inputStyle} />
           </>}
           {form.authType === 'cookie' && (
-            <textarea value={form.cookiesJson} onChange={e => { setForm(f => ({ ...f, cookiesJson: e.target.value })); }} placeholder='Cookie JSON: [{"name":"...","value":"..."}]' rows={3} style={{ ...inputStyle, flex: '3 1 300px' }} />
+            <textarea value={form.cookiesJson} onChange={e => { setForm(f => ({ ...f, cookiesJson: e.target.value })); }} placeholder={t('cred.cookiesJson.placeholder')} rows={3} style={{ ...inputStyle, flex: '3 1 300px' }} />
           )}
           {form.authType === 'token' && (
-            <textarea value={form.headersJson} onChange={e => { setForm(f => ({ ...f, headersJson: e.target.value })); }} placeholder='Headers JSON: {"Authorization":"Bearer ..."}' rows={2} style={{ ...inputStyle, flex: '3 1 300px' }} />
+            <textarea value={form.headersJson} onChange={e => { setForm(f => ({ ...f, headersJson: e.target.value })); }} placeholder={t('cred.headersJson.placeholder')} rows={2} style={{ ...inputStyle, flex: '3 1 300px' }} />
           )}
           <Button type="submit">{t('common.save')}</Button>
           <Button type="button" onClick={() => { setCreating(false); }}>{t('common.cancel')}</Button>

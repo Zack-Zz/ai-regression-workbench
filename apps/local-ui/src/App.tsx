@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout.js';
 import { HomePage } from './pages/HomePage.js';
+import { StartRunPage } from './pages/StartRunPage.js';
 import { RunListPage } from './pages/RunListPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { FailureReportPage } from './pages/FailureReportPage.js';
@@ -18,6 +19,7 @@ export function App(): React.ReactElement {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<HomePage />} />
+        <Route path="start-run" element={<StartRunPage />} />
         <Route path="runs" element={<RunListPage />} />
         <Route path="runs/:runId" element={<RunDetailPage />} />
         <Route path="runs/:runId/execution-report" element={<ExecutionReportPage />} />

@@ -7,23 +7,17 @@ import { Loading, ErrorBanner, Button } from './ui.js';
 
 type SelectorType = 'suite' | 'scenario' | 'tag' | 'testcase';
 
-const sel = (style: React.CSSProperties): React.CSSProperties => ({ padding: '4px 8px', ...style });
-const label = (extra?: React.CSSProperties): React.CSSProperties => ({ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85em', ...extra });
-
 export function QuickRunPanel(): React.ReactElement {
   const navigate = useNavigate();
 
-  // Step 1: project / site
   const [projectId, setProjectId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [repoId, setRepoId] = useState('');
 
-  // Step 2: mode + selector
   const [mode, setMode] = useState<import('../types.js').RunMode>('regression');
   const [selectorType, setSelectorType] = useState<SelectorType>('suite');
   const [selectorValue, setSelectorValue] = useState('');
 
-  // Step 3: exploration config (auto-populated from site.baseUrl)
   const [startUrls, setStartUrls] = useState('');
   const [credentialId, setCredentialId] = useState('');
   const [browserMode, setBrowserMode] = useState<'headless' | 'headed'>('headless');
@@ -53,7 +47,6 @@ export function QuickRunPanel(): React.ReactElement {
     [projectId],
   );
 
-  // Load selector cache — only needs projectId; repoId is optional for finer scope
   const { data: selectors, reload: reloadSelectors } = useAsync(
     () => {
       if (!projectId) return Promise.resolve([]);
@@ -68,20 +61,27 @@ export function QuickRunPanel(): React.ReactElement {
   async function handleScan(): Promise<void> {
     if (!projectId || !repoId) return;
     setScanning(true);
-    try { await api.scanSelectorsForRepo(projectId, repoId); reloadSelectors(); }
-    finally { setScanning(false); }
+    try {
+      await api.scanSelectorsForRepo(projectId, repoId);
+      reloadSelectors();
+    } finally {
+      setScanning(false);
+    }
   }
 
-  // When site changes, pre-fill startUrls and allowedHosts from baseUrl
   React.useEffect(() => {
     if (!siteId || !sites) return;
-    const site = sites.find(s => s.id === siteId);
+    const site = sites.find((value) => value.id === siteId);
     if (!site) return;
+
     setStartUrls(site.baseUrl);
+
     try {
       const host = new URL(site.baseUrl).hostname;
       setAllowedHosts(host);
-    } catch { /* ignore invalid URL */ }
+    } catch {
+      // Ignore invalid URLs and keep any manual input.
+    }
   }, [siteId, sites]);
 
   React.useEffect(() => {
@@ -89,11 +89,10 @@ export function QuickRunPanel(): React.ReactElement {
       setCredentialId('');
       return;
     }
-    const preferred = creds.find(c => c.isDefault) ?? creds[0];
+    const preferred = creds.find((value) => value.isDefault) ?? creds[0];
     setCredentialId(preferred?.id ?? '');
   }, [siteId, creds]);
 
-  // When project changes, reset dependent selections
   React.useEffect(() => {
     setSiteId('');
     setRepoId('');
@@ -103,20 +102,25 @@ export function QuickRunPanel(): React.ReactElement {
   const needsSelector = mode === 'regression' || mode === 'hybrid';
   const needsExploration = mode === 'exploration' || mode === 'hybrid';
 
-  const selectedRepo = repos?.find(r => r.id === repoId);
+  const selectedProject = projects?.find((project) => project.id === projectId);
+  const selectedSite = sites?.find((site) => site.id === siteId);
+  const selectedCredential = creds?.find((credential) => credential.id === credentialId);
+  const selectedRepo = repos?.find((repo) => repo.id === repoId);
   const projectPath = selectedRepo?.path ?? '';
   const requiresRepoSelection = Boolean(projectId && repos && repos.length > 0);
 
-  async function handleSubmit(e: React.FormEvent): Promise<void> {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
     setError(null);
     setLoading(true);
+
     try {
       const input: import('../types.js').StartRunInput = { runMode: mode };
       if (projectId) input.projectId = projectId;
       if (repoId) input.repoId = repoId;
       if (siteId) input.siteId = siteId;
       if (projectPath) input.projectPath = projectPath;
+
       if (needsSelector) {
         input.selector = {
           ...(selectorType === 'suite' ? { suite: selectorValue } : {}),
@@ -125,9 +129,10 @@ export function QuickRunPanel(): React.ReactElement {
           ...(selectorType === 'testcase' ? { testcaseId: selectorValue } : {}),
         };
       }
+
       if (needsExploration) {
         input.exploration = {
-          startUrls: startUrls.split('\n').map(s => s.trim()).filter(Boolean),
+          startUrls: startUrls.split('\n').map((value) => value.trim()).filter(Boolean),
           maxSteps,
           maxPages,
           browserMode,
@@ -137,203 +142,364 @@ export function QuickRunPanel(): React.ReactElement {
           manualLoginTimeoutMs: manualLoginTimeoutSec * 1000,
         };
         if (credentialId) input.exploration.credentialId = credentialId;
-        if (allowedHosts) input.exploration.allowedHosts = allowedHosts.split(',').map(s => s.trim()).filter(Boolean);
-        if (focusAreas) input.exploration.focusAreas = focusAreas.split('\n').map(s => s.trim()).filter(Boolean);
+        if (allowedHosts) input.exploration.allowedHosts = allowedHosts.split(',').map((value) => value.trim()).filter(Boolean);
+        if (focusAreas) input.exploration.focusAreas = focusAreas.split('\n').map((value) => value.trim()).filter(Boolean);
       }
+
       if (credentialId) input.credentialId = credentialId;
+
       const result = await api.startRun(input);
       if (result.run) navigate(`/runs/${result.run.runId}`);
       else navigate('/runs');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+    <form onSubmit={(event) => { void handleSubmit(event); }} className="quick-run-form">
       {error && <ErrorBanner message={error} />}
 
-      {/* Row 1: Project + Site */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <label style={label({ minWidth: 160 })}>
-          项目
-          {projLoading ? <Loading /> : (
-            <select value={projectId} onChange={e => { setProjectId(e.target.value); }} style={sel({})}>
-              <option value="">— 不指定 —</option>
-              {projects?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          )}
-        </label>
-        {projectId && (
-          <label style={label({ minWidth: 160 })}>
-            站点
-            <select value={siteId} onChange={e => { setSiteId(e.target.value); }} style={sel({})}>
-              <option value="">— 不指定 —</option>
-              {sites?.map(s => <option key={s.id} value={s.id}>{s.name} ({s.baseUrl})</option>)}
-            </select>
-          </label>
-        )}
-        {siteId && creds && creds.length > 0 && (
-          <label style={label({ minWidth: 140 })}>
-            认证凭据
-            <select value={credentialId} onChange={e => { setCredentialId(e.target.value); }} style={sel({})}>
-              <option value="">— 不使用 —</option>
-              {creds.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-          </label>
-        )}
-        {projectId && (
-          <label style={label({ minWidth: 180 })}>
-            代码仓库
-            <select value={repoId} onChange={e => { setRepoId(e.target.value); setSelectorValue(''); }} style={sel({})} required={requiresRepoSelection}>
-              <option value="">— 选择仓库 —</option>
-              {repos?.map(r => <option key={r.id} value={r.id}>{r.name} ({r.path})</option>)}
-            </select>
-          </label>
-        )}
-      </div>
+      <section className="form-section">
+        <div className="form-section__header">
+          <span className="form-section__eyebrow">{t('run.section.target.step')}</span>
+          <h3 className="form-section__title">{t('run.section.target.title')}</h3>
+          <p className="form-section__description">{t('run.section.target.description')}</p>
+        </div>
 
-      {/* Row 2: Mode + Selector */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-        <label style={label()}>
-          {t('run.mode')}
-          <select value={mode} onChange={e => { setMode(e.target.value as import('../types.js').RunMode); }} style={sel({})}>
-            <option value="regression">{t('run.mode.regression')}</option>
-            <option value="exploration">{t('run.mode.exploration')}</option>
-            <option value="hybrid">{t('run.mode.hybrid')}</option>
-          </select>
-          <span style={{ color: '#888', fontSize: '0.9em' }}>{t(`run.mode.hint.${mode}`)}</span>
-        </label>
-        {needsSelector && (
-          <>
-            <label style={label()}>
-              {t('run.selectorType')}
-              <select value={selectorType} onChange={e => { setSelectorType(e.target.value as SelectorType); }} style={sel({})}>
-                <option value="suite">{t('run.selectorType.suite')}</option>
-                <option value="scenario">{t('run.selectorType.scenario')}</option>
-                <option value="tag">{t('run.selectorType.tag')}</option>
-                <option value="testcase">{t('run.selectorType.testcase')}</option>
+        <div className="form-grid form-grid--fit">
+          <label className="field">
+            <span className="field__label">{t('run.form.project')}</span>
+            {projLoading ? (
+              <Loading />
+            ) : (
+              <select value={projectId} onChange={(event) => { setProjectId(event.target.value); }} className="field-control">
+                <option value="">{t('run.form.project.placeholder')}</option>
+                {projects?.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+
+          {projectId && (
+            <label className="field">
+              <span className="field__label">{t('run.form.site')}</span>
+              <select value={siteId} onChange={(event) => { setSiteId(event.target.value); }} className="field-control">
+                <option value="">{t('run.form.site.placeholder')}</option>
+                {sites?.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name} ({site.baseUrl})
+                  </option>
+                ))}
               </select>
             </label>
-            <label style={label({ flex: 1, minWidth: 160 })}>
-              {t('run.selectorValue')}
-              <div style={{ display: 'flex', gap: '0.25rem' }}>
-                {selectors && selectors.length > 0 ? (
-                  <select value={selectorValue} onChange={e => { setSelectorValue(e.target.value); }} required style={sel({ flex: 1 })}>
-                    <option value="">— 选择 —</option>
-                    {selectors.map(s => <option key={s.id} value={s.value}>{s.value}</option>)}
-                  </select>
-                ) : (
-                  <input value={selectorValue} onChange={e => { setSelectorValue(e.target.value); }} required
-                    placeholder={t(`run.selectorValue.placeholder.${selectorType}`)} style={sel({ flex: 1 })} />
-                )}
-                {projectId && repoId && (
-                  <button type="button" onClick={() => { void handleScan(); }} disabled={scanning}
-                    title="扫描仓库更新选择器缓存"
-                    style={{ padding: '4px 8px', fontSize: '0.8em', cursor: scanning ? 'not-allowed' : 'pointer', border: '1px solid #ccc', borderRadius: 4, background: '#f5f5f5' }}>
-                    {scanning ? '…' : '↻'}
-                  </button>
-                )}
-              </div>
-            </label>
-          </>
-        )}
-      </div>
+          )}
 
-      {/* Row 3: Exploration config */}
+          {siteId && creds && creds.length > 0 && (
+            <label className="field">
+              <span className="field__label">{t('run.form.credential')}</span>
+              <select value={credentialId} onChange={(event) => { setCredentialId(event.target.value); }} className="field-control">
+                <option value="">{t('run.form.credential.placeholder')}</option>
+                {creds.map((credential) => (
+                  <option key={credential.id} value={credential.id}>
+                    {credential.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {projectId && (
+            <label className="field">
+              <span className="field__label">{t('run.form.repo')}</span>
+              <select
+                value={repoId}
+                onChange={(event) => {
+                  setRepoId(event.target.value);
+                  setSelectorValue('');
+                }}
+                className="field-control"
+                required={requiresRepoSelection}
+              >
+                <option value="">{t('run.form.repo.placeholder')}</option>
+                {repos?.map((repo) => (
+                  <option key={repo.id} value={repo.id}>
+                    {repo.name} ({repo.path})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </section>
+
+      <section className="form-section">
+        <div className="form-section__header">
+          <span className="form-section__eyebrow">{t('run.section.mode.step')}</span>
+          <h3 className="form-section__title">{t('run.section.mode.title')}</h3>
+          <p className="form-section__description">{t('run.section.mode.description')}</p>
+        </div>
+
+        <div className="form-grid">
+          <label className="field field--span-12">
+            <span className="field__label">{t('run.mode')}</span>
+            <select
+              value={mode}
+              onChange={(event) => { setMode(event.target.value as import('../types.js').RunMode); }}
+              className="field-control"
+            >
+              <option value="regression">{t('run.mode.regression')}</option>
+              <option value="exploration">{t('run.mode.exploration')}</option>
+              <option value="hybrid">{t('run.mode.hybrid')}</option>
+            </select>
+            <span className="field__hint">{t(`run.mode.hint.${mode}`)}</span>
+          </label>
+
+          {needsSelector && (
+            <>
+              <label className="field field--span-3">
+                <span className="field__label">{t('run.selectorType')}</span>
+                <select
+                  value={selectorType}
+                  onChange={(event) => { setSelectorType(event.target.value as SelectorType); }}
+                  className="field-control"
+                >
+                  <option value="suite">{t('run.selectorType.suite')}</option>
+                  <option value="scenario">{t('run.selectorType.scenario')}</option>
+                  <option value="tag">{t('run.selectorType.tag')}</option>
+                  <option value="testcase">{t('run.selectorType.testcase')}</option>
+                </select>
+              </label>
+
+              <label className="field field--span-8">
+                <span className="field__label">{t('run.selectorValue')}</span>
+                <div className="field-inline">
+                  {selectors && selectors.length > 0 ? (
+                    <select
+                      value={selectorValue}
+                      onChange={(event) => { setSelectorValue(event.target.value); }}
+                      required
+                      className="field-control"
+                    >
+                      <option value="">{t('run.form.selector.placeholder')}</option>
+                      {selectors.map((selector) => (
+                        <option key={selector.id} value={selector.value}>
+                          {selector.value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={selectorValue}
+                      onChange={(event) => { setSelectorValue(event.target.value); }}
+                      required
+                      placeholder={t(`run.selectorValue.placeholder.${selectorType}`)}
+                      className="field-control"
+                    />
+                  )}
+                  {projectId && repoId && (
+                    <Button
+                      type="button"
+                      onClick={() => { void handleScan(); }}
+                      disabled={scanning}
+                      size="sm"
+                      title={t('run.refreshSelectors.title')}
+                    >
+                      {scanning ? t('run.refreshingSelectors') : t('run.refreshSelectors')}
+                    </Button>
+                  )}
+                </div>
+                <span className="field__hint">{t('run.selectorCacheHint')}</span>
+              </label>
+            </>
+          )}
+        </div>
+      </section>
+
       {needsExploration && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <label style={label()}>
-            {t('run.startUrls')} ({t('run.startUrls.hint')})
-            <textarea value={startUrls} onChange={e => { setStartUrls(e.target.value); }} rows={3} required style={{ padding: '4px 8px', resize: 'vertical' }} />
-          </label>
-          <label style={label()}>
-            {t('run.focusAreas')} ({t('run.focusAreas.hint')})
-            <textarea value={focusAreas} onChange={e => { setFocusAreas(e.target.value); }} rows={2} style={{ padding: '4px 8px', resize: 'vertical' }} />
-          </label>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <label style={label()}>
-              {t('run.maxSteps')}
-              <input type="number" value={maxSteps} onChange={e => { setMaxSteps(Number(e.target.value)); }} min={1} style={sel({ width: 80 })} />
+        <section className="form-section">
+          <div className="form-section__header">
+            <span className="form-section__eyebrow">{t('run.section.exploration.step')}</span>
+            <h3 className="form-section__title">{t('run.section.exploration.title')}</h3>
+            <p className="form-section__description">{t('run.section.exploration.description')}</p>
+          </div>
+
+          <div className="form-grid">
+            <label className="field field--span-12">
+              <span className="field__label">
+                {t('run.startUrls')} ({t('run.startUrls.hint')})
+              </span>
+              <textarea
+                value={startUrls}
+                onChange={(event) => { setStartUrls(event.target.value); }}
+                rows={3}
+                required
+                className="field-control field-control--textarea"
+              />
             </label>
-            <label style={label()}>
-              {t('run.maxPages')}
-              <input type="number" value={maxPages} onChange={e => { setMaxPages(Number(e.target.value)); }} min={1} style={sel({ width: 80 })} />
+
+            <label className="field field--span-12">
+              <span className="field__label">
+                {t('run.focusAreas')} ({t('run.focusAreas.hint')})
+              </span>
+              <textarea
+                value={focusAreas}
+                onChange={(event) => { setFocusAreas(event.target.value); }}
+                rows={2}
+                className="field-control field-control--textarea"
+              />
             </label>
-            <label style={label()}>
-              {t('run.browserMode')}
-              <select value={browserMode} onChange={e => { setBrowserMode(e.target.value as 'headless' | 'headed'); }} style={sel({ minWidth: 120 })}>
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.maxSteps')}</span>
+              <input
+                type="number"
+                value={maxSteps}
+                onChange={(event) => { setMaxSteps(Number(event.target.value)); }}
+                min={1}
+                className="field-control"
+              />
+            </label>
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.maxPages')}</span>
+              <input
+                type="number"
+                value={maxPages}
+                onChange={(event) => { setMaxPages(Number(event.target.value)); }}
+                min={1}
+                className="field-control"
+              />
+            </label>
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.browserMode')}</span>
+              <select
+                value={browserMode}
+                onChange={(event) => { setBrowserMode(event.target.value as 'headless' | 'headed'); }}
+                className="field-control"
+              >
                 <option value="headless">{t('run.browserMode.headless')}</option>
                 <option value="headed">{t('run.browserMode.headed')}</option>
               </select>
             </label>
-            <label style={label()}>
-              {t('run.captchaAutoSolve')}
-              <select value={captchaAutoSolve ? 'on' : 'off'} onChange={e => { setCaptchaAutoSolve(e.target.value === 'on'); }} style={sel({ minWidth: 120 })}>
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.captchaAutoSolve')}</span>
+              <select
+                value={captchaAutoSolve ? 'on' : 'off'}
+                onChange={(event) => { setCaptchaAutoSolve(event.target.value === 'on'); }}
+                className="field-control"
+              >
                 <option value="on">{t('common.enabled')}</option>
                 <option value="off">{t('common.disabled')}</option>
               </select>
             </label>
-            <label style={label()}>
-              {t('run.captchaAutoSolveAttempts')}
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.captchaAutoSolveAttempts')}</span>
               <input
                 type="number"
                 value={captchaAutoSolveAttempts}
-                onChange={e => { setCaptchaAutoSolveAttempts(Math.max(1, Math.min(3, Number(e.target.value) || 1))); }}
+                onChange={(event) => { setCaptchaAutoSolveAttempts(Math.max(1, Math.min(3, Number(event.target.value) || 1))); }}
                 min={1}
                 max={3}
                 disabled={!captchaAutoSolve}
-                style={sel({ width: 80 })}
+                className="field-control"
               />
             </label>
-            <label style={label()}>
-              {t('run.manualInterventionOnCaptcha')}
-              <select value={manualInterventionOnCaptcha ? 'on' : 'off'} onChange={e => { setManualInterventionOnCaptcha(e.target.value === 'on'); }} style={sel({ minWidth: 120 })}>
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.manualInterventionOnCaptcha')}</span>
+              <select
+                value={manualInterventionOnCaptcha ? 'on' : 'off'}
+                onChange={(event) => { setManualInterventionOnCaptcha(event.target.value === 'on'); }}
+                className="field-control"
+              >
                 <option value="on">{t('common.enabled')}</option>
                 <option value="off">{t('common.disabled')}</option>
               </select>
             </label>
-            <label style={label()}>
-              {t('run.manualLoginTimeoutSec')}
+
+            <label className="field field--span-3">
+              <span className="field__label">{t('run.manualLoginTimeoutSec')}</span>
               <input
                 type="number"
                 value={manualLoginTimeoutSec}
-                onChange={e => { setManualLoginTimeoutSec(Math.max(10, Number(e.target.value) || 10)); }}
+                onChange={(event) => { setManualLoginTimeoutSec(Math.max(10, Number(event.target.value) || 10)); }}
                 min={10}
                 disabled={!manualInterventionOnCaptcha}
-                style={sel({ width: 90 })}
+                className="field-control"
               />
             </label>
-            <label style={label({ flex: 1, minWidth: 160 })}>
-              {t('run.allowedHosts')} ({t('run.allowedHosts.hint')})
-              <input value={allowedHosts} onChange={e => { setAllowedHosts(e.target.value); }} style={sel({})} />
+
+            <label className="field field--span-6">
+              <span className="field__label">
+                {t('run.allowedHosts')} ({t('run.allowedHosts.hint')})
+              </span>
+              <input
+                value={allowedHosts}
+                onChange={(event) => { setAllowedHosts(event.target.value); }}
+                className="field-control"
+              />
             </label>
           </div>
-        </div>
+        </section>
       )}
 
       {(projectId || repoId || projectPath) && (
-        <div style={{ padding: '0.6rem 0.75rem', border: '1px solid #e5e7eb', borderRadius: 6, background: '#fafafa', fontSize: '0.85em', color: '#444' }}>
-          <div><strong>目标工作区</strong></div>
-          <div>项目：{projects?.find(p => p.id === projectId)?.name ?? '—'}</div>
-          <div>站点：{sites?.find(s => s.id === siteId)?.name ?? '—'}</div>
-          <div>凭据：{creds?.find(c => c.id === credentialId)?.label ?? '—'}</div>
-          {needsExploration && <div>浏览器模式：{browserMode === 'headed' ? t('run.browserMode.headed') : t('run.browserMode.headless')}</div>}
-          {needsExploration && <div>滑块自动尝试：{captchaAutoSolve ? `${String(captchaAutoSolveAttempts)} 次` : t('common.disabled')}</div>}
-          {needsExploration && <div>人工兜底：{manualInterventionOnCaptcha ? `${t('common.enabled')} (${String(manualLoginTimeoutSec)}s)` : t('common.disabled')}</div>}
-          <div>仓库：{selectedRepo?.name ?? (requiresRepoSelection ? '未选择' : '—')}</div>
-          <div style={{ wordBreak: 'break-all' }}>路径：{projectPath || '—'}</div>
-          {projectId && sites && sites.length > 0 && !siteId && (
-            <div style={{ color: '#b45309', marginTop: '0.35rem' }}>当前项目已配置站点，建议选择站点后再启动运行。</div>
+        <section className="selection-summary" aria-label={t('run.workspaceSummary')}>
+          <SummaryItem label={t('run.workspaceSummary.project')} value={selectedProject?.name ?? t('common.none')} />
+          <SummaryItem label={t('run.workspaceSummary.site')} value={selectedSite?.name ?? t('common.none')} />
+          <SummaryItem label={t('run.workspaceSummary.credential')} value={selectedCredential?.label ?? t('common.none')} />
+          <SummaryItem label={t('run.workspaceSummary.repo')} value={selectedRepo?.name ?? (requiresRepoSelection ? t('run.workspaceSummary.repoUnselected') : t('common.none'))} />
+          <SummaryItem label={t('run.workspaceSummary.path')} value={projectPath || t('common.none')} />
+          {needsExploration && (
+            <SummaryItem
+              label={t('run.workspaceSummary.browserMode')}
+              value={browserMode === 'headed' ? t('run.browserMode.headed') : t('run.browserMode.headless')}
+            />
           )}
-        </div>
+          {needsExploration && (
+            <SummaryItem
+              label={t('run.workspaceSummary.captchaAttempts')}
+              value={captchaAutoSolve ? t('run.workspaceSummary.attempts', { count: captchaAutoSolveAttempts }) : t('common.disabled')}
+            />
+          )}
+          {needsExploration && (
+            <SummaryItem
+              label={t('run.workspaceSummary.manualFallback')}
+              value={manualInterventionOnCaptcha ? t('run.workspaceSummary.manualFallback.enabled', { seconds: manualLoginTimeoutSec }) : t('common.disabled')}
+            />
+          )}
+          {projectId && sites && sites.length > 0 && !siteId && (
+            <div className="selection-summary__warning">{t('run.workspaceSummary.siteRecommendation')}</div>
+          )}
+        </section>
       )}
 
-      <div>
-        <Button type="submit" variant="primary" disabled={loading || (requiresRepoSelection && !repoId)}>{loading ? t('common.loading') : t('run.start')}</Button>
+      <div className="quick-run-actions">
+        <div className="quick-run-actions__hint">
+          {t('run.submitHint')}
+        </div>
+        <Button type="submit" variant="primary" disabled={loading || (requiresRepoSelection && !repoId)}>
+          {loading ? t('common.loading') : t('run.start')}
+        </Button>
       </div>
     </form>
+  );
+}
+
+function SummaryItem({ label, value }: { label: string; value: string }): React.ReactElement {
+  return (
+    <div className="selection-summary__item">
+      <div className="selection-summary__label">{label}</div>
+      <div className="selection-summary__value">{value}</div>
+    </div>
   );
 }
