@@ -41,4 +41,8 @@ export const HARNESS_TEMPLATE_VERSIONS = {
   explorationPlan: 'exploration-plan/default@v1',
   explorationDecision: 'exploration-decision/default@v1',
   explorationLogin: 'exploration-login/default@v1',
+  codeRepairPlan: 'code-repair-plan/default@v1',
+  codeRepairApply: 'code-repair-apply/default@v1',
+  codeRepairVerify: 'code-repair-verify/default@v1',
+  codeRepairRetry: 'code-repair-retry/default@v1',
 } as const;

@@ -3,10 +3,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync } from 'node:fs';
 import { openDb, runMigrations, RunRepository } from '@zarb/storage';
-import { HarnessSessionManager } from '../src/session-manager.js';
-import { ObservedHarness } from '../src/observed-harness.js';
-import type { ObservabilityAdapter } from '../src/observability.js';
-import { DEFAULT_EXPLORATION_POLICY } from '../src/harness-policy.js';
+import { HarnessSessionManager, ObservedHarness, DEFAULT_EXPLORATION_POLICY } from '../src/runtime/index.js';
+import type { ObservabilityAdapter } from '../src/runtime/index.js';
 
 const MIGRATIONS_DIR = join(new URL('.', import.meta.url).pathname, '../../../scripts/sql');
 

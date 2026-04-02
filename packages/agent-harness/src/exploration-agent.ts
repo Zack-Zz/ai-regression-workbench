@@ -3,12 +3,27 @@ import { join } from 'node:path';
 import type { ExplorationConfig } from '@zarb/shared-types';
 import type { Db } from '@zarb/storage';
 import { FindingRepository, SiteCredentialRepository } from '@zarb/storage';
-import { HarnessSessionManager } from './session-manager.js';
-import { ToolRegistry } from './tool-registry.js';
+import { HarnessSessionManager } from './runtime/session-manager.js';
+import { ToolRegistry } from './runtime/tool-registry.js';
 import { StepLogger, appLogger } from '@zarb/logger';
 import type { DomSnapshot, PlaywrightToolProvider, VerificationChallenge } from './playwright-tool-provider.js';
 import { LoginFailedError, isLoginUrl } from './playwright-tool-provider.js';
 import { HARNESS_TEMPLATE_VERSIONS, renderHarnessTemplate } from './prompt-loader.js';
+import { PlaywrightExplorationBrowserAdapter } from './exploration/browser-adapter.js';
+import type { ExplorationBrowserAdapter } from './exploration/browser-adapter.js';
+import {
+  buildExplorationDecisionPrompt as buildExplorationDecisionPromptFromModule,
+  buildExplorationPlanPrompt as buildExplorationPlanPromptFromModule,
+  summarizePromptContext as summarizePromptContextFromModule,
+} from './exploration/prompt-builder.js';
+import { ExplorationFindingExtractor } from './exploration/finding-extractor.js';
+import { ExplorationBrain, resolveAuthGateMode as resolveAuthGateModeFromBrain } from './exploration/brain.js';
+import {
+  ExplorationAuthFlow,
+  estimateSliderDragDistance as estimateSliderDragDistanceFromAuth,
+  isCaptchaChallengeError as isCaptchaChallengeErrorFromAuth,
+  looksLoggedInBySnapshot as looksLoggedInBySnapshotFromAuth,
+} from './exploration/auth-flow.js';
 
 const log = appLogger.child('ExplorationAgent');
 
@@ -529,14 +544,11 @@ function buildPageSnapshot(pageState: PageProbe): NonNullable<import('@zarb/logg
 }
 
 export function isCaptchaChallengeError(errorMessage: string): boolean {
-  const hasCaptchaKeyword = /(拖动滑块|滑块|验证码|captcha|recaptcha|hcaptcha|turnstile|geetest|verify-content)/i.test(errorMessage);
-  if (hasCaptchaKeyword) return true;
-  return /intercepts pointer events/i.test(errorMessage) && /(verify|slider|captcha|login|登录)/i.test(errorMessage);
+  return isCaptchaChallengeErrorFromAuth(errorMessage);
 }
 
 export function looksLoggedInBySnapshot(snapshot: DomSnapshot): boolean {
-  const hasPasswordInput = snapshot.inputs.some((inp) => inp.type === 'password');
-  return !isLoginUrl(snapshot.url) && !hasPasswordInput;
+  return looksLoggedInBySnapshotFromAuth(snapshot);
 }
 
 type AuthGateMode = 'none' | 'skip' | 'replan-continue' | 'replan-plan';
@@ -546,11 +558,7 @@ export function resolveAuthGateMode(input: {
   hasAuthError: boolean;
   isOnLoginPage: boolean;
 }): AuthGateMode {
-  const { authEstablished, hasAuthError, isOnLoginPage } = input;
-  if (!hasAuthError && !isOnLoginPage) return 'none';
-  if (authEstablished && isOnLoginPage && !hasAuthError) return 'skip';
-  if (authEstablished) return 'replan-continue';
-  return 'replan-plan';
+  return resolveAuthGateModeFromBrain(input);
 }
 
 const SLIDER_HANDLE_SELECTORS = [
@@ -665,6 +673,10 @@ export class ExplorationAgent {
   private readonly findings: FindingRepository;
   private readonly sessionManager: HarnessSessionManager;
   private readonly credentials: SiteCredentialRepository;
+  private readonly findingExtractor = new ExplorationFindingExtractor();
+  private readonly browserAdapter: ExplorationBrowserAdapter | undefined;
+  private readonly brain: ExplorationBrain;
+  private readonly authFlow: ExplorationAuthFlow | undefined;
 
   constructor(
     private readonly db: Db,
@@ -674,6 +686,9 @@ export class ExplorationAgent {
     this.findings = new FindingRepository(db);
     this.sessionManager = new HarnessSessionManager(db);
     this.credentials = new SiteCredentialRepository(db);
+    this.browserAdapter = playwrightProvider ? new PlaywrightExplorationBrowserAdapter(playwrightProvider) : undefined;
+    this.brain = new ExplorationBrain(provider, this.sessionManager);
+    this.authFlow = this.browserAdapter ? new ExplorationAuthFlow(provider, this.sessionManager, this.browserAdapter) : undefined;
   }
 
   private async findSliderGeometry(page: import('playwright').Page): Promise<SliderGeometry | undefined> {
@@ -985,7 +1000,7 @@ export class ExplorationAgent {
       });
       return false;
     }
-    const baseDistance = estimateSliderDragDistance({
+    const baseDistance = estimateSliderDragDistanceFromAuth({
       gapX: detection.gapX,
       originalWidth: challenge.originalWidth,
       sliderWidth: challenge.sliderWidth,
@@ -1321,12 +1336,12 @@ export class ExplorationAgent {
     // If PlaywrightToolProvider is available, launch it and use its probe
     let activePwProvider: PlaywrightToolProvider | null = null;
     let effectiveProbe = probe;
-    if (this.playwrightProvider) {
+    if (this.browserAdapter) {
       try {
-        await this.playwrightProvider.launch({ headless: config.browserMode !== 'headed' });
-        this.playwrightProvider.registerTools(registry);
-        effectiveProbe = this.playwrightProvider.buildProbe();
-        activePwProvider = this.playwrightProvider;
+        await this.browserAdapter.launch({ headless: config.browserMode !== 'headed' });
+        this.browserAdapter.registerTools(registry);
+        effectiveProbe = this.browserAdapter.buildProbe();
+        activePwProvider = this.browserAdapter as unknown as PlaywrightToolProvider;
       } catch (e) {
         // Playwright unavailable (e.g. no browser installed) — fall back to probe callback
         log.warn('Playwright launch failed, falling back to fetch', { error: String(e) });
@@ -1398,8 +1413,8 @@ export class ExplorationAgent {
         }
 
         // Persist findings from this page
-        const newFindings = this.extractFindings(runId, pageState, config).filter((finding) => {
-          const key = `${finding.category}:${finding.severity}:${finding.pageUrl ?? ''}:${finding.summary}`;
+        const newFindings = this.findingExtractor.extract(runId, pageState, config).filter((finding) => {
+          const key = this.findingExtractor.buildDedupeKey(finding);
           if (seenFindingKeys.has(key)) return false;
           seenFindingKeys.add(key);
           return true;
@@ -1421,7 +1436,7 @@ export class ExplorationAgent {
         // For unauthenticated sessions, let planner/login logic run instead of looping with immediate continue.
         const hasAuthError = hasAuthNetworkError(pageState);
         const isOnLoginPage = isLoginUrl(pageState.url);
-        const authGateMode = resolveAuthGateMode({ authEstablished, hasAuthError, isOnLoginPage });
+        const authGateMode = resolveAuthGateModeFromBrain({ authEstablished, hasAuthError, isOnLoginPage });
         if (authGateMode === 'skip') {
           stepLogger.log({
             component: 'ExplorationAgent',
@@ -1482,7 +1497,7 @@ export class ExplorationAgent {
             actionId: planActionId,
             promptTemplateVersion: HARNESS_TEMPLATE_VERSIONS.explorationPlan,
           });
-          activeBrainPlan = await this.planExplorationPhase(
+          activeBrainPlan = await this.brain.planExplorationPhase(
             pageState,
             config,
             stepIndex,
@@ -1569,7 +1584,9 @@ export class ExplorationAgent {
             let loginErr: string | undefined;
             const loginStart = Date.now();
             if (strategy === 'ai') {
-              loginErr = await this.runAiLogin(pageState.url, cred, config, stepLogger, session.session_id, dataRoot);
+              loginErr = this.authFlow
+                ? await this.authFlow.runAiLogin(pageState.url, cred, config, stepLogger, session.session_id, dataRoot)
+                : 'LOGIN_AI_FAILED';
             } else {
               try {
                 await activePwProvider.applyCredential(cred, pageState.url);
@@ -1635,7 +1652,7 @@ export class ExplorationAgent {
         const llmStart = Date.now();
         const llmActionId = `llm-${String(llmStart)}`;
         const domSnapshot = activePwProvider ? await activePwProvider.collectDomSnapshot().catch(() => undefined) : undefined;
-        const promptContextSummary = summarizePromptContext({
+        const promptContextSummary = summarizePromptContextFromModule({
           page: pageState,
           config,
           stepIndex,
@@ -1661,7 +1678,7 @@ export class ExplorationAgent {
           promptContextSummary,
           ...(activeBrainPlan ? { reason: `plan=${activeBrainPlan.phase}: ${activeBrainPlan.objective}` } : {}),
         });
-        const nextStep = await this.decideNextStep(
+        const nextStep = await this.brain.decideNextStep(
           pageState,
           config,
           stepIndex,
@@ -1984,7 +2001,7 @@ export class ExplorationAgent {
     actionId?: string,
   ): Promise<ExplorationBrainPlan> {
     const fallback = fallbackBrainPlan(page, config, visited, authEstablished);
-    const prompt = buildExplorationPlanPrompt({
+    const prompt = buildExplorationPlanPromptFromModule({
       page,
       config,
       visited,
@@ -2182,7 +2199,7 @@ export class ExplorationAgent {
     brainPlan?: ExplorationBrainPlan,
     domSnapshot?: DomSnapshot,
   ): Promise<ExplorationStep> {
-    const prompt = buildExplorationDecisionPrompt({
+    const prompt = buildExplorationDecisionPromptFromModule({
       page,
       config,
       stepIndex,
@@ -2200,7 +2217,7 @@ export class ExplorationAgent {
 
     let raw = '';
     const toolInput = { currentUrl: page.url, formCount: page.formCount, linkCount: page.linkCount };
-    const promptContextSummary = summarizePromptContext({
+    const promptContextSummary = summarizePromptContextFromModule({
       page,
       config,
       stepIndex,

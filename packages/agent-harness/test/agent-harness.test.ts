@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { openDb, runMigrations, RunRepository, CodeTaskRepository } from '@zarb/storage';
-import { HarnessSessionManager } from '../src/session-manager.js';
-import { ToolRegistry } from '../src/tool-registry.js';
-import { ArtifactWriter } from '../src/artifact-writer.js';
-import { DEFAULT_EXPLORATION_POLICY, DEFAULT_CODE_REPAIR_POLICY } from '../src/harness-policy.js';
+import { HarnessSessionManager, ToolRegistry, ArtifactWriter, DEFAULT_EXPLORATION_POLICY, DEFAULT_CODE_REPAIR_POLICY } from '../src/runtime/index.js';
+import { ToolExecutionPlanner } from '../src/runtime/tool-execution-planner.js';
+import { CodeRepairAgent } from '../src/code-repair/code-repair-agent.js';
 
 const MIGRATIONS_DIR = join(new URL('.', import.meta.url).pathname, '../../../scripts/sql');
 
@@ -97,6 +96,54 @@ describe('ToolRegistry', () => {
     await registry.call('noop', {}, { sessionId: 's1', stepIndex: 0 });
     await registry.call('noop', {}, { sessionId: 's1', stepIndex: 1 });
     expect(registry.getCallLog()).toHaveLength(2);
+  });
+
+  it('supports structured descriptors and context modification', async () => {
+    const registry = new ToolRegistry({ requireApprovalFor: [], toolCallTimeoutMs: 1000 });
+    registry.register('memory.lookup', {
+      handler: async () => ['m1', 'm2'],
+      isReadOnly: true,
+      isConcurrencySafe: true,
+      summarizeResult: (value) => `${String((value as string[]).length)} memories`,
+      modifyContext: (context: { items: string[] }, result) => ({
+        ...context,
+        items: result.value as string[],
+      }),
+    });
+    const result = await registry.call<string[]>('memory.lookup', {}, { sessionId: 's1', stepIndex: 0 });
+    expect(result.record.resultSummary).toBe('2 memories');
+    expect(registry.getContextModifier<{ items: string[] }>('memory.lookup')).toBeTypeOf('function');
+  });
+});
+
+describe('ToolExecutionPlanner', () => {
+  it('batches read-only concurrency-safe tools and applies context modifiers', async () => {
+    const registry = new ToolRegistry({ requireApprovalFor: [], toolCallTimeoutMs: 1000 });
+    registry.register('read.a', {
+      handler: async () => 'A',
+      isReadOnly: true,
+      isConcurrencySafe: true,
+      modifyContext: (context: { values: string[] }, result) => ({
+        values: [...context.values, result.value as string],
+      }),
+    });
+    registry.register('write.b', {
+      handler: async () => 'B',
+      isReadOnly: false,
+      isConcurrencySafe: false,
+      modifyContext: (context: { values: string[] }, result) => ({
+        values: [...context.values, result.value as string],
+      }),
+    });
+
+    const planner = new ToolExecutionPlanner(registry);
+    const executed = await planner.execute([
+      { toolName: 'read.a', input: {} },
+      { toolName: 'write.b', input: {} },
+    ], { sessionId: 's1', stepIndex: 0 }, { values: [] });
+
+    expect(executed.results).toHaveLength(2);
+    expect(executed.context.values).toEqual(['A', 'B']);
   });
 });
 
@@ -366,6 +413,51 @@ describe('ArtifactWriter', () => {
     // Staged change must still be staged after artifact generation
     const stagedAfter = execSync('git diff --cached --name-only', { cwd: ws, encoding: 'utf8' }).trim();
     expect(stagedAfter).toContain('staged.ts');
+  });
+});
+
+describe('CodeRepairAgent', () => {
+  it('assembles staged prompts, runs transport, and records prompt samples', async () => {
+    const db = makeDb();
+    seedRun(db, 'r-code-repair');
+    new CodeTaskRepository(db).create({
+      taskId: 'task-code-repair',
+      runId: 'r-code-repair',
+      workspacePath: '/ws',
+      goal: 'fix flaky test',
+      scopePathsJson: JSON.stringify(['apps/cli/src/services/code-task-service.ts']),
+      verificationCommandsJson: JSON.stringify(['pnpm test']),
+      createdAt: new Date().toISOString(),
+    });
+    const task = new CodeTaskRepository(db).findById('task-code-repair');
+    expect(task).toBeTruthy();
+    const sessionManager = new HarnessSessionManager(db);
+    const session = sessionManager.startSession({
+      runId: 'r-code-repair',
+      taskId: 'task-code-repair',
+      kind: 'code-repair',
+      agentName: 'CodeRepairAgent',
+      policy: DEFAULT_CODE_REPAIR_POLICY,
+      dataRoot: dir,
+    });
+    const transport = {
+      name: 'MockTransport',
+      run: async () => ({ rawOutput: 'patched file successfully', exitCode: 0 }),
+    };
+    const agent = new CodeRepairAgent(db, transport, sessionManager);
+
+    const result = await agent.execute({
+      task: task!,
+      sessionId: session.session_id,
+      dataRoot: dir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.planSummary).toContain('Apply the minimal code changes');
+    const promptSamples = readFileSync(join(dir, 'agent-traces', session.session_id, 'prompt-samples.jsonl'), 'utf8');
+    expect(promptSamples).toContain('code-repair-plan');
+    expect(promptSamples).toContain('code-repair-apply');
+    expect(promptSamples).toContain('code-repair-verify');
   });
 });
 

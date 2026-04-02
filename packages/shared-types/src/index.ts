@@ -4,3 +4,4 @@ export * from './services.js';
 export * from './events.js';
 export * from './lifecycle.js';
 export * from './transitions.js';
+export * from './agent-memory.js';

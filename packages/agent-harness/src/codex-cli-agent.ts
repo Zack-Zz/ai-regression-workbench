@@ -1,16 +1,24 @@
 import { spawn } from 'node:child_process';
 
-export interface CodexRunInput {
+export interface CodeRepairTransportInput {
   workspacePath: string;
   prompt: string;
   /** Timeout in milliseconds. Default: 5 minutes. */
   timeoutMs?: number;
 }
 
-export interface CodexRunResult {
+export interface CodeRepairTransportResult {
   rawOutput: string;
   exitCode: number;
 }
+
+export interface CodeRepairTransport {
+  readonly name: string;
+  run(input: CodeRepairTransportInput): Promise<CodeRepairTransportResult>;
+}
+
+export type CodexRunInput = CodeRepairTransportInput;
+export type CodexRunResult = CodeRepairTransportResult;
 
 /**
  * CodexCliAgent — headless executor that delegates to `codex exec`.
@@ -18,6 +26,8 @@ export interface CodexRunResult {
  * System-derived diff/patch/verify truth is produced by ArtifactWriter after this returns.
  */
 export class CodexCliAgent {
+  readonly name = 'CodexCliAgent';
+
   run(input: CodexRunInput): Promise<CodexRunResult> {
     const { workspacePath, prompt, timeoutMs = 300_000 } = input;
     return new Promise((resolve) => {

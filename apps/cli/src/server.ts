@@ -7,7 +7,7 @@ import { TestRunner } from '@zarb/test-runner';
 import { createTraceProvider } from '@zarb/trace-bridge';
 import { createLogProvider } from '@zarb/log-bridge';
 import { LocalAIEngine, createAIProvider } from '@zarb/ai-engine';
-import { CodexCliAgent, KiroCliAgent } from '@zarb/agent-harness';
+import { CodexCliAgent, KiroCliAgent } from '@zarb/agent-harness/code-repair';
 import { RunService } from './services/run-service.js';
 import { DiagnosticsService } from './services/diagnostics-service.js';
 import { CodeTaskService } from './services/code-task-service.js';

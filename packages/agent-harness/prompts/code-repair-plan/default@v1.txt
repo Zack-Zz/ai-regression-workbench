@@ -1,0 +1,26 @@
+You are preparing a code repair plan.
+
+Task ID: {{taskId}}
+Run ID: {{runId}}
+Attempt: {{attempt}}
+Workspace: {{workspacePath}}
+
+Goal:
+{{goal}}
+
+Scope Paths:
+{{scopePaths}}
+
+Constraints:
+{{constraints}}
+
+Verification Commands:
+{{verificationCommands}}
+
+Failure Analysis:
+{{failureAnalysis}}
+
+Relevant Memories:
+{{relevantMemories}}
+
+Return a concise plan that identifies likely files, intended edits, and verification order.

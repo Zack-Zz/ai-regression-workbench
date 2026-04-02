@@ -12,7 +12,7 @@ import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationCo
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
-import { CodexCliAgent } from '@zarb/agent-harness';
+import { CodexCliAgent } from '@zarb/agent-harness/code-repair';
 import { CommitManager } from '@zarb/review-manager';
 import { SettingsService } from '../src/services/settings-service.js';
 import { DoctorService } from '../src/services/doctor-service.js';
@@ -21,8 +21,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const MIGRATIONS_DIR = join(new URL('.', import.meta.url).pathname, '../../../scripts/sql');
 
-vi.mock('@zarb/agent-harness', async () => {
-  const actual = await vi.importActual<typeof import('@zarb/agent-harness')>('@zarb/agent-harness');
+vi.mock('@zarb/agent-harness/exploration', async () => {
+  const actual = await vi.importActual<typeof import('@zarb/agent-harness/exploration')>('@zarb/agent-harness/exploration');
 
   class MockExplorationAgent {
     async explore(_runId: string, config: { startUrls?: string[] }): Promise<{ findingCount: number; stepsExecuted: number; pagesVisited: number; llmError?: string }> {
@@ -79,6 +79,23 @@ function res(): { res: ServerResponse; body: () => Record<string, unknown>; stat
   let raw = '';
   const r = { writeHead: (c: number) => { code = c; }, end: (d: string) => { raw = d; } } as unknown as ServerResponse;
   return { res: r, body: () => JSON.parse(raw) as Record<string, unknown>, status: () => code };
+}
+
+async function waitForValue<T>(
+  read: () => T,
+  predicate: (value: T) => boolean,
+  timeoutMs = 1_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let current = read();
+  while (!predicate(current)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for condition. Last value: ${JSON.stringify(current)}`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    current = read();
+  }
+  return current;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +254,11 @@ describe('Run lifecycle flow', () => {
     });
     expect(started.success).toBe(true);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
     const runId = started.run?.runId as string;
-    const detail = svc.getRun(runId);
+    const detail = await waitForValue(
+      () => svc.getRun(runId),
+      (value) => value?.summary.status === 'FAILED',
+    );
     expect(detail?.summary.status).toBe('FAILED');
     expect(detail?.summary.summary).toBe('LOGIN_FAILED');
     expect(detail?.summary.currentStage).toBe('RUNNING_EXPLORATION');
@@ -262,10 +280,11 @@ describe('Run lifecycle flow', () => {
     });
     expect(started.success).toBe(true);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
     const runId = started.run?.runId as string;
-    const detail = svc.getRun(runId);
+    const detail = await waitForValue(
+      () => svc.getRun(runId),
+      (value) => value?.summary.status === 'FAILED',
+    );
     expect(detail?.summary.status).toBe('FAILED');
     expect(detail?.summary.summary).toBe('LOGIN_CAPTCHA_REQUIRED');
     expect(detail?.summary.currentStage).toBe('RUNNING_EXPLORATION');

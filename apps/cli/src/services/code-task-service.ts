@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Db, CodeTaskRow } from '@zarb/storage';
 import { CodeTaskRepository, ReviewRepository, CommitRepository, CodeTaskDraftRepository, AnalysisRepository } from '@zarb/storage';
-import { HarnessSessionManager, ArtifactWriter, CodexCliAgent, KiroCliAgent, DEFAULT_CODE_REPAIR_POLICY } from '@zarb/agent-harness';
+import {
+  HarnessSessionManager,
+  ArtifactWriter,
+  DEFAULT_CODE_REPAIR_POLICY,
+} from '@zarb/agent-harness/runtime';
+import { CodexCliAgent, KiroCliAgent, CodeRepairAgent } from '@zarb/agent-harness/code-repair';
 import { CommitManager } from '@zarb/review-manager';
 import type {
   CodeTaskSummary, CodeTaskDetail, CodeTaskSummaryPage, ActionResult,
@@ -47,6 +52,7 @@ export class CodeTaskService {
   private readonly sessionManager: HarnessSessionManager;
   private readonly artifactWriter: ArtifactWriter;
   private readonly agent: CodexCliAgent | KiroCliAgent;
+  private readonly codeRepairAgent: CodeRepairAgent;
   private readonly commitManager: CommitManager;
   private readonly codeTaskRoot: string;
 
@@ -65,6 +71,7 @@ export class CodeTaskService {
     this.sessionManager = new HarnessSessionManager(db);
     this.artifactWriter = new ArtifactWriter(dataRoot, db, codeTaskRoot);
     this.agent = agent ?? new CodexCliAgent();
+    this.codeRepairAgent = new CodeRepairAgent(db, this.agent, this.sessionManager);
     this.commitManager = commitManager ?? new CommitManager(db);
     this.codeTaskRoot = codeTaskRoot ?? `${dataRoot}/code-tasks`;
   }
@@ -260,23 +267,37 @@ export class CodeTaskService {
       const verificationCommands: string[] = row.verification_commands_json
         ? JSON.parse(row.verification_commands_json) as string[]
         : [];
+      const analysis = row.testcase_id ? this.analyses.findByTestcase(row.run_id, row.testcase_id) : undefined;
 
       const t0 = Date.now();
-      const agentResult = await this.agent.run({ workspacePath: row.workspace_path, prompt: row.goal });
-      log.info('agent run completed', { taskId, exitCode: agentResult.exitCode, durationMs: Date.now() - t0 });
-
-      // Record agent execution step
-      this.sessionManager.appendStep(session.session_id, {
-        stepIndex: 0,
-        description: `codex exec: ${row.goal.slice(0, 100)}`,
-        outcome: agentResult.exitCode === 0 ? 'ok' : `exit ${String(agentResult.exitCode)}`,
-        timestamp: new Date().toISOString(),
-      }, this.dataRoot);
+      const agentResult = await this.codeRepairAgent.execute({
+        task: row,
+        sessionId: session.session_id,
+        dataRoot: this.dataRoot,
+        ...(analysis ? { analysis } : {}),
+      });
+      log.info('agent run completed', {
+        taskId,
+        exitCode: agentResult.exitCode,
+        durationMs: Date.now() - t0,
+        contextSummary: agentResult.contextSummary,
+      });
 
       if (agentResult.exitCode !== 0) {
         log.warn('agent run failed', { taskId, exitCode: agentResult.exitCode });
+        this.codeRepairAgent.recordApplyFailure(
+          row,
+          'transport execution failed',
+          agentResult.rawOutput,
+        );
         const rawOutputPath = this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
-        this.tasks.update(taskId, { status: 'FAILED', harnessSessionId: session.session_id, rawOutputPath, updatedAt: new Date().toISOString() });
+        this.tasks.update(taskId, {
+          status: 'FAILED',
+          harnessSessionId: session.session_id,
+          rawOutputPath,
+          summary: agentResult.planSummary,
+          updatedAt: new Date().toISOString(),
+        });
         this.emitTask(taskId);
         this.syncRunForTask(taskId);
         this.sessionManager.completeSession(session.session_id);
@@ -299,7 +320,20 @@ export class CodeTaskService {
 
       const finalStatus = artifacts.verifyPassed ? 'SUCCEEDED' : 'FAILED';
       log.info('code task verify done', { taskId, verifyPassed: artifacts.verifyPassed, finalStatus });
-      this.tasks.update(taskId, { status: finalStatus, updatedAt: new Date().toISOString() });
+      if (!artifacts.verifyPassed) {
+        this.codeRepairAgent.recordVerifyFailure(
+          row,
+          'verification failed after apply',
+          verificationCommands.length > 0
+            ? `commands: ${verificationCommands.join(', ')}`
+            : 'artifact verification failed',
+        );
+      }
+      this.tasks.update(taskId, {
+        status: finalStatus,
+        summary: agentResult.planSummary,
+        updatedAt: new Date().toISOString(),
+      });
       this.emitTask(taskId);
       this.syncRunForTask(taskId);
       this.sessionManager.completeSession(session.session_id);
@@ -386,6 +420,7 @@ export class CodeTaskService {
       codeTaskVersion: input.codeTaskVersion,
       createdAt: now,
     });
+    this.codeRepairAgent.recordReviewFeedback(row, input.decision, input.comment);
 
     if (input.decision === 'accept') {
       this.tasks.update(input.taskId, { status: 'COMMIT_PENDING', updatedAt: now });

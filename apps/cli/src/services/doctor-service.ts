@@ -31,6 +31,7 @@ const EXPECTED_MIGRATIONS = [
   '033_selector_cache',
   '034_repo_base_branch',
   '035_runs_credential',
+  '036_code_task_memory',
 ];
 
 function check(name: string, fn: () => 'ok' | 'warn' | 'fail' | { status: 'ok' | 'warn' | 'fail'; message: string }): DoctorCheckResult {

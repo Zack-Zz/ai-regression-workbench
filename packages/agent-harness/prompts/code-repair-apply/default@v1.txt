@@ -1,0 +1,33 @@
+You are executing a code repair task in unattended mode.
+
+Task ID: {{taskId}}
+Run ID: {{runId}}
+Attempt: {{attempt}}
+Workspace: {{workspacePath}}
+
+Goal:
+{{goal}}
+
+Plan:
+{{planSummary}}
+
+Scope Paths:
+{{scopePaths}}
+
+Constraints:
+{{constraints}}
+
+Verification Commands:
+{{verificationCommands}}
+
+Failure Analysis:
+{{failureAnalysis}}
+
+Relevant Memories:
+{{relevantMemories}}
+
+Requirements:
+- Work only within scope when possible
+- Prefer minimal, complete edits
+- Preserve existing project conventions
+- Leave the workspace in a state suitable for verification

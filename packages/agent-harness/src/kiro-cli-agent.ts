@@ -9,6 +9,8 @@ import type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
  * and exits when the task is complete.
  */
 export class KiroCliAgent {
+  readonly name = 'KiroCliAgent';
+
   run(input: CodexRunInput): Promise<CodexRunResult> {
     const { workspacePath, prompt, timeoutMs = 300_000 } = input;
     return new Promise((resolve) => {

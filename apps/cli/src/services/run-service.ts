@@ -414,7 +414,7 @@ export class RunService {
     this.emitRun(runId);
 
     if (this.opts.aiEngine && explorationConfig) {
-      const { ExplorationAgent, PlaywrightToolProvider } = await import('@zarb/agent-harness');
+      const { ExplorationAgent, PlaywrightToolProvider } = await import('@zarb/agent-harness/exploration');
       const providerAdapter = this.opts.aiEngine.getProvider();
 
       // Detect null/unconfigured provider early and fail fast with a clear run summary

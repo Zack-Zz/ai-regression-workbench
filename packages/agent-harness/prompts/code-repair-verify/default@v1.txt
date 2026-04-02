@@ -1,0 +1,12 @@
+You are verifying a completed code repair attempt.
+
+Task ID: {{taskId}}
+Attempt: {{attempt}}
+
+Verification Commands:
+{{verificationCommands}}
+
+Apply Output Summary:
+{{applyOutputSummary}}
+
+Return a short verification checklist and likely failure surfaces.

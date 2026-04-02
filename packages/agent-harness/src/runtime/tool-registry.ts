@@ -8,6 +8,14 @@ export type ToolHandler<TInput = unknown, TOutput = unknown> = (
   input: TInput,
 ) => Promise<TOutput>;
 
+export interface ToolDescriptor<TInput = unknown, TOutput = unknown, TContext = unknown> {
+  handler: ToolHandler<TInput, TOutput>;
+  isReadOnly?: boolean;
+  isConcurrencySafe?: boolean;
+  summarizeResult?: (value: TOutput) => string;
+  modifyContext?: (context: TContext, result: ToolCallResult<TOutput>) => TContext;
+}
+
 export interface ToolCallRecord {
   sessionId: string;
   stepIndex: number;
@@ -27,7 +35,7 @@ export interface ToolCallResult<T = unknown> {
 }
 
 export class ToolRegistry {
-  private readonly tools = new Map<string, ToolHandler>();
+  private readonly tools = new Map<string, ToolDescriptor<any, any, any>>();
   private readonly requireApprovalFor: ReadonlySet<string>;
   private readonly toolCallTimeoutMs: number;
   private readonly allowedHosts: ReadonlySet<string>;
@@ -46,8 +54,11 @@ export class ToolRegistry {
     this.allowedWriteScopes = opts.allowedWriteScopes ?? [];
   }
 
-  register(name: string, handler: ToolHandler): void {
-    this.tools.set(name, handler);
+  register(name: string, descriptorOrHandler: ToolHandler | ToolDescriptor<any, any, any>): void {
+    const descriptor = typeof descriptorOrHandler === 'function'
+      ? { handler: descriptorOrHandler, isReadOnly: false, isConcurrencySafe: false }
+      : descriptorOrHandler;
+    this.tools.set(name, descriptor);
   }
 
   async call<T = unknown>(
@@ -116,8 +127,8 @@ export class ToolRegistry {
       }
     }
 
-    const handler = this.tools.get(toolName);
-    if (!handler) {
+    const descriptor = this.tools.get(toolName);
+    if (!descriptor) {
       const record: ToolCallRecord = {
         sessionId: context.sessionId,
         stepIndex: context.stepIndex,
@@ -133,7 +144,7 @@ export class ToolRegistry {
 
     try {
       const value = await Promise.race([
-        handler(input) as Promise<T>,
+        descriptor.handler(input) as Promise<T>,
         new Promise<never>((_, reject) =>
           setTimeout(() => { reject(new Error('timeout')); }, this.toolCallTimeoutMs),
         ),
@@ -144,7 +155,7 @@ export class ToolRegistry {
         stepIndex: context.stepIndex,
         toolName,
         inputSummary: summarize(input),
-        resultSummary: summarize(value),
+        resultSummary: descriptor.summarizeResult ? descriptor.summarizeResult(value) : summarize(value),
         durationMs,
         status: 'ok',
         ...(context.approvalId ? { approvalId: context.approvalId } : {}),
@@ -174,6 +185,15 @@ export class ToolRegistry {
 
   hasApprovalRequired(toolName: string): boolean {
     return this.requireApprovalFor.has(toolName);
+  }
+
+  getDescriptor(toolName: string): ToolDescriptor<any, any, any> | undefined {
+    return this.tools.get(toolName);
+  }
+
+  getContextModifier<TContext = unknown>(toolName: string): ((context: TContext, result: ToolCallResult) => TContext) | undefined {
+    const modifier = this.tools.get(toolName)?.modifyContext;
+    return modifier as ((context: TContext, result: ToolCallResult) => TContext) | undefined;
   }
 }
 

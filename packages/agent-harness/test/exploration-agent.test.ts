@@ -3,7 +3,7 @@ import { openDb, runMigrations } from '@zarb/storage';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync } from 'node:fs';
-import { ExplorationAgent, buildExplorationDecisionPrompt, buildExplorationPlanPrompt, estimateSliderDragDistance, isCaptchaChallengeError, looksLoggedInBySnapshot, resolveAuthGateMode } from '../src/exploration-agent.js';
+import { ExplorationAgent, buildExplorationDecisionPrompt, buildExplorationPlanPrompt, estimateSliderDragDistance, isCaptchaChallengeError, looksLoggedInBySnapshot, resolveAuthGateMode } from '../src/exploration/index.js';
 import type { PageProbe } from '../src/exploration-agent.js';
 import type { DomSnapshot } from '../src/playwright-tool-provider.js';
 

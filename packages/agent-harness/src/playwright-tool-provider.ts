@@ -12,7 +12,7 @@
  */
 
 import type { Browser, BrowserContext, Page, Request, Response } from 'playwright';
-import type { ToolRegistry } from './tool-registry.js';
+import type { ToolRegistry } from './runtime/tool-registry.js';
 import type { PageProbe } from './exploration-agent.js';
 import type { SiteCredentialRow } from '@zarb/storage';
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -130,58 +130,88 @@ export class PlaywrightToolProvider {
   registerTools(registry: ToolRegistry, opts?: PlaywrightToolProviderOptions): void {
     const waitMs = opts?.waitAfterNavigateMs ?? 500;
 
-    registry.register('playwright.navigate', async (input) => {
-      const { url } = input as { url: string };
-      const page = this.requirePage();
-      log.debug('navigate', { url });
-      const t0 = Date.now();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      if (waitMs > 0) await page.waitForTimeout(waitMs);
-      const state = await this.collectState(page, url);
-      log.debug('navigate done', { url, title: state.title, formCount: state.formCount, linkCount: state.linkCount, consoleErrors: state.consoleErrors.length, networkErrors: state.networkErrors.length, durationMs: Date.now() - t0 });
-      return state;
+    registry.register('playwright.navigate', {
+      handler: async (input) => {
+        const { url } = input as { url: string };
+        const page = this.requirePage();
+        log.debug('navigate', { url });
+        const t0 = Date.now();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        if (waitMs > 0) await page.waitForTimeout(waitMs);
+        const state = await this.collectState(page, url);
+        log.debug('navigate done', { url, title: state.title, formCount: state.formCount, linkCount: state.linkCount, consoleErrors: state.consoleErrors.length, networkErrors: state.networkErrors.length, durationMs: Date.now() - t0 });
+        return state;
+      },
+      isReadOnly: false,
+      isConcurrencySafe: false,
+      summarizeResult: (value) => {
+        const state = value as PageProbe;
+        return `${state.url} forms=${String(state.formCount)} links=${String(state.linkCount)} networkErrors=${String(state.networkErrors.length)}`;
+      },
     });
 
-    registry.register('playwright.click', async (input) => {
-      const { selector } = input as { selector: string };
-      const page = this.requirePage();
-      log.debug('click', { selector });
-      const t0 = Date.now();
-      try {
-        await page.click(selector, { timeout: 10_000 });
-        await page.waitForTimeout(300);
-        log.debug('click ok', { selector, durationMs: Date.now() - t0 });
-        return { ok: true };
-      } catch (e) {
-        log.warn('click failed', { selector, error: String(e), durationMs: Date.now() - t0 });
-        throw new Error(String(e));
-      }
+    registry.register('playwright.click', {
+      handler: async (input) => {
+        const { selector } = input as { selector: string };
+        const page = this.requirePage();
+        log.debug('click', { selector });
+        const t0 = Date.now();
+        try {
+          await page.click(selector, { timeout: 10_000 });
+          await page.waitForTimeout(300);
+          log.debug('click ok', { selector, durationMs: Date.now() - t0 });
+          return { ok: true };
+        } catch (e) {
+          log.warn('click failed', { selector, error: String(e), durationMs: Date.now() - t0 });
+          throw new Error(String(e));
+        }
+      },
+      isReadOnly: false,
+      isConcurrencySafe: false,
+      summarizeResult: () => 'click ok',
     });
 
-    registry.register('playwright.fill', async (input) => {
-      const { selector, value } = input as { selector: string; value: string };
-      const page = this.requirePage();
-      log.debug('fill', { selector, valueLength: String(value).length });
-      const t0 = Date.now();
-      try {
-        await page.fill(selector, value, { timeout: 10_000 });
-        log.debug('fill ok', { selector, durationMs: Date.now() - t0 });
-        return { ok: true };
-      } catch (e) {
-        log.warn('fill failed', { selector, error: String(e), durationMs: Date.now() - t0 });
-        throw new Error(String(e));
-      }
+    registry.register('playwright.fill', {
+      handler: async (input) => {
+        const { selector, value } = input as { selector: string; value: string };
+        const page = this.requirePage();
+        log.debug('fill', { selector, valueLength: String(value).length });
+        const t0 = Date.now();
+        try {
+          await page.fill(selector, value, { timeout: 10_000 });
+          log.debug('fill ok', { selector, durationMs: Date.now() - t0 });
+          return { ok: true };
+        } catch (e) {
+          log.warn('fill failed', { selector, error: String(e), durationMs: Date.now() - t0 });
+          throw new Error(String(e));
+        }
+      },
+      isReadOnly: false,
+      isConcurrencySafe: false,
+      summarizeResult: () => 'fill ok',
     });
 
-    registry.register('playwright.getState', async () => {
-      const page = this.requirePage();
-      log.debug('getState', { url: page.url() });
-      return this.collectState(page, page.url());
+    registry.register('playwright.getState', {
+      handler: async () => {
+        const page = this.requirePage();
+        log.debug('getState', { url: page.url() });
+        return this.collectState(page, page.url());
+      },
+      isReadOnly: true,
+      isConcurrencySafe: true,
+      summarizeResult: (value) => {
+        const state = value as PageProbe;
+        return `${state.url} title=${state.title || 'n/a'}`;
+      },
     });
 
-    registry.register('playwright.close', async () => {
-      log.debug('close');
-      await this.close();
+    registry.register('playwright.close', {
+      handler: async () => {
+        log.debug('close');
+        await this.close();
+      },
+      isReadOnly: false,
+      isConcurrencySafe: false,
     });
   }
 

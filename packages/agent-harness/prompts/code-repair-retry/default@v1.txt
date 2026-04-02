@@ -1,0 +1,18 @@
+You are preparing a retry decision for a failed code repair attempt.
+
+Task ID: {{taskId}}
+Attempt: {{attempt}}
+
+Goal:
+{{goal}}
+
+Failure Summary:
+{{failureSummary}}
+
+Verification Output:
+{{verifyOutput}}
+
+Relevant Memories:
+{{relevantMemories}}
+
+Return a concise retry strategy that explicitly avoids repeating failed approaches.

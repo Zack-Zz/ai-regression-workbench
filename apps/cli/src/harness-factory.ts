@@ -1,7 +1,6 @@
 import type { Db } from '@zarb/storage';
-import { HarnessSessionManager } from '@zarb/agent-harness';
-import { ObservedHarness } from '@zarb/agent-harness';
-import type { ObservabilityAdapter } from '@zarb/agent-harness';
+import { HarnessSessionManager, ObservedHarness } from '@zarb/agent-harness/runtime';
+import type { ObservabilityAdapter } from '@zarb/agent-harness/runtime';
 
 /**
  * createHarness — dependency assembly point for the harness session manager.

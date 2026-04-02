@@ -1,28 +1,9 @@
-export { HarnessSessionManager } from './session-manager.js';
-export type { StartSessionInput, StepRecord, CheckpointData, ApprovalRecord, PromptSampleRecord, StopConditionResult } from './session-manager.js';
+// Top-level exports are kept as a compatibility layer during the Phase 0 split.
+// New code should prefer importing from:
+// - @zarb/agent-harness/runtime
+// - @zarb/agent-harness/exploration
+// - @zarb/agent-harness/code-repair
 
-export { ToolRegistry } from './tool-registry.js';
-export type { ToolCallRecord, ToolCallResult, ToolHandler } from './tool-registry.js';
-
-export { ArtifactWriter } from './artifact-writer.js';
-export type { GenerateArtifactsInput, GenerateArtifactsResult } from './artifact-writer.js';
-
-export {
-  DEFAULT_EXPLORATION_POLICY,
-  DEFAULT_CODE_REPAIR_POLICY,
-} from './harness-policy.js';
-export type { HarnessPolicy, StopConditions } from './harness-policy.js';
-
-export { ObservedHarness } from './observed-harness.js';
-export type { ObservabilityAdapter, ObservabilityEvent, ObservabilitySummary } from './observability.js';
-
-export { CodexCliAgent } from './codex-cli-agent.js';
-export { KiroCliAgent } from './kiro-cli-agent.js';
-export type { CodexRunInput, CodexRunResult } from './codex-cli-agent.js';
-
-export { ExplorationAgent } from './exploration-agent.js';
-export type { AIProvider as ExplorationAIProvider, PageProbe, ExplorationStep, ExplorationResult } from './exploration-agent.js';
-export { HARNESS_TEMPLATE_VERSIONS, loadHarnessTemplate, renderHarnessTemplate, resetHarnessPromptsDir, setHarnessPromptsDir } from './prompt-loader.js';
-
-export { PlaywrightToolProvider } from './playwright-tool-provider.js';
-export type { PlaywrightToolProviderOptions } from './playwright-tool-provider.js';
+export * from './runtime/index.js';
+export * from './code-repair/index.js';
+export * from './exploration/index.js';

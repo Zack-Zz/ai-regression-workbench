@@ -21,6 +21,9 @@ export type { LocalRepoRow, SaveLocalRepoInput } from './repos/local-repo-repo.j
 export { CodeTaskRepository } from './repos/code-task-repo.js';
 export type { CodeTaskRow, CreateCodeTaskInput, UpdateCodeTaskInput, ListCodeTasksFilter, CodeTaskPage } from './repos/code-task-repo.js';
 
+export { CodeTaskMemoryRepository } from './repos/code-task-memory-repo.js';
+export type { CodeTaskMemoryRow, SaveCodeTaskMemoryInput } from './repos/code-task-memory-repo.js';
+
 export { ReviewRepository } from './repos/review-repo.js';
 export type { ReviewRow, CreateReviewInput } from './repos/review-repo.js';
 
@@ -71,4 +74,3 @@ export type { RunEventRow, SaveRunEventInput, ListRunEventsFilter } from './repo
 
 export { SelectorCacheRepository } from './repos/selector-cache-repo.js';
 export type { SelectorCacheRow, SelectorType, SelectorSource } from './repos/selector-cache-repo.js';
-
