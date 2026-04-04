@@ -3,7 +3,20 @@ import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository, TestResultRepository, AnalysisRepository, CodeTaskDraftRepository } from '@zarb/storage';
+import {
+  openDb,
+  runMigrations,
+  RunRepository,
+  CodeTaskRepository,
+  TestResultRepository,
+  AnalysisRepository,
+  CodeTaskDraftRepository,
+  AgentSessionRepository,
+  agentContextSummaryPath,
+  agentPromptSamplesPath,
+  agentStepsPath,
+  agentToolCallsPath,
+} from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -18,13 +31,17 @@ let dir: string;
 let db: ReturnType<typeof openDb>;
 let router: Router;
 
+function makeRunService(): RunService {
+  return new RunService(db, { dataRoot: dir });
+}
+
 beforeEach(() => {
   dir = join(tmpdir(), `zarb-api-test-${String(Date.now())}`);
   mkdirSync(dir, { recursive: true });
   db = openDb(join(dir, 'test.db'));
   runMigrations(db, MIGRATIONS_DIR);
   router = buildRouter(
-    new RunService(db),
+    makeRunService(),
     new DiagnosticsService(db, dir),
     new CodeTaskService(db, dir),
     new SettingsService(join(dir, 'config.json')),
@@ -82,38 +99,38 @@ describe('Router', () => {
 
 describe('RunService', () => {
   it('startRun creates a run and returns summary', () => {
-    const svc = new RunService(db);
+    const svc = makeRunService();
     const result = svc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     expect(result.success).toBe(true);
     expect(result.run?.runMode).toBe('regression');
   });
 
   it('startRun fails without selector for regression', () => {
-    const svc = new RunService(db);
+    const svc = makeRunService();
     const result = svc.startRun({ runMode: 'regression' });
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe('RUN_SELECTOR_INVALID');
   });
 
   it('listRuns returns created runs', () => {
-    const svc = new RunService(db);
+    const svc = makeRunService();
     svc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     const page = svc.listRuns();
     expect(page.items.length).toBeGreaterThan(0);
   });
 
   it('getRun returns null for unknown runId', () => {
-    expect(new RunService(db).getRun('nope')).toBeNull();
+    expect(makeRunService().getRun('nope')).toBeNull();
   });
 
   it('cancelRun returns error for unknown run', () => {
-    const result = new RunService(db).cancelRun('nope');
+    const result = makeRunService().cancelRun('nope');
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe('RUN_NOT_FOUND');
   });
 
   it('cancelRun succeeds for existing run', () => {
-    const svc = new RunService(db);
+    const svc = makeRunService();
     const created = svc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     const runId = created.run?.runId;
     expect(runId).toBeDefined();
@@ -122,12 +139,97 @@ describe('RunService', () => {
   });
 
   it('cancelRun returns ALREADY_CANCELLED on second cancel', () => {
-    const svc = new RunService(db);
+    const svc = makeRunService();
     const created = svc.startRun({ runMode: 'regression', selector: { suite: 'all' } });
     const runId = created.run?.runId as string;
     svc.cancelRun(runId);
     const result = svc.cancelRun(runId);
     expect(result.errorCode).toBe('RUN_ALREADY_CANCELLED');
+  });
+
+  it('loads run sessions and a structured session replay from agent traces', () => {
+    const svc = makeRunService();
+    const runId = 'r-session-replay';
+    const projectId = 'project-session';
+    const now = new Date().toISOString();
+    new RunRepository(db).create({
+      runId,
+      runMode: 'exploration',
+      scopeType: 'exploration',
+      workspacePath: '/ws',
+      projectId,
+      startedAt: now,
+    });
+    new AgentSessionRepository(db).save({
+      sessionId: 'session-1',
+      runId,
+      kind: 'exploration',
+      agentName: 'ExplorationAgent',
+      status: 'completed',
+      contextRefsJson: JSON.stringify({ approxTokenBudget: 10000 }),
+      startedAt: now,
+      updatedAt: now,
+      endedAt: now,
+      summary: 'session done',
+    });
+    const projectDataRoot = join(dir, '..', 'projects', projectId);
+    mkdirSync(join(projectDataRoot, 'agent-traces', 'session-1'), { recursive: true });
+    writeFileSync(join(projectDataRoot, agentContextSummaryPath('session-1')), JSON.stringify({
+      sessionId: 'session-1',
+      contextRefs: { approxTokenBudget: 10000, allowedHosts: ['example.com'] },
+      startedAt: now,
+    }), 'utf8');
+    writeFileSync(join(projectDataRoot, agentStepsPath('session-1')), `${JSON.stringify({
+      stepIndex: 0,
+      description: 'ExplorationAgent plan',
+      outcome: 'bootstrap',
+      timestamp: now,
+    })}\n${JSON.stringify({
+      type: 'checkpoint',
+      checkpointId: 'cp-1',
+      stepIndex: 1,
+      timestamp: now,
+      summary: 'paused safely',
+    })}\n`, 'utf8');
+    writeFileSync(join(projectDataRoot, agentToolCallsPath('session-1')), `${JSON.stringify({
+      sessionId: 'session-1',
+      stepIndex: 0,
+      toolName: 'playwright.navigate',
+      inputSummary: '{"url":"https://example.com"}',
+      resultSummary: 'ok',
+      durationMs: 42,
+      status: 'ok',
+    })}\n${JSON.stringify({
+      type: 'approval',
+      approvalId: 'approval-1',
+      sessionId: 'session-1',
+      stepIndex: 1,
+      toolName: 'fs.write',
+      requestedAt: now,
+      status: 'pending',
+    })}\n`, 'utf8');
+    writeFileSync(join(projectDataRoot, agentPromptSamplesPath('session-1')), `${JSON.stringify({
+      sessionId: 'session-1',
+      stepIndex: 0,
+      timestamp: now,
+      phase: 'brain.plan',
+      templateVersion: 'exploration-plan/default@v1',
+      prompt: 'plan prompt',
+      sampledBy: 'forced',
+    })}\n`, 'utf8');
+
+    const sessions = svc.getRunSessions(runId);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.sessionId).toBe('session-1');
+
+    const replay = svc.getRunSessionReplay(runId, 'session-1');
+    expect(replay?.session.agentName).toBe('ExplorationAgent');
+    expect(replay?.contextRefs).toMatchObject({ approxTokenBudget: 10000 });
+    expect(replay?.steps).toHaveLength(2);
+    expect(replay?.steps[1]?.entryType).toBe('checkpoint');
+    expect(replay?.toolCalls).toHaveLength(2);
+    expect(replay?.toolCalls[1]?.entryType).toBe('approval');
+    expect(replay?.promptSamples[0]?.phase).toBe('brain.plan');
   });
 });
 
@@ -228,6 +330,62 @@ describe('GET /runs', () => {
   });
 });
 
+describe('GET /runs/:runId/sessions*', () => {
+  it('returns sessions and session replay payloads', async () => {
+    const runId = 'r-session-http';
+    const projectId = 'project-http';
+    const now = new Date().toISOString();
+    new RunRepository(db).create({
+      runId,
+      runMode: 'exploration',
+      scopeType: 'exploration',
+      workspacePath: '/ws',
+      projectId,
+      startedAt: now,
+    });
+    new AgentSessionRepository(db).save({
+      sessionId: 'session-http',
+      runId,
+      kind: 'exploration',
+      agentName: 'ExplorationAgent',
+      status: 'completed',
+      contextRefsJson: '{}',
+      startedAt: now,
+      updatedAt: now,
+      endedAt: now,
+    });
+    const projectDataRoot = join(dir, '..', 'projects', projectId);
+    mkdirSync(join(projectDataRoot, 'agent-traces', 'session-http'), { recursive: true });
+    writeFileSync(join(projectDataRoot, agentContextSummaryPath('session-http')), JSON.stringify({
+      sessionId: 'session-http',
+      contextRefs: { startUrls: ['https://example.com'] },
+      startedAt: now,
+    }), 'utf8');
+    writeFileSync(join(projectDataRoot, agentToolCallsPath('session-http')), `${JSON.stringify({
+      sessionId: 'session-http',
+      stepIndex: 0,
+      toolName: 'playwright.navigate',
+      inputSummary: '{"url":"https://example.com"}',
+      resultSummary: 'ok',
+      durationMs: 28,
+      status: 'ok',
+    })}\n`, 'utf8');
+
+    const listRes = mockRes();
+    await router.handle(mockReq('GET', `/runs/${runId}/sessions`), listRes.res);
+    expect(listRes.status()).toBe(200);
+    const listBody = listRes.body() as { data: Array<{ sessionId: string }> };
+    expect(listBody.data[0]?.sessionId).toBe('session-http');
+
+    const replayRes = mockRes();
+    await router.handle(mockReq('GET', `/runs/${runId}/sessions/session-http/replay`), replayRes.res);
+    expect(replayRes.status()).toBe(200);
+    const replayBody = replayRes.body() as { data: { session: { sessionId: string }; toolCalls: Array<{ toolName: string }> } };
+    expect(replayBody.data.session.sessionId).toBe('session-http');
+    expect(replayBody.data.toolCalls[0]?.toolName).toBe('playwright.navigate');
+  });
+});
+
 describe('GET /settings', () => {
   it('returns settings snapshot', async () => {
     const { res, body, status } = mockRes();
@@ -283,7 +441,7 @@ describe('GET /runs/:runId/testcases/:testcaseId/artifacts/:kind', () => {
   it('serves artifact paths persisted under a custom artifact root basename', async () => {
     const customArtifactRoot = join(dir, 'custom-shots');
     const customRouter = buildRouter(
-      new RunService(db),
+      makeRunService(),
       new DiagnosticsService(db, dir, customArtifactRoot),
       new CodeTaskService(db, dir),
       new SettingsService(join(dir, 'config.json')),
@@ -341,7 +499,7 @@ describe('GET /code-tasks/:taskId/artifacts/:kind', () => {
   it('serves code-task artifacts persisted under a custom code-task root basename', async () => {
     const customCodeTaskRoot = join(dir, 'custom-code-tasks');
     const customRouter = buildRouter(
-      new RunService(db),
+      makeRunService(),
       new DiagnosticsService(db, dir),
       new CodeTaskService(db, dir, undefined, undefined, customCodeTaskRoot),
       new SettingsService(join(dir, 'config.json')),
@@ -359,6 +517,26 @@ describe('GET /code-tasks/:taskId/artifacts/:kind', () => {
     await customRouter.handle(mockReq('GET', '/code-tasks/t-art-custom/artifacts/diff'), res);
     expect(status()).toBe(200);
     expect(body().toString('utf8')).toBe('custom diff --git');
+  });
+
+  it('serves the persisted runtime summary artifact', async () => {
+    new RunRepository(db).create({ runId: 'r-task-runtime', scopeType: 'suite', workspacePath: '/ws', startedAt: new Date().toISOString() });
+    const codeTaskDir = join(dir, 'code-tasks', 't-runtime');
+    mkdirSync(codeTaskDir, { recursive: true });
+    writeFileSync(join(codeTaskDir, 'runtime-summary.json'), JSON.stringify({
+      finalStatus: 'SUCCEEDED',
+      stopReason: 'succeeded',
+      summary: 'done',
+      budget: { maxAttempts: 1, attemptsUsed: 1, compactionsUsed: 0, maxCompactions: 1, usedTokens: 42, remainingTokens: 58 },
+      attempts: [],
+    }, null, 2));
+    new CodeTaskRepository(db).create({ taskId: 't-runtime', runId: 'r-task-runtime', workspacePath: '/ws', goal: 'fix', createdAt: new Date().toISOString() });
+
+    const { res, status, body, headers } = mockBinaryRes();
+    await router.handle(mockReq('GET', '/code-tasks/t-runtime/artifacts/runtime-summary'), res);
+    expect(status()).toBe(200);
+    expect(headers()['Content-Type']).toContain('application/json');
+    expect(JSON.parse(body().toString('utf8'))).toMatchObject({ finalStatus: 'SUCCEEDED', stopReason: 'succeeded' });
   });
 });
 

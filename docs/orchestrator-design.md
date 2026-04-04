@@ -27,7 +27,7 @@
 
 - `AIEngine`
 - `AgentHarness`
-- `CodeAgent`
+- `CodeRepairAgent` / transport
 - `ExecutionReportBuilder`
 
 ## 4. 内部协作者建议

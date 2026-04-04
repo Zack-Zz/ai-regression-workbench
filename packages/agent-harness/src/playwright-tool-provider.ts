@@ -13,7 +13,7 @@
 
 import type { Browser, BrowserContext, Page, Request, Response } from 'playwright';
 import type { ToolRegistry } from './runtime/tool-registry.js';
-import type { PageProbe } from './exploration-agent.js';
+import type { PageProbe } from './exploration/types.js';
 import type { SiteCredentialRow } from '@zarb/storage';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';

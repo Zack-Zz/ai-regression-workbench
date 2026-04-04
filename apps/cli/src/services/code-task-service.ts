@@ -12,6 +12,7 @@ import type {
   CodeTaskSummary, CodeTaskDetail, CodeTaskSummaryPage, ActionResult,
   ListCodeTasksQuery, SubmitReviewInput, CreateCommitInput,
 } from '@zarb/shared-types';
+import type { CodeRepairRuntimeSummary, CodeRepairRuntimeAttempt } from '@zarb/shared-types';
 import {
   deriveRunStatusFromCodeTasks,
   isCodeTaskTransitionAllowed,
@@ -159,6 +160,7 @@ export class CodeTaskService {
     if (!row) return null;
     const reviewRow = this.reviews.findByTaskId(taskId);
     const commitRow = this.commits.findByTaskId(taskId);
+    const runtimeSummary = this.artifactWriter.readRuntimeSummary(taskId);
     return {
       summary: toSummary(row),
       scopePaths: row.scope_paths_json ? JSON.parse(row.scope_paths_json) as string[] : [],
@@ -169,6 +171,10 @@ export class CodeTaskService {
       ...(row.patch_path ? { patchPath: row.patch_path } : {}),
       ...(row.raw_output_path ? { rawOutputPath: row.raw_output_path } : {}),
       ...(row.verify_output_path ? { verifyOutputPath: row.verify_output_path } : {}),
+      ...(runtimeSummary ? {
+        runtimeSummaryPath: this.artifactWriter.getRuntimeSummaryPath(taskId),
+        runtimeSummary,
+      } : {}),
       reviews: reviewRow ? [{
         reviewId: reviewRow.id,
         taskId: reviewRow.task_id,
@@ -194,7 +200,7 @@ export class CodeTaskService {
 
   getCodeTaskArtifactPath(
     taskId: string,
-    kind: 'diff' | 'patch' | 'raw-output' | 'verify-output',
+    kind: 'diff' | 'patch' | 'raw-output' | 'verify-output' | 'runtime-summary',
   ): string | null {
     const row = this.tasks.findById(taskId);
     if (!row) return null;
@@ -204,7 +210,9 @@ export class CodeTaskService {
         ? row.patch_path
         : kind === 'raw-output'
           ? row.raw_output_path
-          : row.verify_output_path;
+          : kind === 'verify-output'
+            ? row.verify_output_path
+            : this.artifactWriter.getRuntimeSummaryPath(taskId);
     if (!relativePath) return null;
     return resolveConfiguredRelativePath(this.codeTaskRoot, 'code-tasks', relativePath);
   }
@@ -270,79 +278,65 @@ export class CodeTaskService {
       const analysis = row.testcase_id ? this.analyses.findByTestcase(row.run_id, row.testcase_id) : undefined;
 
       const t0 = Date.now();
-      const agentResult = await this.codeRepairAgent.execute({
+      const loopResult = await this.codeRepairAgent.executeUntilSettled({
         task: row,
         sessionId: session.session_id,
         dataRoot: this.dataRoot,
+        maxAttempts: row.automation_level === 'headless' ? 3 : 1,
         ...(analysis ? { analysis } : {}),
+        onAttemptStart: async (attemptNumber) => {
+          if (attemptNumber > 1) {
+            log.info('code task retrying', { taskId, attemptNumber });
+          }
+          this.tasks.update(taskId, { status: 'RUNNING', updatedAt: new Date().toISOString() });
+          this.emitTask(taskId);
+          this.syncRunForTask(taskId);
+        },
+        onVerificationStart: async (attemptNumber) => {
+          log.info('code task verifying', { taskId, verificationCommands, attemptNumber });
+          this.tasks.update(taskId, { status: 'VERIFYING', updatedAt: new Date().toISOString() });
+          this.emitTask(taskId);
+          this.syncRunForTask(taskId);
+        },
+        verify: async ({ execution }) => this.artifactWriter.generateArtifacts({
+          taskId,
+          sessionId: session.session_id,
+          workspacePath: row.workspace_path,
+          verificationCommands,
+          rawOutput: execution.rawOutput,
+        }),
       });
       log.info('agent run completed', {
         taskId,
-        exitCode: agentResult.exitCode,
+        exitCode: loopResult.finalExecution.exitCode,
+        attempts: loopResult.attempts.length,
+        finalStatus: loopResult.finalStatus,
+        stopReason: loopResult.stopReason,
+        budget: loopResult.budget,
         durationMs: Date.now() - t0,
-        contextSummary: agentResult.contextSummary,
+        contextSummary: loopResult.finalExecution.contextSummary,
       });
+      this.artifactWriter.writeRuntimeSummary(taskId, toRuntimeSummary(loopResult));
 
-      if (agentResult.exitCode !== 0) {
-        log.warn('agent run failed', { taskId, exitCode: agentResult.exitCode });
-        this.codeRepairAgent.recordApplyFailure(
-          row,
-          'transport execution failed',
-          agentResult.rawOutput,
-        );
-        const rawOutputPath = this.artifactWriter.writeRawOutput(taskId, agentResult.rawOutput);
-        this.tasks.update(taskId, {
-          status: 'FAILED',
-          harnessSessionId: session.session_id,
-          rawOutputPath,
-          summary: agentResult.planSummary,
-          updatedAt: new Date().toISOString(),
-        });
-        this.emitTask(taskId);
-        this.syncRunForTask(taskId);
-        this.sessionManager.completeSession(session.session_id);
-        return;
-      }
-
-      // VERIFYING stage
-      log.info('code task verifying', { taskId, verificationCommands });
-      this.tasks.update(taskId, { status: 'VERIFYING', updatedAt: new Date().toISOString() });
-      this.emitTask(taskId);
-      this.syncRunForTask(taskId);
-
-      const artifacts = this.artifactWriter.generateArtifacts({
-        taskId,
-        sessionId: session.session_id,
-        workspacePath: row.workspace_path,
-        verificationCommands,
-        rawOutput: agentResult.rawOutput,
-      });
-
-      const finalStatus = artifacts.verifyPassed ? 'SUCCEEDED' : 'FAILED';
-      log.info('code task verify done', { taskId, verifyPassed: artifacts.verifyPassed, finalStatus });
-      if (!artifacts.verifyPassed) {
-        this.codeRepairAgent.recordVerifyFailure(
-          row,
-          'verification failed after apply',
-          verificationCommands.length > 0
-            ? `commands: ${verificationCommands.join(', ')}`
-            : 'artifact verification failed',
-        );
-      }
-      this.tasks.update(taskId, {
-        status: finalStatus,
-        summary: agentResult.planSummary,
+      const update: Parameters<CodeTaskRepository['update']>[1] = {
+        status: loopResult.finalStatus,
+        harnessSessionId: session.session_id,
+        summary: loopResult.summary,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (!loopResult.finalArtifacts) {
+        update.rawOutputPath = this.artifactWriter.writeRawOutput(taskId, loopResult.finalExecution.rawOutput);
+      }
+      this.tasks.update(taskId, update);
       this.emitTask(taskId);
       this.syncRunForTask(taskId);
-      this.sessionManager.completeSession(session.session_id);
+      this.sessionManager.completeSession(session.session_id, loopResult.summary);
     } catch (err) {
       log.error('code task execution threw', { taskId, error: String(err) });
       this.tasks.update(taskId, { status: 'FAILED', updatedAt: new Date().toISOString() });
       this.emitTask(taskId);
       this.syncRunForTask(taskId);
-      this.sessionManager.completeSession(session.session_id);
+      this.sessionManager.completeSession(session.session_id, 'Code task execution failed unexpectedly.');
     }
   }
 
@@ -506,4 +500,33 @@ export class CodeTaskService {
     this.syncRunForTask(input.taskId);
     return { success: true, message: `Committed: ${result.commitSha ?? ''}` };
   }
+}
+
+function toRuntimeSummary(loopResult: import('@zarb/agent-harness/code-repair').CodeRepairLoopResult): CodeRepairRuntimeSummary {
+  return {
+    finalStatus: loopResult.finalStatus,
+    stopReason: loopResult.stopReason,
+    summary: loopResult.summary,
+    budget: { ...loopResult.budget },
+    attempts: loopResult.attempts.map<CodeRepairRuntimeAttempt>((attempt) => ({
+      attemptNumber: attempt.attemptNumber,
+      exitCode: attempt.execution.exitCode,
+      summary: attempt.verification?.summary ?? attempt.execution.planSummary,
+      ...(attempt.artifacts ? {
+        verifyPassed: attempt.artifacts.verifyPassed,
+        changedFiles: attempt.artifacts.changedFiles,
+      } : { changedFiles: [] }),
+      ...(attempt.verification ? {
+        verificationVerdict: attempt.verification.verdict,
+        verificationSummary: attempt.verification.summary,
+      } : {}),
+      plan: {
+        summary: attempt.execution.plan.summary,
+        criticalFiles: [...attempt.execution.plan.criticalFiles],
+        checklist: [...attempt.execution.plan.checklist],
+        retryStrategy: [...attempt.execution.plan.retryStrategy],
+      },
+      taskLedger: attempt.verification?.taskLedger ?? attempt.execution.taskLedger,
+    })),
+  };
 }

@@ -34,6 +34,12 @@ export interface ExplorationConfig {
   allowedHosts?: string[];
   maxSteps: number;
   maxPages: number;
+  /** Approximate prompt/context token budget for long-running exploration. */
+  approxTokenBudget?: number;
+  /** Whether exploration may compact prior context before stopping on token pressure. Default true. */
+  enableAutoCompact?: boolean;
+  /** Max auto compactions for one exploration run. Default 1. */
+  maxCompactions?: number;
   /** Browser mode for exploration run. Default 'headless'. */
   browserMode?: 'headless' | 'headed';
   /** Try solving slider/captcha automatically before manual fallback. Default true. */
@@ -81,6 +87,7 @@ export interface RunDetail {
   diagnosticsSummary?: DiagnosticsSummary;
   analysisSummary?: AnalysisSummary;
   events: RunEventItem[];
+  sessions?: AgentSession[];
   explorationConfig?: ExplorationConfig;
 }
 
@@ -150,6 +157,64 @@ export interface RunSummaryPage {
   nextCursor?: string;
 }
 
+export interface StepLogEntry {
+  ts: string;
+  component: string;
+  action: string;
+  detail?: string;
+  status: 'ok' | 'warn' | 'error' | 'skip' | 'pending';
+  durationMs?: number;
+  toolInput?: unknown;
+  toolOutput?: unknown;
+  pageState?: {
+    url: string;
+    title: string;
+    formCount: number;
+    linkCount: number;
+    consoleErrors: number;
+    networkErrors: number;
+    headings?: string[];
+    primaryButtons?: string[];
+    navLinks?: string[];
+    ctaCandidates?: string[];
+    inputHints?: string[];
+    textSnippet?: string;
+  };
+  reason?: string;
+  model?: string;
+  tool?: string;
+  actionId?: string;
+  promptTemplateVersion?: string;
+  promptContextSummary?: string;
+}
+
+export interface NetworkLogEntry {
+  ts: string;
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+  resourceType: string;
+  error?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
+}
+
+export interface PromptSampleEntry {
+  sessionId: string;
+  stepIndex: number;
+  timestamp: string;
+  phase: string;
+  templateVersion: string;
+  prompt: string;
+  response?: string;
+  promptContextSummary?: string;
+  sampledBy: 'first-step' | 'interval' | 'forced';
+  metadata?: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // CodeTask
 // ---------------------------------------------------------------------------
@@ -172,6 +237,53 @@ export interface CodeTaskSummary {
   updatedAt: string;
 }
 
+export interface CodeRepairRuntimePlan {
+  summary: string;
+  criticalFiles: string[];
+  checklist: string[];
+  retryStrategy: string[];
+}
+
+export interface CodeRepairRuntimeTaskLedgerItem {
+  id: 'memory-selection' | 'plan' | 'apply' | 'verify' | 'retry-decision';
+  title: string;
+  owner: 'runtime' | 'transport' | 'verification-agent';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'skipped';
+  summary?: string;
+  blocks: string[];
+  blockedBy: string[];
+}
+
+export interface CodeRepairRuntimeAttempt {
+  attemptNumber: number;
+  exitCode: number;
+  summary: string;
+  verifyPassed?: boolean;
+  changedFiles: string[];
+  verificationVerdict?: 'pass' | 'retry' | 'review';
+  verificationSummary?: string;
+  plan: CodeRepairRuntimePlan;
+  taskLedger: CodeRepairRuntimeTaskLedgerItem[];
+}
+
+export interface CodeRepairRuntimeBudget {
+  maxAttempts: number;
+  attemptsUsed: number;
+  compactionsUsed: number;
+  maxCompactions: number;
+  tokenBudget?: number;
+  usedTokens: number;
+  remainingTokens?: number;
+}
+
+export interface CodeRepairRuntimeSummary {
+  finalStatus: 'SUCCEEDED' | 'FAILED';
+  stopReason: 'succeeded' | 'apply_failed' | 'verification_failed' | 'budget_exhausted' | 'token_budget_exhausted' | 'no_progress';
+  summary: string;
+  budget: CodeRepairRuntimeBudget;
+  attempts: CodeRepairRuntimeAttempt[];
+}
+
 export interface CodeTaskDetail {
   summary: CodeTaskSummary;
   scopePaths: string[];
@@ -182,6 +294,8 @@ export interface CodeTaskDetail {
   patchPath?: string;
   rawOutputPath?: string;
   verifyOutputPath?: string;
+  runtimeSummaryPath?: string;
+  runtimeSummary?: CodeRepairRuntimeSummary;
   reviews: ReviewRecord[];
   commit?: CommitDetail | null;
 }
@@ -464,6 +578,38 @@ export interface AgentSession {
   startedAt: string;
   endedAt?: string;
   summary?: string;
+}
+
+export interface AgentSessionStepEntry {
+  entryType: 'step' | 'checkpoint';
+  stepIndex: number;
+  timestamp: string;
+  description?: string;
+  outcome?: string;
+  checkpointId?: string;
+  summary?: string;
+}
+
+export interface AgentToolTraceEntry {
+  entryType: 'tool-call' | 'approval';
+  sessionId: string;
+  stepIndex: number;
+  toolName: string;
+  status: string;
+  inputSummary?: string;
+  resultSummary?: string;
+  durationMs?: number;
+  approvalId?: string;
+  requestedAt?: string;
+  grantedAt?: string;
+}
+
+export interface AgentSessionReplay {
+  session: AgentSession;
+  contextRefs?: Record<string, unknown>;
+  steps: AgentSessionStepEntry[];
+  toolCalls: AgentToolTraceEntry[];
+  promptSamples: PromptSampleEntry[];
 }
 
 // ---------------------------------------------------------------------------

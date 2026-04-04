@@ -7,8 +7,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execSync } from 'node:child_process';
 import { mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository, ProjectRepository, LocalRepoRepository, FindingRepository, DiagnosticFetchRepository, AgentSessionRepository, agentPromptSamplesPath } from '@zarb/storage';
+import { openDb, runMigrations, RunRepository, CodeTaskRepository, CorrelationContextRepository, ProjectRepository, LocalRepoRepository, FindingRepository, DiagnosticFetchRepository, AgentSessionRepository, agentContextSummaryPath, agentPromptSamplesPath, agentStepsPath, agentToolCallsPath } from '@zarb/storage';
 import { RunService } from '../src/services/run-service.js';
 import { DiagnosticsService } from '../src/services/diagnostics-service.js';
 import { CodeTaskService } from '../src/services/code-task-service.js';
@@ -495,6 +496,77 @@ describe('Run lifecycle flow', () => {
     expect(samples[0]?.prompt).toBe('p0');
     expect(samples[1]?.sessionId).toBe('session-a');
     expect(samples[1]?.response).toBe('{"action":"fill"}');
+
+    const detail = svc.getRun(runId);
+    expect(detail?.sessions).toHaveLength(2);
+    expect(detail?.sessions?.[0]?.sessionId).toBe('session-a');
+  });
+
+  it('run session replay loads context refs, steps, tool calls, and prompt samples together', () => {
+    const projectId = 'project-replay';
+    const dataRoot = join(dir, '.zarb', 'data');
+    const svc = new RunService(db, { dataRoot });
+    const runId = 'r-session-replay';
+    const now = new Date().toISOString();
+
+    new RunRepository(db).create({
+      runId,
+      runMode: 'exploration',
+      scopeType: 'exploration',
+      workspacePath: '/ws',
+      projectId,
+      startedAt: now,
+    });
+
+    new AgentSessionRepository(db).save({
+      sessionId: 'session-replay',
+      runId,
+      kind: 'exploration',
+      agentName: 'ExplorationAgent',
+      status: 'completed',
+      contextRefsJson: JSON.stringify({ startUrls: ['https://example.com'] }),
+      startedAt: now,
+      updatedAt: now,
+      endedAt: now,
+    });
+
+    const sessionDir = join(dataRoot, '..', 'projects', projectId, 'agent-traces', 'session-replay');
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentContextSummaryPath('session-replay')), JSON.stringify({
+      sessionId: 'session-replay',
+      contextRefs: { startUrls: ['https://example.com'], allowedHosts: ['example.com'] },
+      startedAt: now,
+    }), 'utf8');
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentStepsPath('session-replay')), `${JSON.stringify({
+      stepIndex: 0,
+      description: 'ExplorationAgent plan',
+      outcome: 'bootstrap',
+      timestamp: now,
+    })}\n`, 'utf8');
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentToolCallsPath('session-replay')), `${JSON.stringify({
+      sessionId: 'session-replay',
+      stepIndex: 0,
+      toolName: 'playwright.navigate',
+      inputSummary: '{"url":"https://example.com"}',
+      resultSummary: 'ok',
+      durationMs: 31,
+      status: 'ok',
+    })}\n`, 'utf8');
+    writeFileSync(join(dataRoot, '..', 'projects', projectId, agentPromptSamplesPath('session-replay')), `${JSON.stringify({
+      sessionId: 'session-replay',
+      stepIndex: 0,
+      timestamp: now,
+      phase: 'brain.plan',
+      templateVersion: 'exploration-plan/default@v1',
+      prompt: 'plan prompt',
+      sampledBy: 'forced',
+    })}\n`, 'utf8');
+
+    const replay = svc.getRunSessionReplay(runId, 'session-replay');
+    expect(replay?.contextRefs).toMatchObject({ allowedHosts: ['example.com'] });
+    expect(replay?.steps[0]?.description).toBe('ExplorationAgent plan');
+    expect(replay?.toolCalls[0]?.toolName).toBe('playwright.navigate');
+    expect(replay?.promptSamples[0]?.phase).toBe('brain.plan');
   });
 });
 
@@ -566,11 +638,136 @@ describe('CodeTask lifecycle flow', () => {
 
     const result = await svc.executeCodeTask('t-fail-path');
     expect(result.success).toBe(true);
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    const detail = await waitForValue(
+      () => svc.getCodeTask('t-fail-path'),
+      (value) => value?.summary.status === 'FAILED',
+      2_000,
+    );
 
-    const detail = svc.getCodeTask('t-fail-path');
     expect(detail?.summary.status).toBe('FAILED');
     expect(detail?.rawOutputPath).toBe('custom-code-tasks/t-fail-path/raw-output.txt');
+    expect(detail?.runtimeSummaryPath).toBe('custom-code-tasks/t-fail-path/runtime-summary.json');
+    expect(detail?.runtimeSummary?.finalStatus).toBe('FAILED');
+    expect(detail?.runtimeSummary?.stopReason).toBe('budget_exhausted');
+  });
+
+  it('automatically retries within the same task when the first verification attempt fails', async () => {
+    const workspacePath = join(dir, 'retry-workspace');
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(workspacePath, 'target.txt'), 'broken\n', 'utf8');
+    execSync('git init', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git config user.email "test@example.com"', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git add target.txt', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: workspacePath, stdio: 'ignore' });
+
+    new RunRepository(db).create({ runId: 'r-retry-success', scopeType: 'suite', workspacePath, startedAt: new Date().toISOString() });
+    new RunRepository(db).update('r-retry-success', { status: 'ANALYZING_FAILURES', currentStage: 'ANALYZING_FAILURES', updatedAt: new Date().toISOString() });
+    new CodeTaskRepository(db).create({
+      taskId: 't-retry-success',
+      runId: 'r-retry-success',
+      workspacePath,
+      goal: 'write the fixed marker to target.txt',
+      verificationCommandsJson: JSON.stringify(['grep -q "fixed" target.txt']),
+      createdAt: new Date().toISOString(),
+    });
+    db.prepare("UPDATE code_tasks SET status='APPROVED' WHERE task_id='t-retry-success'").run();
+
+    let transportCalls = 0;
+    const retryingAgent = {
+      name: 'RetryingAgent',
+      run: async () => {
+        transportCalls += 1;
+        writeFileSync(
+          join(workspacePath, 'target.txt'),
+          transportCalls === 1 ? 'still-broken\n' : 'fixed\n',
+          'utf8',
+        );
+        return {
+          rawOutput: `attempt ${String(transportCalls)}`,
+          exitCode: 0,
+        };
+      },
+    } as unknown as CodexCliAgent;
+    const commitMgr = { commit: () => ({ success: true, commitSha: 'abc123' }) } as unknown as CommitManager;
+    const svc = new CodeTaskService(db, dir, retryingAgent, commitMgr);
+
+    const result = await svc.executeCodeTask('t-retry-success');
+    expect(result.success).toBe(true);
+
+    const detail = await waitForValue(
+      () => svc.getCodeTask('t-retry-success'),
+      (value) => value?.summary.status === 'SUCCEEDED',
+      2_000,
+    );
+
+    expect(detail?.summary.status).toBe('SUCCEEDED');
+    expect(detail?.summary.verifyPassed).toBe(true);
+    expect(detail?.changedFiles).toContain('target.txt');
+    expect(detail?.runtimeSummaryPath).toBe('code-tasks/t-retry-success/runtime-summary.json');
+    expect(detail?.runtimeSummary?.finalStatus).toBe('SUCCEEDED');
+    expect(detail?.runtimeSummary?.stopReason).toBe('succeeded');
+    expect(detail?.runtimeSummary?.attempts).toHaveLength(2);
+    expect(detail?.runtimeSummary?.attempts[0]?.verificationVerdict).toBe('retry');
+    expect(detail?.runtimeSummary?.attempts[1]?.verificationVerdict).toBe('pass');
+    expect(detail?.runtimeSummary?.attempts[1]?.plan.retryStrategy.length).toBeGreaterThan(0);
+    expect(transportCalls).toBe(2);
+  });
+
+  it('stops early when repeated retries show no verification progress', async () => {
+    const workspacePath = join(dir, 'retry-no-progress-workspace');
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(workspacePath, 'target.txt'), 'broken\n', 'utf8');
+    execSync('git init', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git config user.email "test@example.com"', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git add target.txt', { cwd: workspacePath, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: workspacePath, stdio: 'ignore' });
+
+    new RunRepository(db).create({ runId: 'r-retry-stop', scopeType: 'suite', workspacePath, startedAt: new Date().toISOString() });
+    new RunRepository(db).update('r-retry-stop', { status: 'ANALYZING_FAILURES', currentStage: 'ANALYZING_FAILURES', updatedAt: new Date().toISOString() });
+    new CodeTaskRepository(db).create({
+      taskId: 't-retry-stop',
+      runId: 'r-retry-stop',
+      workspacePath,
+      goal: 'write the fixed marker to target.txt',
+      verificationCommandsJson: JSON.stringify(['grep -q "fixed" target.txt']),
+      createdAt: new Date().toISOString(),
+    });
+    db.prepare("UPDATE code_tasks SET status='APPROVED' WHERE task_id='t-retry-stop'").run();
+
+    let transportCalls = 0;
+    const retryingAgent = {
+      name: 'RetryingAgent',
+      run: async () => {
+        transportCalls += 1;
+        writeFileSync(join(workspacePath, 'target.txt'), 'still-broken\n', 'utf8');
+        return {
+          rawOutput: `attempt ${String(transportCalls)}`,
+          exitCode: 0,
+        };
+      },
+    } as unknown as CodexCliAgent;
+    const commitMgr = { commit: () => ({ success: true, commitSha: 'abc123' }) } as unknown as CommitManager;
+    const svc = new CodeTaskService(db, dir, retryingAgent, commitMgr);
+
+    const result = await svc.executeCodeTask('t-retry-stop');
+    expect(result.success).toBe(true);
+
+    const detail = await waitForValue(
+      () => svc.getCodeTask('t-retry-stop'),
+      (value) => value?.summary.status === 'FAILED',
+      2_000,
+    );
+
+    expect(detail?.summary.status).toBe('FAILED');
+    expect(detail?.summary.verifyPassed).toBe(false);
+    expect(detail?.runtimeSummary?.finalStatus).toBe('FAILED');
+    expect(detail?.runtimeSummary?.stopReason).toBe('no_progress');
+    expect(detail?.runtimeSummary?.attempts).toHaveLength(2);
+    expect(detail?.runtimeSummary?.attempts[1]?.taskLedger.find((item) => item.id === 'retry-decision')?.summary).toContain('withheld');
+    expect(transportCalls).toBe(2);
+    expect(new CodeTaskRepository(db).findById('t-retry-stop')?.summary).toContain('No progress detected');
   });
 
 

@@ -11,6 +11,15 @@ Goal:
 Plan:
 {{planSummary}}
 
+Critical Files:
+{{criticalFiles}}
+
+Checklist:
+{{checklist}}
+
+Retry Strategy:
+{{retryStrategy}}
+
 Scope Paths:
 {{scopePaths}}
 

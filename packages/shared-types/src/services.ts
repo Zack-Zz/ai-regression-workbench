@@ -301,6 +301,8 @@ export interface RunService {
   getRun(runId: string): Promise<RunDetail>;
   getExecutionReport(runId: string): Promise<ExecutionReport | null>;
   getRunEvents(runId: string, query?: RunEventsQuery): Promise<RunEventPage>;
+  getRunSessions(runId: string): Promise<AgentSession[]>;
+  getRunSessionReplay(runId: string, sessionId: string): Promise<import('./dtos.js').AgentSessionReplay | null>;
   pauseRun(runId: string): Promise<ActionResult>;
   resumeRun(runId: string): Promise<ActionResult>;
   cancelRun(runId: string): Promise<ActionResult>;

@@ -1,11 +1,32 @@
 import type { Db, RunRow } from '@zarb/storage';
-import { RunRepository, RunEventRepository, TestResultRepository, FindingRepository, ExecutionReportRepository, CodeTaskDraftRepository, CodeTaskRepository, SelectorCacheRepository, ProjectRepository, SiteRepository, LocalRepoRepository, SiteCredentialRepository, FlowStepRepository, UiActionRepository, ApiCallRepository, AgentSessionRepository, agentPromptSamplesPath } from '@zarb/storage';
+import {
+  RunRepository,
+  RunEventRepository,
+  TestResultRepository,
+  FindingRepository,
+  ExecutionReportRepository,
+  CodeTaskDraftRepository,
+  CodeTaskRepository,
+  SelectorCacheRepository,
+  ProjectRepository,
+  SiteRepository,
+  LocalRepoRepository,
+  SiteCredentialRepository,
+  FlowStepRepository,
+  UiActionRepository,
+  ApiCallRepository,
+  AgentSessionRepository,
+  agentContextSummaryPath,
+  agentPromptSamplesPath,
+  agentStepsPath,
+  agentToolCallsPath,
+} from '@zarb/storage';
 import { join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import type {
   RunSummary, RunDetail, RunSummaryPage, RunEventPage, ActionResult,
   StartRunInput, StartRunResult, ListRunsQuery, RunEventsQuery, RunStatus,
-  ExecutionReport, ExplorationConfig,
+  ExecutionReport, ExplorationConfig, AgentSession, AgentSessionReplay, AgentSessionStepEntry, AgentToolTraceEntry, PromptSampleEntry,
 } from '@zarb/shared-types';
 import type { RunScopeType } from '@zarb/shared-types';
 import { isRunTransitionAllowed } from '@zarb/shared-types';
@@ -58,6 +79,24 @@ function toSummary(row: RunRow, projectName?: string, siteName?: string, siteBas
   if (row.current_stage) base.currentStage = row.current_stage;
   if (row.summary) base.summary = row.summary;
   return base;
+}
+
+function toAgentSession(row: import('@zarb/storage').AgentSessionRow): AgentSession {
+  return {
+    sessionId: row.session_id,
+    runId: row.run_id,
+    ...(row.task_id ? { taskId: row.task_id } : {}),
+    agentName: row.agent_name ?? row.kind,
+    kind: row.kind,
+    status: row.status,
+    ...(row.policy_json ? { policyJson: row.policy_json } : {}),
+    ...(row.checkpoint_id ? { checkpointId: row.checkpoint_id } : {}),
+    ...(row.context_refs_json ? { contextRefsJson: row.context_refs_json } : {}),
+    ...(row.trace_path ? { tracePath: row.trace_path } : {}),
+    startedAt: row.started_at,
+    ...(row.ended_at ? { endedAt: row.ended_at } : {}),
+    ...(row.summary ? { summary: row.summary } : {}),
+  };
 }
 
 /** Validate selector: exactly one of suite/scenarioId/tag/testcaseId must be set. */
@@ -167,19 +206,6 @@ function summarizeFlowDuration(startedAt?: string | null, endedAt?: string | nul
   if (!startedAt || !endedAt) return undefined;
   const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
   return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
-}
-
-interface PromptSampleEntry {
-  sessionId: string;
-  stepIndex: number;
-  timestamp: string;
-  phase: string;
-  templateVersion: string;
-  prompt: string;
-  response?: string;
-  promptContextSummary?: string;
-  sampledBy: 'first-step' | 'interval' | 'forced';
-  metadata?: Record<string, unknown>;
 }
 
 export class RunService {
@@ -648,6 +674,31 @@ export class RunService {
     return result.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   }
 
+  getRunSessions(runId: string): AgentSession[] {
+    const row = this.runs.findById(runId);
+    if (!row) return [];
+    return this.agentSessions.findByRun(runId).map(toAgentSession);
+  }
+
+  getRunSessionReplay(runId: string, sessionId: string): AgentSessionReplay | null {
+    const row = this.runs.findById(runId);
+    if (!row) return null;
+    const session = this.agentSessions.findById(sessionId);
+    if (!session || session.run_id !== runId) return null;
+
+    const projectId = row.project_id ?? 'project-default';
+    const projectDataRoot = join(this.opts.dataRoot, '..', 'projects', projectId);
+    const contextSummary = readJsonFile<{ contextRefs?: Record<string, unknown> }>(join(projectDataRoot, agentContextSummaryPath(sessionId)));
+    const contextRefs = contextSummary?.contextRefs;
+    return {
+      session: toAgentSession(session),
+      ...(contextRefs && Object.keys(contextRefs).length > 0 ? { contextRefs } : {}),
+      steps: readJsonLines(join(projectDataRoot, agentStepsPath(sessionId)), parseAgentSessionStepEntry),
+      toolCalls: readJsonLines(join(projectDataRoot, agentToolCallsPath(sessionId)), parseAgentToolTraceEntry),
+      promptSamples: readJsonLines(join(projectDataRoot, agentPromptSamplesPath(sessionId)), parsePromptSampleEntry),
+    };
+  }
+
   listRuns(query: ListRunsQuery = {}): RunSummaryPage {
     const filter: import('@zarb/storage').ListRunsFilter = { limit: query.limit ?? 20 };
     if (query.status !== undefined) filter.status = query.status as RunStatus;
@@ -687,7 +738,9 @@ export class RunService {
       entityId: e.entity_id,
       createdAt: e.created_at,
     }));
+    const sessions = this.getRunSessions(runId);
     return { summary: toSummary(row, this.resolveProjectName(row.project_id), this.resolveSiteName(row.site_id), this.resolveSiteBaseUrl(row.site_id), this.resolveCredLabel(row.credential_id)), testResults, findings, events,
+      ...(sessions.length > 0 ? { sessions } : {}),
       ...(row.exploration_config_json ? { explorationConfig: JSON.parse(row.exploration_config_json) as import('@zarb/shared-types').ExplorationConfig } : {}),
     };
   }
@@ -999,4 +1052,131 @@ export class RunService {
     this.emitRun(runId);
     return { success: true, message: 'Run cancelled' };
   }
+}
+
+function readJsonFile<T>(absPath: string): T | null {
+  if (!existsSync(absPath)) return null;
+  try {
+    return JSON.parse(readFileSync(absPath, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readJsonLines<T>(absPath: string, parser: (input: unknown) => T | null): T[] {
+  if (!existsSync(absPath)) return [];
+  try {
+    return readFileSync(absPath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return parser(JSON.parse(line) as unknown);
+        } catch {
+          return null;
+        }
+      })
+      .filter((value): value is T => value !== null);
+  } catch {
+    return [];
+  }
+}
+
+function parseAgentSessionStepEntry(input: unknown): AgentSessionStepEntry | null {
+  if (!input || typeof input !== 'object') return null;
+  const record = input as Record<string, unknown>;
+  if (typeof record.stepIndex !== 'number' || typeof record.timestamp !== 'string') return null;
+  if (record.type === 'checkpoint' && typeof record.checkpointId === 'string') {
+    return {
+      entryType: 'checkpoint',
+      stepIndex: record.stepIndex,
+      timestamp: record.timestamp,
+      checkpointId: record.checkpointId,
+      ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
+    };
+  }
+  if (typeof record.description !== 'string' || typeof record.outcome !== 'string') return null;
+  return {
+    entryType: 'step',
+    stepIndex: record.stepIndex,
+    timestamp: record.timestamp,
+    description: record.description,
+    outcome: record.outcome,
+  };
+}
+
+function parseAgentToolTraceEntry(input: unknown): AgentToolTraceEntry | null {
+  if (!input || typeof input !== 'object') return null;
+  const record = input as Record<string, unknown>;
+  if (record.type === 'approval') {
+    if (
+      typeof record.sessionId !== 'string'
+      || typeof record.stepIndex !== 'number'
+      || typeof record.toolName !== 'string'
+      || typeof record.requestedAt !== 'string'
+      || typeof record.status !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      entryType: 'approval',
+      sessionId: record.sessionId,
+      stepIndex: record.stepIndex,
+      toolName: record.toolName,
+      status: record.status,
+      ...(typeof record.approvalId === 'string' ? { approvalId: record.approvalId } : {}),
+      requestedAt: record.requestedAt,
+      ...(typeof record.grantedAt === 'string' ? { grantedAt: record.grantedAt } : {}),
+    };
+  }
+
+  if (
+    typeof record.sessionId !== 'string'
+    || typeof record.stepIndex !== 'number'
+    || typeof record.toolName !== 'string'
+    || typeof record.status !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    entryType: 'tool-call',
+    sessionId: record.sessionId,
+    stepIndex: record.stepIndex,
+    toolName: record.toolName,
+    status: record.status,
+    ...(typeof record.inputSummary === 'string' ? { inputSummary: record.inputSummary } : {}),
+    ...(typeof record.resultSummary === 'string' ? { resultSummary: record.resultSummary } : {}),
+    ...(typeof record.durationMs === 'number' ? { durationMs: record.durationMs } : {}),
+    ...(typeof record.approvalId === 'string' ? { approvalId: record.approvalId } : {}),
+  };
+}
+
+function parsePromptSampleEntry(input: unknown): PromptSampleEntry | null {
+  if (!input || typeof input !== 'object') return null;
+  const record = input as Record<string, unknown>;
+  if (
+    typeof record.sessionId !== 'string'
+    || typeof record.stepIndex !== 'number'
+    || typeof record.timestamp !== 'string'
+    || typeof record.phase !== 'string'
+    || typeof record.templateVersion !== 'string'
+    || typeof record.prompt !== 'string'
+  ) {
+    return null;
+  }
+  const sampledBy = record.sampledBy === 'first-step' || record.sampledBy === 'interval' || record.sampledBy === 'forced'
+    ? record.sampledBy
+    : 'forced';
+  return {
+    sessionId: record.sessionId,
+    stepIndex: record.stepIndex,
+    timestamp: record.timestamp,
+    phase: record.phase,
+    templateVersion: record.templateVersion,
+    prompt: record.prompt,
+    ...(typeof record.response === 'string' ? { response: record.response } : {}),
+    ...(typeof record.promptContextSummary === 'string' ? { promptContextSummary: record.promptContextSummary } : {}),
+    sampledBy,
+    ...(record.metadata && typeof record.metadata === 'object' ? { metadata: record.metadata as Record<string, unknown> } : {}),
+  };
 }

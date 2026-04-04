@@ -28,12 +28,14 @@ const put = <T>(path: string, body?: unknown) => request<T>('PUT', path, body);
 export const api = {
   getFailureArtifactUrl: (runId: string, tcId: string, kind: 'screenshot' | 'video' | 'trace' | 'html-report' | 'network') =>
     `${BASE}/runs/${runId}/testcases/${tcId}/artifacts/${kind}`,
-  getCodeTaskArtifactUrl: (taskId: string, kind: 'diff' | 'patch' | 'raw-output' | 'verify-output') =>
+  getCodeTaskArtifactUrl: (taskId: string, kind: 'diff' | 'patch' | 'raw-output' | 'verify-output' | 'runtime-summary') =>
     `${BASE}/code-tasks/${taskId}/artifacts/${kind}`,
   listRuns: (q?: string) => get<import('./types').RunSummaryPage>(`/runs${q ? `?${q}` : ''}`),
   getRun: (id: string) => get<import('./types').RunDetail>(`/runs/${id}`),
   getExecutionReport: (id: string) => get<import('./types').ExecutionReport>(`/runs/${id}/execution-report`),
   getRunEvents: (id: string, q?: string) => get<import('./types').RunEventPage>(`/runs/${id}/events${q ? `?${q}` : ''}`),
+  getRunSessions: (id: string) => get<import('./types').AgentSession[]>(`/runs/${id}/sessions`),
+  getRunSessionReplay: (runId: string, sessionId: string) => get<import('./types').AgentSessionReplay>(`/runs/${runId}/sessions/${sessionId}/replay`),
   startRun: (body: import('./types').StartRunInput) => post<import('./types').StartRunResult>('/runs', body),
   pauseRun: (id: string) => post<import('./types').ActionResult>(`/runs/${id}/pause`),
   resumeRun: (id: string) => post<import('./types').ActionResult>(`/runs/${id}/resume`),

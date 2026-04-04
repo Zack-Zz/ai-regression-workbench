@@ -25,6 +25,7 @@ Available controls:
 {{availableControls}}
 
 Already visited pages: {{visitedPages}}
+Compacted history: {{compactedHistory}}
 Recent steps: {{recentSteps}}
 Recent findings: {{recentFindings}}
 Recent tool results: {{recentToolResults}}

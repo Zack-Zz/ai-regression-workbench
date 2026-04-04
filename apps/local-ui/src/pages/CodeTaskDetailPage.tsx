@@ -34,11 +34,24 @@ export function CodeTaskDetailPage(): React.ReactElement {
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
-  const { summary, reviews, commit, changedFiles, verificationCommands, diffPath, patchPath, rawOutputPath, verifyOutputPath } = data;
+  const {
+    summary,
+    reviews,
+    commit,
+    changedFiles,
+    verificationCommands,
+    diffPath,
+    patchPath,
+    rawOutputPath,
+    verifyOutputPath,
+    runtimeSummaryPath,
+    runtimeSummary,
+  } = data;
   const diffUrl = diffPath ? api.getCodeTaskArtifactUrl(id, 'diff') : null;
   const patchUrl = patchPath ? api.getCodeTaskArtifactUrl(id, 'patch') : null;
   const rawOutputUrl = rawOutputPath ? api.getCodeTaskArtifactUrl(id, 'raw-output') : null;
   const verifyOutputUrl = verifyOutputPath ? api.getCodeTaskArtifactUrl(id, 'verify-output') : null;
+  const runtimeSummaryUrl = runtimeSummaryPath ? api.getCodeTaskArtifactUrl(id, 'runtime-summary') : null;
 
   return (
     <div>
@@ -80,14 +93,66 @@ export function CodeTaskDetailPage(): React.ReactElement {
         </Card>
       )}
 
-      {(diffUrl ?? patchUrl ?? rawOutputUrl ?? verifyOutputUrl) && (
+      {(diffUrl ?? patchUrl ?? rawOutputUrl ?? verifyOutputUrl ?? runtimeSummaryUrl) && (
         <Card title={t('codeTaskDetail.artifacts')}>
           {diffUrl && <KV label="Diff" value={<a href={diffUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
           {patchUrl && <KV label="Patch" value={<a href={patchUrl} target="_blank" rel="noreferrer">{t('common.download')}</a>} />}
           {rawOutputUrl && <KV label={t('codeTaskDetail.rawOutput')} value={<a href={rawOutputUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
           {verifyOutputUrl && <KV label={t('codeTaskDetail.verifyOutput')} value={<a href={verifyOutputUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
+          {runtimeSummaryUrl && <KV label="Runtime Summary" value={<a href={runtimeSummaryUrl} target="_blank" rel="noreferrer">{t('common.view')}</a>} />}
         </Card>
       )}
+
+      {runtimeSummary && (
+        <Card title="Runtime Summary">
+          <KV label="Final Status" value={runtimeSummary.finalStatus} />
+          <KV label="Stop Reason" value={<code>{runtimeSummary.stopReason}</code>} />
+          <KV label="Attempts" value={String(runtimeSummary.attempts.length)} />
+          <KV label="Budget" value={
+            <code>
+              {`${String(runtimeSummary.budget.attemptsUsed)}/${String(runtimeSummary.budget.maxAttempts)} attempts, ${String(runtimeSummary.budget.usedTokens)} tokens`}
+              {runtimeSummary.budget.remainingTokens !== undefined ? `, ${String(runtimeSummary.budget.remainingTokens)} remaining` : ''}
+              {runtimeSummary.budget.maxCompactions > 0 ? `, ${String(runtimeSummary.budget.compactionsUsed)}/${String(runtimeSummary.budget.maxCompactions)} compactions` : ''}
+            </code>
+          } />
+          <KV label="Summary" value={runtimeSummary.summary} />
+        </Card>
+      )}
+
+      {runtimeSummary?.attempts.length ? (
+        <Card title="Repair Attempts">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {runtimeSummary.attempts.map((attempt) => (
+              <div key={attempt.attemptNumber} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                  <strong>Attempt {String(attempt.attemptNumber)}</strong>
+                  <code>exit {String(attempt.exitCode)}</code>
+                  {attempt.verifyPassed !== undefined ? <span>{attempt.verifyPassed ? 'verify passed' : 'verify failed'}</span> : null}
+                  {attempt.verificationVerdict ? <span>{`verdict: ${attempt.verificationVerdict}`}</span> : null}
+                </div>
+                <div style={{ fontSize: '0.9em', color: '#374151', marginBottom: '0.5rem' }}>{attempt.summary}</div>
+                <div style={{ fontSize: '0.85em', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div><strong>Critical Files:</strong> {attempt.plan.criticalFiles.join(', ') || 'none'}</div>
+                  <div><strong>Checklist:</strong> {attempt.plan.checklist.join(' | ') || 'none'}</div>
+                  <div><strong>Retry Strategy:</strong> {attempt.plan.retryStrategy.join(' | ') || 'none'}</div>
+                  <div><strong>Changed Files:</strong> {attempt.changedFiles.join(', ') || 'none'}</div>
+                </div>
+                <div style={{ marginTop: '0.5rem', fontSize: '0.85em' }}>
+                  <strong>Task Ledger</strong>
+                  <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem' }}>
+                    {attempt.taskLedger.map((item) => (
+                      <li key={item.id}>
+                        <code>{item.id}</code> {item.status}
+                        {item.summary ? `: ${item.summary}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       {verificationCommands.length > 0 && (
         <Card title={t('codeTaskDetail.verifyCommands')}>

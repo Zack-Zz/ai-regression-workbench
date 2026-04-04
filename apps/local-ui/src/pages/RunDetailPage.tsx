@@ -4,9 +4,9 @@ import { api } from '../api.js';
 import { useAsync, usePoll, useServerEvents } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Loading, ErrorBanner, RunStatusBadge, TaskStatusBadge, Card, KV, Button, Table, StageResultsList } from '../components/ui.js';
-import { StepLogPanel } from '../components/StepLog.js';
+import { StepLogPanel, fmtDuration } from '../components/StepLog.js';
 import { fmtDatetime } from '../utils.js';
-import type { SSEEvent } from '../types.js';
+import type { AgentSession, AgentSessionReplay, SSEEvent } from '../types.js';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -15,6 +15,7 @@ export function RunDetailPage(): React.ReactElement {
   const navigate = useNavigate();
   const id = runId ?? '';
   const { data, loading, error, reload } = useAsync(() => api.getRun(id), [id]);
+  const [selectedSession, setSelectedSession] = React.useState<AgentSession | null>(null);
   const isActive = data ? !TERMINAL.has(data.summary.status) : false;
   const { data: taskData, reload: reloadTasks } = useAsync(() => api.listCodeTasks(`runId=${id}`), [id]);
   const { data: report, reload: reloadReport } = useAsync(() => api.getExecutionReport(id), [id]);
@@ -52,7 +53,7 @@ export function RunDetailPage(): React.ReactElement {
   if (error) return <ErrorBanner message={error} onRetry={reload} />;
   if (!data) return <div>{t('common.notFound')}</div>;
 
-  const { summary, testResults, findings, events, explorationConfig } = data;
+  const { summary, testResults, findings, events, sessions, explorationConfig } = data;
   const displayStage = report?.currentStage ?? summary.currentStage;
   const showTopSummaryBanner = Boolean(summary.summary && (!report?.fatalReason || report.fatalReason !== summary.summary));
 
@@ -204,10 +205,171 @@ export function RunDetailPage(): React.ReactElement {
         </Card>
       )}
 
+      {sessions && sessions.length > 0 && (
+        <Card title={`Agent Sessions (${String(sessions.length)})`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            {sessions.map((session) => (
+              <div key={session.sessionId} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.75rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 220 }}>
+                  <div style={{ fontWeight: 600 }}>{session.agentName}</div>
+                  <div style={{ color: '#6b7280', fontSize: '0.85em', fontFamily: 'monospace' }}>{session.sessionId}</div>
+                </div>
+                <span style={{ fontSize: '0.85em', background: '#f3f4f6', borderRadius: 999, padding: '2px 8px' }}>{session.kind}</span>
+                <span style={{ fontSize: '0.85em', background: '#eff6ff', color: '#1d4ed8', borderRadius: 999, padding: '2px 8px' }}>{session.status}</span>
+                <span style={{ color: '#6b7280', fontSize: '0.85em' }}>{fmtDatetime(session.startedAt)}</span>
+                {session.endedAt && <span style={{ color: '#6b7280', fontSize: '0.85em' }}>{fmtDatetime(session.endedAt)}</span>}
+                {session.summary && <span style={{ color: '#374151', fontSize: '0.9em', flex: 1 }}>{session.summary}</span>}
+                <Button onClick={() => { setSelectedSession(session); }}>Open Replay</Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {(summary.runMode === 'exploration' || summary.runMode === 'hybrid') && (
         <StepLogPanel runId={id} {...(summary.summary !== undefined ? { runSummary: summary.summary } : {})} />
       )}
+
+      {selectedSession && (
+        <SessionReplayModal
+          runId={id}
+          session={selectedSession}
+          onClose={() => { setSelectedSession(null); }}
+        />
+      )}
     </div>
+  );
+}
+
+function SessionReplayModal({
+  runId,
+  session,
+  onClose,
+}: {
+  runId: string;
+  session: AgentSession;
+  onClose: () => void;
+}): React.ReactElement {
+  const { data, loading, error } = useAsync(() => api.getRunSessionReplay(runId, session.sessionId), [runId, session.sessionId]);
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div style={{ background: '#fff', borderRadius: 8, width: '92vw', maxWidth: 1180, height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: '1px solid #eee', flexShrink: 0 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700 }}>{session.agentName}</div>
+            <div style={{ color: '#6b7280', fontSize: '0.85em', fontFamily: 'monospace' }}>{session.sessionId}</div>
+          </div>
+          <span style={{ fontSize: '0.85em', background: '#f3f4f6', borderRadius: 999, padding: '2px 8px' }}>{session.kind}</span>
+          <span style={{ fontSize: '0.85em', background: '#eff6ff', color: '#1d4ed8', borderRadius: 999, padding: '2px 8px' }}>{session.status}</span>
+          <Button onClick={onClose}>✕</Button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {loading && <Loading />}
+          {error && <ErrorBanner message={error} onRetry={onClose} />}
+          {data && <SessionReplayContent replay={data} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionReplayContent({ replay }: { replay: AgentSessionReplay }): React.ReactElement {
+  return (
+    <>
+      <Card title="Session Context">
+        <KV label="Started" value={fmtDatetime(replay.session.startedAt)} />
+        {replay.session.endedAt && <KV label="Ended" value={fmtDatetime(replay.session.endedAt)} />}
+        {replay.session.taskId && <KV label="Task" value={replay.session.taskId} />}
+        {replay.session.summary && <KV label="Summary" value={replay.session.summary} />}
+        {replay.contextRefs && (
+          <pre style={{ background: '#f8f8f8', borderRadius: 4, padding: '8px 12px', marginTop: 12, overflowX: 'auto', fontSize: '0.85em' }}>
+            {JSON.stringify(replay.contextRefs, null, 2)}
+          </pre>
+        )}
+      </Card>
+
+      <Card title={`Session Steps (${String(replay.steps.length)})`}>
+        {replay.steps.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: '0.9em' }}>No session steps recorded.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {replay.steps.map((step, index) => (
+              <div key={`${step.entryType}-${step.stepIndex}-${index}`} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong>{step.entryType === 'checkpoint' ? 'Checkpoint' : `Step ${String(step.stepIndex)}`}</strong>
+                  <span style={{ color: '#6b7280', fontSize: '0.85em' }}>{fmtDatetime(step.timestamp)}</span>
+                  {step.checkpointId && <code>{step.checkpointId}</code>}
+                </div>
+                {step.description && <div style={{ marginTop: 4 }}>{step.description}</div>}
+                {step.outcome && <div style={{ color: '#4b5563', fontSize: '0.9em', marginTop: 4 }}>{step.outcome}</div>}
+                {step.summary && <div style={{ color: '#4b5563', fontSize: '0.9em', marginTop: 4 }}>{step.summary}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title={`Tool Calls (${String(replay.toolCalls.length)})`}>
+        {replay.toolCalls.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: '0.9em' }}>No tool calls recorded.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {replay.toolCalls.map((entry, index) => (
+              <div key={`${entry.entryType}-${entry.toolName}-${entry.stepIndex}-${index}`} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong>{entry.toolName}</strong>
+                  <span style={{ fontSize: '0.85em', background: entry.entryType === 'approval' ? '#fff7ed' : '#f3f4f6', color: entry.entryType === 'approval' ? '#c2410c' : '#374151', borderRadius: 999, padding: '2px 8px' }}>
+                    {entry.entryType}
+                  </span>
+                  <span style={{ fontSize: '0.85em', background: '#eff6ff', color: '#1d4ed8', borderRadius: 999, padding: '2px 8px' }}>{entry.status}</span>
+                  <code>step {String(entry.stepIndex)}</code>
+                  {entry.durationMs !== undefined && <span style={{ color: '#6b7280', fontSize: '0.85em' }}>{fmtDuration(entry.durationMs)}</span>}
+                  {entry.requestedAt && <span style={{ color: '#6b7280', fontSize: '0.85em' }}>{fmtDatetime(entry.requestedAt)}</span>}
+                  {entry.grantedAt && <span style={{ color: '#6b7280', fontSize: '0.85em' }}>granted {fmtDatetime(entry.grantedAt)}</span>}
+                </div>
+                {entry.inputSummary && <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: '0.85em', color: '#374151' }}>in: {entry.inputSummary}</div>}
+                {entry.resultSummary && <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: '0.85em', color: '#374151' }}>out: {entry.resultSummary}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title={`Prompt Samples (${String(replay.promptSamples.length)})`}>
+        {replay.promptSamples.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: '0.9em' }}>No prompt samples recorded.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {replay.promptSamples.map((sample, index) => (
+              <details key={`${sample.phase}-${sample.stepIndex}-${index}`} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.5rem' }}>
+                <summary style={{ cursor: 'pointer' }}>
+                  <strong>{sample.phase}</strong>
+                  <span style={{ marginLeft: 8, color: '#6b7280', fontSize: '0.85em' }}>{fmtDatetime(sample.timestamp)}</span>
+                  <span style={{ marginLeft: 8, color: '#6b7280', fontSize: '0.85em', fontFamily: 'monospace' }}>{sample.templateVersion}</span>
+                </summary>
+                {sample.promptContextSummary && (
+                  <div style={{ marginTop: 8, background: '#f8f8f8', borderRadius: 4, padding: '8px 10px', fontFamily: 'monospace', fontSize: '0.85em' }}>
+                    {sample.promptContextSummary}
+                  </div>
+                )}
+                <pre style={{ marginTop: 8, background: '#f8f8f8', borderRadius: 4, padding: '8px 10px', overflowX: 'auto', fontSize: '0.82em', whiteSpace: 'pre-wrap' }}>
+                  {sample.prompt}
+                </pre>
+                {sample.response && (
+                  <pre style={{ marginTop: 8, background: '#f8f8f8', borderRadius: 4, padding: '8px 10px', overflowX: 'auto', fontSize: '0.82em', whiteSpace: 'pre-wrap' }}>
+                    {sample.response}
+                  </pre>
+                )}
+              </details>
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
 

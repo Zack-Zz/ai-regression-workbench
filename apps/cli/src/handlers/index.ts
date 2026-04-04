@@ -127,6 +127,18 @@ export function buildRouter(
     ok(res, runSvc.getRunPromptSamples(params['runId'] ?? ''));
   });
 
+  router.get('/runs/:runId/sessions', (_req, res, params) => {
+    const detail = runSvc.getRun(params['runId'] ?? '');
+    if (!detail) { notFound(res, 'RUN_NOT_FOUND', 'Run not found'); return; }
+    ok(res, detail.sessions ?? []);
+  });
+
+  router.get('/runs/:runId/sessions/:sessionId/replay', (_req, res, params) => {
+    const replay = runSvc.getRunSessionReplay(params['runId'] ?? '', params['sessionId'] ?? '');
+    if (!replay) { notFound(res, 'SESSION_NOT_FOUND', 'Agent session not found'); return; }
+    ok(res, replay);
+  });
+
   router.post('/runs/:runId/pause', (_req, res, params) => {
     const result = runSvc.pauseRun(params['runId'] ?? '');
     if (!result.success) {
@@ -247,13 +259,13 @@ export function buildRouter(
 
   router.get('/code-tasks/:taskId/artifacts/:kind', (_req, res, params) => {
     const kind = params['kind'];
-    if (!kind || !['diff', 'patch', 'raw-output', 'verify-output'].includes(kind)) {
+    if (!kind || !['diff', 'patch', 'raw-output', 'verify-output', 'runtime-summary'].includes(kind)) {
       badRequest(res, 'ARTIFACT_KIND_INVALID', 'Unsupported artifact kind');
       return;
     }
     const absPath = taskSvc.getCodeTaskArtifactPath(
       params['taskId'] ?? '',
-      kind as 'diff' | 'patch' | 'raw-output' | 'verify-output',
+      kind as 'diff' | 'patch' | 'raw-output' | 'verify-output' | 'runtime-summary',
     );
     if (!absPath || !existsSync(absPath)) {
       notFound(res, 'ARTIFACT_NOT_FOUND', 'Artifact not found');

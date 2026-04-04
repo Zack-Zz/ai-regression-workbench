@@ -453,7 +453,8 @@ describe('CodeRepairAgent', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.planSummary).toContain('Apply the minimal code changes');
+    expect(result.planSummary).toContain('Read-only plan for task task-code-repair');
+    expect(result.taskLedger.find((item) => item.id === 'apply')?.status).toBe('completed');
     const promptSamples = readFileSync(join(dir, 'agent-traces', session.session_id, 'prompt-samples.jsonl'), 'utf8');
     expect(promptSamples).toContain('code-repair-plan');
     expect(promptSamples).toContain('code-repair-apply');

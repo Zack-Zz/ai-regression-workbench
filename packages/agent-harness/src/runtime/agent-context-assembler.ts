@@ -5,7 +5,7 @@ export interface AgentAssemblyInput {
   analysis?: AnalysisRow;
   verifyOutput?: string;
   verifyPassed?: boolean;
-  relevantMemories?: Array<{ summary: string; detail?: string; kind: string }>;
+  relevantMemories?: Array<{ summary: string; detail?: string; kind: string; files?: string[]; commands?: string[] }>;
 }
 
 export interface CodeRepairContext {
@@ -22,7 +22,7 @@ export interface CodeRepairContext {
   probableCause?: string;
   verifyOutput?: string;
   verifyPassed?: boolean;
-  relevantMemories: Array<{ summary: string; detail?: string; kind: string }>;
+  relevantMemories: Array<{ summary: string; detail?: string; kind: string; files?: string[]; commands?: string[] }>;
 }
 
 export class AgentContextAssembler {

@@ -1,7 +1,8 @@
-import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { execSync } from 'node:child_process';
-import { codeTaskDiffPath, codeTaskPatchPath, codeTaskVerifyPath, codeTaskRawOutputPath } from '@zarb/storage';
+import type { CodeRepairRuntimeSummary } from '@zarb/shared-types';
+import { codeTaskDiffPath, codeTaskPatchPath, codeTaskVerifyPath, codeTaskRawOutputPath, codeTaskRuntimeSummaryPath } from '@zarb/storage';
 import type { Db } from '@zarb/storage';
 import { CodeTaskRepository } from '@zarb/storage';
 
@@ -19,6 +20,7 @@ export interface GenerateArtifactsResult {
   patchPath: string;
   verifyPath: string;
   rawOutputPath: string;
+  verifyOutput: string;
   verifyPassed: boolean;
   changedFiles: string[];
 }
@@ -26,7 +28,13 @@ export interface GenerateArtifactsResult {
 function resolveConfiguredRelativePath(rootDir: string, defaultPrefix: string, relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
   const prefix = `${defaultPrefix}/`;
-  const candidate = resolve(rootDir, normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized);
+  const configuredPrefix = `${rootDir.split(/[/\\]/).pop() ?? defaultPrefix}/`;
+  const strippedPath = normalized.startsWith(prefix)
+    ? normalized.slice(prefix.length)
+    : normalized.startsWith(configuredPrefix)
+      ? normalized.slice(configuredPrefix.length)
+      : normalized;
+  const candidate = resolve(rootDir, strippedPath);
   const rel = relative(resolve(rootDir), candidate);
   if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
     return candidate;
@@ -119,7 +127,7 @@ export class ArtifactWriter {
       });
     }
 
-    return { diffPath, patchPath, verifyPath, rawOutputPath, verifyPassed, changedFiles };
+    return { diffPath, patchPath, verifyPath, rawOutputPath, verifyOutput, verifyPassed, changedFiles };
   }
 
   /** Write raw content directly (for cases where content is already available). */
@@ -137,6 +145,30 @@ export class ArtifactWriter {
 
   writeRawOutput(taskId: string, output: string): string {
     return this.write(codeTaskRawOutputPath(taskId), output);
+  }
+
+  writeRuntimeSummary(taskId: string, summary: CodeRepairRuntimeSummary): string {
+    return this.write(codeTaskRuntimeSummaryPath(taskId), JSON.stringify(summary, null, 2));
+  }
+
+  getRuntimeSummaryPath(taskId: string): string {
+    const relativePath = codeTaskRuntimeSummaryPath(taskId);
+    const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+    return toConfiguredRelativePath(this.codeTaskRoot, 'code-tasks', ...parts.slice(1));
+  }
+
+  readRuntimeSummary(taskId: string): CodeRepairRuntimeSummary | null {
+    const absPath = resolveConfiguredRelativePath(
+      this.codeTaskRoot,
+      'code-tasks',
+      this.getRuntimeSummaryPath(taskId),
+    );
+    if (!existsSync(absPath)) return null;
+    try {
+      return JSON.parse(readFileSync(absPath, 'utf8')) as CodeRepairRuntimeSummary;
+    } catch {
+      return null;
+    }
   }
 
   private write(relPath: string, content: string): string {

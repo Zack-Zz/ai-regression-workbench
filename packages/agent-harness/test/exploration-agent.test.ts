@@ -3,8 +3,9 @@ import { openDb, runMigrations } from '@zarb/storage';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, rmSync } from 'node:fs';
-import { ExplorationAgent, buildExplorationDecisionPrompt, buildExplorationPlanPrompt, estimateSliderDragDistance, isCaptchaChallengeError, looksLoggedInBySnapshot, resolveAuthGateMode } from '../src/exploration/index.js';
-import type { PageProbe } from '../src/exploration-agent.js';
+import { buildExplorationDecisionPrompt, buildExplorationPlanPrompt, estimateSliderDragDistance, ExplorationBrain, isCaptchaChallengeError, looksLoggedInBySnapshot, resolveAuthGateMode } from '../src/exploration/index.js';
+import { HarnessSessionManager } from '../src/runtime/index.js';
+import type { PageProbe } from '../src/exploration/index.js';
 import type { DomSnapshot } from '../src/playwright-tool-provider.js';
 
 const MIGRATIONS_DIR = join(new URL('.', import.meta.url).pathname, '../../../scripts/sql');
@@ -59,6 +60,7 @@ describe('buildExplorationDecisionPrompt', () => {
       recentFindings: ['network-error: /api/users returned 500'],
       recentToolResults: ['click button[type="submit"] => Admin Users'],
       recentNetworkHighlights: ['GET fetch status=500 https://example.com/api/users (320ms)'],
+      compactCarryover: 'Compacted exploration history at step 2.',
       supportedActions: '"click"|"fill"|"navigate"|"done"',
       remainingSteps: 17,
       remainingPages: 6,
@@ -71,6 +73,7 @@ describe('buildExplorationDecisionPrompt', () => {
     expect(prompt).toContain('Recent findings');
     expect(prompt).toContain('Recent tool results');
     expect(prompt).toContain('Recent network highlights');
+    expect(prompt).toContain('Compacted history: Compacted exploration history at step 2.');
     expect(prompt).toContain('Available controls');
     expect(prompt).toContain('button[type="submit"]');
     expect(prompt).toContain('input[name="email"]');
@@ -185,12 +188,14 @@ describe('buildExplorationPlanPrompt', () => {
       recentToolResults: ['state.capture => Home'],
       recentNetworkHighlights: [],
       authEstablished: true,
+      compactCarryover: 'Compacted exploration history at step 1.',
     });
 
     expect(prompt).toContain('Auth established: yes');
     expect(prompt).toContain('No-script signal: yes');
     expect(prompt).toContain('Login detected:');
     expect(prompt).toContain('Recent tool results: state.capture => Home');
+    expect(prompt).toContain('Compacted history: Compacted exploration history at step 1.');
   });
 });
 
@@ -288,23 +293,21 @@ describe('estimateSliderDragDistance', () => {
   });
 });
 
-describe('ExplorationAgent.decideNextStep', () => {
+describe('ExplorationBrain.decideNextStep', () => {
   it('parses click decisions and preserves selector/reasoning', async () => {
     const { db, cleanup } = makeDb();
     try {
       const prompts: string[] = [];
-      const agent = new ExplorationAgent(db, {
+      const brain = new ExplorationBrain({
         complete: async (prompt: string) => {
           prompts.push(prompt);
           return '{"action":"click","selector":"button[type=\\"submit\\"]","reasoning":"submit the visible form"}';
         },
         isConfigured: () => true,
         model: 'test-model',
-      });
+      }, new HarnessSessionManager(db));
 
-      const step = await (agent as unknown as {
-        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], brainPlan?: unknown, domSnapshot?: DomSnapshot) => Promise<{ action: string; selector?: string; reasoning: string }>;
-      }).decideNextStep(
+      const step = await brain.decideNextStep(
         {
           url: 'https://example.com/admin',
           title: 'Admin',
@@ -347,15 +350,13 @@ describe('ExplorationAgent.decideNextStep', () => {
     const { db, cleanup } = makeDb();
     try {
       const logs: unknown[] = [];
-      const agent = new ExplorationAgent(db, {
+      const brain = new ExplorationBrain({
         complete: async () => '{"action":"click","selector":"button.primary","reasoning":"best next action"}',
         isConfigured: () => true,
         model: undefined,
-      });
+      }, new HarnessSessionManager(db));
 
-      const step = await (agent as unknown as {
-        decideNextStep: (page: PageProbe, config: Record<string, unknown>, stepIndex: number, visited: string[], stepLogger: { log: (...args: unknown[]) => void }, sessionId: string, dataRoot: string, actionId?: string, recentSteps?: string[], recentFindings?: string[], recentToolResults?: string[], recentNetworkHighlights?: string[], brainPlan?: unknown, domSnapshot?: DomSnapshot) => Promise<{ action: string; reasoning: string }>;
-      }).decideNextStep(
+      const step = await brain.decideNextStep(
         {
           url: 'https://example.com/status',
           title: 'Status',

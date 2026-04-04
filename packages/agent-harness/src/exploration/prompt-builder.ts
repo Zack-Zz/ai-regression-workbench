@@ -4,9 +4,14 @@ import type {
   ExplorationPlanPromptContext,
   ExplorationPromptContext,
   PageProbe,
-} from '../exploration-agent.js';
+} from './types.js';
 import type { DomSnapshot } from '../playwright-tool-provider.js';
 import type { ExplorationConfig } from '@zarb/shared-types';
+import {
+  hasAuthNetworkError,
+  includesNoScriptBanner,
+  pageLooksLikeLogin,
+} from './heuristics.js';
 
 export function buildExplorationDecisionPrompt(ctx: ExplorationPromptContext): string {
   const focusDirectives = summarizeFocusAreas(ctx.config).map((item) => `- ${item}`);
@@ -32,6 +37,7 @@ export function buildExplorationDecisionPrompt(ctx: ExplorationPromptContext): s
     networkErrors: ctx.page.networkErrors.slice(0, 3).map((item) => `${item.status} ${item.url}`).join(' | ') || 'none',
     availableControls: `${summarizeDomSnapshot(ctx.domSnapshot)}\n${domSummary}`,
     visitedPages: ctx.visited.slice(-8).join(', ') || 'none',
+    compactedHistory: ctx.compactCarryover ?? 'none',
     recentSteps: ctx.recentSteps.length > 0 ? ctx.recentSteps.join(' | ') : 'none',
     recentFindings: ctx.recentFindings.length > 0 ? ctx.recentFindings.join(' | ') : 'none',
     recentToolResults: ctx.recentToolResults.length > 0 ? ctx.recentToolResults.join(' | ') : 'none',
@@ -55,6 +61,7 @@ export function buildExplorationPlanPrompt(ctx: ExplorationPlanPromptContext): s
     remainingBudget: `${String(ctx.remainingSteps)} steps, ${String(ctx.remainingPages)} pages`,
     focusAreas: listOrFallback(focusDirectives, '- general exploration'),
     visitedPages: ctx.visited.slice(-12).join(', ') || 'none',
+    compactedHistory: ctx.compactCarryover ?? 'none',
     recentSteps: ctx.recentSteps.length > 0 ? ctx.recentSteps.join(' | ') : 'none',
     recentFindings: ctx.recentFindings.length > 0 ? ctx.recentFindings.join(' | ') : 'none',
     recentToolResults: ctx.recentToolResults.length > 0 ? ctx.recentToolResults.join(' | ') : 'none',
@@ -72,6 +79,7 @@ export function summarizePromptContext(ctx: ExplorationPromptContext): string {
     `recentFindings=${String(ctx.recentFindings.length)}`,
     `recentToolResults=${String(ctx.recentToolResults.length)}`,
     `recentNetwork=${String(ctx.recentNetworkHighlights.length)}`,
+    `compact=${ctx.compactCarryover ? 'yes' : 'no'}`,
     `actions=${ctx.supportedActions.replace(/"/g, '')}`,
     `focusAreas=${(ctx.config.focusAreas ?? []).join('|') || 'general'}`,
   ];
@@ -133,23 +141,4 @@ function summarizeBrainPlan(plan?: ExplorationBrainPlan): string {
     `avoidUrls=${plan.avoidUrls.join(', ') || 'none'}`,
     `preferredActions=${plan.preferredActions.join('|') || 'none'}`,
   ].join('\n');
-}
-
-function hasAuthNetworkError(page: PageProbe): boolean {
-  return page.networkErrors.some((entry) => entry.status === 401 || entry.status === 403);
-}
-
-function includesNoScriptBanner(page: PageProbe): boolean {
-  if (page.domSummary?.noScriptWarningVisible) return true;
-  const snippet = page.domSummary?.textSnippet ?? '';
-  return /doesn'?t work properly without javascript enabled/i.test(snippet);
-}
-
-function pageLooksLikeLogin(page: PageProbe): boolean {
-  const title = page.title ?? '';
-  const hints = page.domSummary?.inputHints.join(' ') ?? '';
-  const snippet = page.domSummary?.textSnippet ?? '';
-  const loginCue = `${title} ${hints} ${snippet}`;
-  const hasLoginKeyword = /(登录|sign[ -]?in|log[ -]?in|password|密码|username|用户名|账号|账号登录|验证码|captcha)/i.test(loginCue);
-  return (page.url.includes('/login') || page.url.includes('/signin') || page.url.includes('/auth')) || (page.formCount > 0 && hasLoginKeyword);
 }

@@ -107,6 +107,8 @@
 - degraded 步骤与原因
 - 最终失败原因（若存在）
 - 报告与产物链接（trace、logs、diff、patch、verify）
+- agent sessions 列表（agentName、kind、status、startedAt、endedAt、summary）
+- session replay 入口，至少能查看 context refs、session steps、tool calls、prompt samples
 - 流程链路摘要（每条链路步骤数、点击数、接口数、耗时）
 - testcase 级执行明细入口（接口表、点击时间线、流程步骤时间线）
 - 接口表建议至少展示 method、url、statusCode、responseSummary、durationMs、errorMessage
@@ -126,7 +128,7 @@
 - `Test Assets`（sharedRoot、generatedRoot、执行开关）
 - `Diagnostics`（correlation keys、time window）
 - `Trace / Logs`（provider、endpoint、limit）
-- `AI / CodeAgent`（model、审批默认策略、verify 命令）
+- `AI / Code Repair`（model、审批默认策略、verify 命令）
 - `Report / UI`（端口、语言）
 
 交互要求：
@@ -179,6 +181,8 @@
 - `PUT /settings`
 - `GET /runs`（支持 `cursor`、`limit`、`status`、`runMode`）
 - `GET /runs/:runId`
+- `GET /runs/:runId/sessions`
+- `GET /runs/:runId/sessions/:sessionId/replay`
 - `GET /runs/:runId/execution-report`
 - `GET /runs/:runId/events`
 - `GET /runs/:runId/findings`（后续可选；第一阶段先内嵌在 `RunDetail`）

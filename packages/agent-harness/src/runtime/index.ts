@@ -33,8 +33,17 @@ export type {
 export {
   EXPLORATION_AGENT_PROFILE,
   CODE_REPAIR_AGENT_PROFILE,
+  PLAN_AGENT_PROFILE,
+  VERIFICATION_AGENT_PROFILE,
 } from './agent-profile.js';
 export type { AgentRole, AgentProfile } from './agent-profile.js';
 
 export { AgentContextAssembler } from './agent-context-assembler.js';
 export type { AgentAssemblyInput, CodeRepairContext } from './agent-context-assembler.js';
+
+export {
+  buildApproxBudgetSnapshot,
+  estimateApproxTokens,
+  isApproxBudgetExceeded,
+} from './budget.js';
+export type { ApproxBudgetSnapshot } from './budget.js';

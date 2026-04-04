@@ -1,10 +1,14 @@
 export { ExplorationAgent } from '../exploration-agent.js';
+export type { AIProvider as ExplorationAIProvider } from '../exploration-agent.js';
 export type {
-  AIProvider as ExplorationAIProvider,
   PageProbe,
   ExplorationStep,
   ExplorationResult,
-} from '../exploration-agent.js';
+  ExplorationBrainPhase,
+  ExplorationBrainPlan,
+  ExplorationPromptContext,
+  ExplorationPlanPromptContext,
+} from './types.js';
 
 export {
   HARNESS_TEMPLATE_VERSIONS,

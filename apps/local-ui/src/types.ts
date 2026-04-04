@@ -53,6 +53,7 @@ export interface RunDetail {
   testResults: TestResultSummary[];
   findings?: FindingSummaryItem[];
   events: RunEventItem[];
+  sessions?: AgentSession[];
   explorationConfig?: ExplorationConfig;
 }
 
@@ -144,10 +145,58 @@ export interface CommitRecord {
   errorMessage?: string; createdAt: string;
 }
 
+export interface CodeRepairRuntimePlan {
+  summary: string;
+  criticalFiles: string[];
+  checklist: string[];
+  retryStrategy: string[];
+}
+
+export interface CodeRepairRuntimeTaskLedgerItem {
+  id: 'memory-selection' | 'plan' | 'apply' | 'verify' | 'retry-decision';
+  title: string;
+  owner: 'runtime' | 'transport' | 'verification-agent';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'skipped';
+  summary?: string;
+  blocks: string[];
+  blockedBy: string[];
+}
+
+export interface CodeRepairRuntimeAttempt {
+  attemptNumber: number;
+  exitCode: number;
+  summary: string;
+  verifyPassed?: boolean;
+  changedFiles: string[];
+  verificationVerdict?: 'pass' | 'retry' | 'review';
+  verificationSummary?: string;
+  plan: CodeRepairRuntimePlan;
+  taskLedger: CodeRepairRuntimeTaskLedgerItem[];
+}
+
+export interface CodeRepairRuntimeBudget {
+  maxAttempts: number;
+  attemptsUsed: number;
+  compactionsUsed: number;
+  maxCompactions: number;
+  tokenBudget?: number;
+  usedTokens: number;
+  remainingTokens?: number;
+}
+
+export interface CodeRepairRuntimeSummary {
+  finalStatus: 'SUCCEEDED' | 'FAILED';
+  stopReason: 'succeeded' | 'apply_failed' | 'verification_failed' | 'budget_exhausted' | 'token_budget_exhausted' | 'no_progress';
+  summary: string;
+  budget: CodeRepairRuntimeBudget;
+  attempts: CodeRepairRuntimeAttempt[];
+}
+
 export interface CodeTaskDetail {
   summary: CodeTaskSummary;
   scopePaths: string[]; constraints: string[]; verificationCommands: string[];
   changedFiles: string[]; diffPath?: string; patchPath?: string; rawOutputPath?: string; verifyOutputPath?: string;
+  runtimeSummaryPath?: string; runtimeSummary?: CodeRepairRuntimeSummary;
   reviews: ReviewRecord[];
   commit?: CommitRecord;
 }
@@ -220,6 +269,54 @@ export interface PromptSampleEntry {
   promptContextSummary?: string;
   sampledBy: 'first-step' | 'interval' | 'forced';
   metadata?: Record<string, unknown>;
+}
+
+export interface AgentSession {
+  sessionId: string;
+  runId: string;
+  taskId?: string;
+  agentName: string;
+  kind: string;
+  status: string;
+  policyJson?: string;
+  checkpointId?: string;
+  contextRefsJson?: string;
+  tracePath?: string;
+  startedAt: string;
+  endedAt?: string;
+  summary?: string;
+}
+
+export interface AgentSessionStepEntry {
+  entryType: 'step' | 'checkpoint';
+  stepIndex: number;
+  timestamp: string;
+  description?: string;
+  outcome?: string;
+  checkpointId?: string;
+  summary?: string;
+}
+
+export interface AgentToolTraceEntry {
+  entryType: 'tool-call' | 'approval';
+  sessionId: string;
+  stepIndex: number;
+  toolName: string;
+  status: string;
+  inputSummary?: string;
+  resultSummary?: string;
+  durationMs?: number;
+  approvalId?: string;
+  requestedAt?: string;
+  grantedAt?: string;
+}
+
+export interface AgentSessionReplay {
+  session: AgentSession;
+  contextRefs?: Record<string, unknown>;
+  steps: AgentSessionStepEntry[];
+  toolCalls: AgentToolTraceEntry[];
+  promptSamples: PromptSampleEntry[];
 }
 
 export interface ActionResult {

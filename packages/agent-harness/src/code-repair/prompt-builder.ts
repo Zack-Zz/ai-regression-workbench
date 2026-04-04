@@ -1,5 +1,6 @@
 import { HARNESS_TEMPLATE_VERSIONS, renderHarnessTemplate } from '../prompt-loader.js';
 import type { CodeRepairContext } from '../runtime/agent-context-assembler.js';
+import type { CodeRepairPlan } from './plan-agent.js';
 
 export interface CodeRepairPromptBundle {
   phase: 'code-repair-plan' | 'code-repair-apply' | 'code-repair-verify' | 'code-repair-retry';
@@ -18,12 +19,17 @@ export class CodeRepairPromptBuilder {
     };
   }
 
-  buildApplyPrompt(context: CodeRepairContext, planSummary: string): CodeRepairPromptBundle {
+  buildApplyPrompt(context: CodeRepairContext, plan: CodeRepairPlan): CodeRepairPromptBundle {
     return {
       phase: 'code-repair-apply',
       templateVersion: HARNESS_TEMPLATE_VERSIONS.codeRepairApply,
-      prompt: renderHarnessTemplate(HARNESS_TEMPLATE_VERSIONS.codeRepairApply, buildPromptVars(context, { planSummary })),
-      promptContextSummary: `${summarizeContext(context)} plan=${truncate(planSummary, 160)}`,
+      prompt: renderHarnessTemplate(HARNESS_TEMPLATE_VERSIONS.codeRepairApply, buildPromptVars(context, {
+        planSummary: plan.summary,
+        criticalFiles: joinOrFallback(plan.criticalFiles),
+        checklist: joinOrFallback(plan.checklist),
+        retryStrategy: joinOrFallback(plan.retryStrategy),
+      })),
+      promptContextSummary: `${summarizeContext(context)} plan=${truncate(plan.summary, 160)}`,
     };
   }
 
@@ -51,7 +57,7 @@ export class CodeRepairPromptBuilder {
 
 function buildPromptVars(
   context: CodeRepairContext,
-  overrides: Partial<Record<'planSummary' | 'applyOutputSummary' | 'failureSummary' | 'verifyOutput', string>>,
+  overrides: Partial<Record<'planSummary' | 'criticalFiles' | 'checklist' | 'retryStrategy' | 'applyOutputSummary' | 'failureSummary' | 'verifyOutput', string>>,
 ): Record<string, string> {
   return {
     taskId: context.taskId,
@@ -64,9 +70,16 @@ function buildPromptVars(
     verificationCommands: joinOrFallback(context.verificationCommands),
     failureAnalysis: context.analysisSummary ?? context.probableCause ?? 'none',
     relevantMemories: context.relevantMemories.length > 0
-      ? context.relevantMemories.map((item) => `- [${item.kind}] ${item.summary}${item.detail ? ` :: ${item.detail}` : ''}`).join('\n')
+      ? context.relevantMemories.map((item) => {
+        const filePart = item.files && item.files.length > 0 ? ` files=${item.files.join(', ')}` : '';
+        const commandPart = item.commands && item.commands.length > 0 ? ` commands=${item.commands.join(', ')}` : '';
+        return `- [${item.kind}] ${item.summary}${item.detail ? ` :: ${item.detail}` : ''}${filePart}${commandPart}`;
+      }).join('\n')
       : 'none',
     planSummary: overrides.planSummary ?? 'Plan should identify likely files, expected edits, and verification order.',
+    criticalFiles: overrides.criticalFiles ?? 'none',
+    checklist: overrides.checklist ?? 'none',
+    retryStrategy: overrides.retryStrategy ?? 'none',
     applyOutputSummary: overrides.applyOutputSummary ?? 'pending',
     failureSummary: overrides.failureSummary ?? 'none',
     verifyOutput: overrides.verifyOutput || context.verifyOutput || 'none',

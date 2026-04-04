@@ -45,17 +45,23 @@ export class CodeTaskMemory {
     this.recordFailure({ ...input, kind: 'review-feedback' });
   }
 
+  recordRetryDecision(input: Omit<CodeTaskMemoryEntry, 'id' | 'createdAt' | 'kind'> & { detail?: string }): void {
+    this.recordFailure({ ...input, kind: 'retry-decision' });
+  }
+
   selectRelevantMemories(input: {
     runId: string;
     taskId: string;
     testcaseId?: string;
     goal: string;
+    scopePaths?: string[];
+    verificationCommands?: string[];
     limit?: number;
   }): CodeTaskMemoryEntry[] {
     const rows = this.repo.listRelevant(input.runId, input.testcaseId, 24);
-    const goalTerms = normalizeTerms(input.goal);
+    const signals = buildSelectionSignals(input);
     return rows
-      .map((row) => ({ row, score: scoreMemory(row, goalTerms, input.taskId) }))
+      .map((row) => ({ row, score: scoreMemory(row, signals) }))
       .sort((a, b) => b.score - a.score || compareDesc(a.row.created_at, b.row.created_at))
       .slice(0, input.limit ?? 5)
       .map(({ row }) => toEntry(row));
@@ -93,13 +99,40 @@ function normalizeTerms(value: string): string[] {
   return value.toLowerCase().split(/[^a-z0-9_./-]+/i).filter(Boolean);
 }
 
-function scoreMemory(row: CodeTaskMemoryRow, goalTerms: string[], taskId: string): number {
-  let score = row.task_id === taskId ? 12 : 0;
-  if (row.parent_task_id === taskId) score += 8;
+function scoreMemory(
+  row: CodeTaskMemoryRow,
+  signals: {
+    taskId: string;
+    testcaseId?: string;
+    goalTerms: string[];
+    scopePaths: Set<string>;
+    scopeTerms: string[];
+    verificationCommands: Set<string>;
+    verificationTerms: string[];
+  },
+): number {
+  let score = row.task_id === signals.taskId ? 12 : 0;
+  if (row.parent_task_id === signals.taskId) score += 8;
+  if (signals.testcaseId && row.testcase_id === signals.testcaseId) score += 6;
   if (row.kind === 'verify-failure') score += 4;
   if (row.kind === 'review-feedback') score += 3;
+  if (row.kind === 'retry-decision') score += 2;
+
+  const rowFiles = new Set(parseJsonArray(row.files_json));
+  const rowCommands = new Set(parseJsonArray(row.commands_json));
+  score += overlapScore(rowFiles, signals.scopePaths, 4);
+  score += overlapScore(rowCommands, signals.verificationCommands, 3);
+
   const haystack = `${row.summary} ${row.detail ?? ''} ${row.files_json ?? ''} ${row.commands_json ?? ''}`.toLowerCase();
-  for (const term of goalTerms) {
+  for (const term of signals.goalTerms) {
+    if (term.length < 3) continue;
+    if (haystack.includes(term)) score += 1;
+  }
+  for (const term of signals.scopeTerms) {
+    if (term.length < 3) continue;
+    if (haystack.includes(term)) score += 1;
+  }
+  for (const term of signals.verificationTerms) {
     if (term.length < 3) continue;
     if (haystack.includes(term)) score += 1;
   }
@@ -108,4 +141,40 @@ function scoreMemory(row: CodeTaskMemoryRow, goalTerms: string[], taskId: string
 
 function compareDesc(a: string, b: string): number {
   return a < b ? 1 : a > b ? -1 : 0;
+}
+
+function buildSelectionSignals(input: {
+  taskId: string;
+  testcaseId?: string;
+  goal: string;
+  scopePaths?: string[];
+  verificationCommands?: string[];
+}): {
+  taskId: string;
+  testcaseId?: string;
+  goalTerms: string[];
+  scopePaths: Set<string>;
+  scopeTerms: string[];
+  verificationCommands: Set<string>;
+  verificationTerms: string[];
+} {
+  const scopePaths = input.scopePaths ?? [];
+  const verificationCommands = input.verificationCommands ?? [];
+  return {
+    taskId: input.taskId,
+    ...(input.testcaseId ? { testcaseId: input.testcaseId } : {}),
+    goalTerms: normalizeTerms(input.goal),
+    scopePaths: new Set(scopePaths),
+    scopeTerms: normalizeTerms(scopePaths.join(' ')),
+    verificationCommands: new Set(verificationCommands),
+    verificationTerms: normalizeTerms(verificationCommands.join(' ')),
+  };
+}
+
+function overlapScore(left: Set<string>, right: Set<string>, weight: number): number {
+  let score = 0;
+  for (const value of left) {
+    if (right.has(value)) score += weight;
+  }
+  return score;
 }

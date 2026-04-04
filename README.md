@@ -110,7 +110,7 @@ Typical correlation sources:
 ## Documentation
 
 - Detailed design: [docs/design.md](./docs/design.md)
-- Development history: [docs/development-completed.md](./docs/development-completed.md)
+- Agent architecture: [docs/agent-intelligence-refactor-plan.md](./docs/agent-intelligence-refactor-plan.md)
 - Operator guide: [docs/operator-guide.md](./docs/operator-guide.md)
 - Local debug guide: [docs/local-debug-guide.md](./docs/local-debug-guide.md)
 - Release notes: [docs/release-notes.md](./docs/release-notes.md)
@@ -144,4 +144,4 @@ Active design work / next-step spec work:
 - Project & site management — multi-project, multi-domain, per-project code repos and data directories
 - CodeTask automation — auto-trigger on regression failure and exploration findings
 
-See [docs/development-completed.md](./docs/development-completed.md) for the full phase-by-phase delivery summary.
+See [docs/agent-intelligence-refactor-plan.md](./docs/agent-intelligence-refactor-plan.md) and [docs/agent-harness-design.md](./docs/agent-harness-design.md) for the current agent architecture.

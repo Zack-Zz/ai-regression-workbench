@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ExplorationConfig } from '@zarb/shared-types';
 import type { SaveFindingInput } from '@zarb/storage';
-import type { PageProbe } from '../exploration-agent.js';
+import type { PageProbe } from './types.js';
 
 export class ExplorationFindingExtractor {
   extract(runId: string, page: PageProbe, config: ExplorationConfig): SaveFindingInput[] {

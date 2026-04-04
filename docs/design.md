@@ -16,6 +16,7 @@
 - [项目与站点管理设计](./project-site-design.md)
 - [探索模块设计](./exploration-design.md)
 - [CodeTask 自动化设计](./codetask-automation-design.md)
+- [Agent 智能化与运行时分层设计](./agent-intelligence-refactor-plan.md)
 
 模块设计文档：
 
@@ -139,6 +140,7 @@ Playwright 回归执行 / AI 引导探测
 
 - `AI 分析` 可自动执行。
 - `CodeTask 执行` 默认停在待审批状态。
+- `CodeTask` 执行内部现在包含只读 `Plan`、独立 `Verification` 复盘角色，以及有限预算自动 retry；预算耗尽后仍会停下等待人工决策。
 - `Commit` 必须是独立动作，不与 review 自动绑定。
 
 ---
@@ -159,7 +161,7 @@ Playwright 回归执行 / AI 引导探测
 6. AI Engine：失败分析、发现归纳、候选测试/修复任务草稿生成
 7. Agent Harness：Agent 运行时外壳，负责上下文、工具、权限、审批、恢复、回放
 8. Exploration Agent：AI 自主探测站点问题的专用 Agent
-9. Code Agent Adapter：受控代码修改执行层
+9. Code Repair Runtime / Transport / Plan / Verify：受控代码修改执行层
 10. Review Manager：review 与提交控制
 11. Local Web UI：本地可视化界面
 12. Storage：SQLite 与本地文件存储
@@ -217,7 +219,7 @@ flowchart TB
     AH["Agent Harness"]
     OH["ObservedHarness (可选)"]
     EA["Exploration Agent"]
-    CA["Code Agent Adapter (Codex/Kiro)"]
+    CA["Code Repair Runtime / Transport (Codex/Kiro)"]
   end
 
   subgraph ToolData["Tool Workspace 数据层"]
@@ -293,7 +295,7 @@ AI Engine 生成 FailureAnalysis / Finding / Candidate Test / CodeTask Draft
   ->
 用户决定 approve / reject / skip / cancel
   ->
-Agent Harness 托管 Exploration Agent / Code Agent 执行
+Agent Harness 托管 Exploration Agent / Code Repair Runtime 执行
   ->
 用户 review diff / patch / verify 输出
   ->
@@ -317,7 +319,7 @@ sequenceDiagram
   participant AI as AI Engine
   participant Harness as Agent Harness
   participant Explorer as Exploration Agent
-  participant Agent as Code Agent Adapter
+  participant Agent as Code Repair Runtime / Transport
   participant Review as Review Manager
   participant Repo as Repository/Event Store
   participant Target as Target Workspace(Git)
@@ -400,7 +402,7 @@ sequenceDiagram
 +---------------------------------------------------------------+
 | Test Runner | Trace Bridge | Log Bridge | AI Engine           |
 +---------------------------------------------------------------+
-| Agent Harness | Exploration Agent | Code Agent Adapter        |
+| Agent Harness | Exploration Agent | Code Repair Runtime       |
 +---------------------------------------------------------------+
 | Config | Storage | Shared Types | API Contract                |
 +---------------------------------------------------------------+
@@ -415,9 +417,10 @@ sequenceDiagram
 - 诊断层由 `Test Runner + Trace Bridge + Log Bridge` 共同组成。
 - Test Runner 统一承接现有测试执行与 AI 规划后的 Playwright 探针执行，保证执行侧可复现。
 - AI Engine 只负责分析、发现归纳和草稿生成，不直接持有运行时工具权限。
-- Agent Harness 是所有 Agent 的统一运行时外壳，负责上下文拼装、工具注册、权限边界、审批门禁、重试恢复、checkpoint、trace 与 replay。
+- Agent Harness 是所有 Agent 的统一运行时外壳，负责上下文拼装、工具注册、权限边界、审批门禁、重试恢复、checkpoint、trace 与 replay，并开始承接跨 agent 共享的 budget / compact 底盘能力。
+- `RunDetailPage` 现在已经可以查看 harness session replay，直接消费 agent trace 中的 context/steps/tool-calls/prompt-samples。
 - Exploration Agent 负责“看哪里、探哪里、停在哪里”的决策，不直接绕开 Harness 调工具。
-- Code Agent Adapter 负责通过 Harness 执行受控代码修改，并以工作区 diff/patch/verify 为准落盘产物。
+- Code Repair Runtime 负责通过 Harness 执行受控代码修改，并以工作区 diff/patch/verify 为准落盘产物。
 - Event Store 贯穿全链路，是可观测性与恢复能力的基础。
 - 外部观测工具只允许旁路接入，不作为主流程依赖。
 
@@ -444,7 +447,7 @@ sequenceDiagram
 - Orchestrator 拆分为调度服务
 - Runner 拆为独立 worker
 - Trace / Log Bridge 拆为集成服务
-- Code Agent 执行器拆为隔离 worker
+- Code Repair Runtime / Agent worker 拆为隔离 worker
 - SQLite 替换为 PostgreSQL
 - 本地文件替换为对象存储
 - Local UI 升级为平台 Web Console
@@ -538,7 +541,7 @@ ai-regression-workbench/
   详见 [ai-engine-design.md](./ai-engine-design.md)
 
 - `packages/agent-harness`
-  Agent runtime、tool registry、policy、checkpoint、replay、`ExplorationAgent` / `CodeAgent` 装配。
+  Agent runtime、tool registry、policy、checkpoint、replay、`ExplorationAgent` / `CodeRepairAgent` 装配。
   详见 [agent-harness-design.md](./agent-harness-design.md)
 
 - `apps/review-manager`
@@ -574,7 +577,7 @@ ai-regression-workbench/
 - `packages/*` 不依赖 `apps/*`。
 - `apps/orchestrator` 不直接依赖具体 provider 的实现细节，只依赖接口。
 - `apps/local-ui` 不直连 SQLite，统一通过 API 或读取统一 repository 接口。
-- `ExplorationAgent` 与 `CodeAgent` 的运行时归属 `packages/agent-harness`，`apps/ai-engine` 只负责分析与 draft 生成。
+- `ExplorationAgent` 与 `CodeRepairAgent` 的运行时归属 `packages/agent-harness`，`apps/ai-engine` 只负责分析与 draft 生成。
 
 ### 6.4 目标项目目录约束
 
@@ -1142,6 +1145,7 @@ stateDiagram-v2
 - 拼装上下文、注册工具、应用权限策略与审批门禁
 - 负责重试、checkpoint、错误恢复、trace、回放与 eval 入口
 - 记录 tool call、session 状态、预算消耗与人工确认记录
+- 提供跨 agent 共享的近似 token budget / budget snapshot 等长流程运行时工具
 
 说明：
 
@@ -1161,7 +1165,7 @@ stateDiagram-v2
 - Exploration Agent 不直接写业务代码
 - Exploration Agent 不绕过 Harness 直接调用文件系统、shell 或 git
 
-### 10.9 Code Agent Adapter
+### 10.9 Code Repair Runtime / Transport
 
 职责：
 
@@ -1236,6 +1240,9 @@ export interface ExplorationConfig {
   allowedHosts?: string[];
   maxSteps: number;
   maxPages: number;
+  approxTokenBudget?: number;
+  enableAutoCompact?: boolean;
+  maxCompactions?: number;
   focusAreas?: Array<'smoke' | 'navigation' | 'forms' | 'console-errors' | 'network-errors' | 'auth'>;
   persistAsCandidateTests?: boolean;
 }
@@ -1503,7 +1510,7 @@ export interface ExplorationAgent {
 - `ExplorationAgent` 的停止先受硬预算约束，再结合 `stopConditions`
 - `explore()` 是 session 级入口，不表示 Agent 脱离 Harness 独立运行；实际 step 循环、tool 调用、checkpoint 与预算控制仍由 Harness 驱动
 
-### 11.8 CodeAgent
+### 11.8 CodeRepairAgent Runtime
 
 ```ts
 export interface CodeTask {
@@ -1538,12 +1545,17 @@ export interface CodeChangeResult {
   rawOutputPath?: string;
 }
 
-export interface CodeAgent {
+export interface CodeRepairTransport {
   name: string;
   isAvailable(): Promise<boolean>;
-  plan(task: CodeTask): Promise<string>;
-  apply(task: CodeTask): Promise<CodeChangeResult>;
-  verify(task: CodeTask): Promise<CodeChangeResult>;
+  run(input: { workspacePath: string; prompt: string }): Promise<{
+    exitCode: number;
+    rawOutput: string;
+  }>;
+}
+
+export interface CodeRepairRuntime {
+  execute(task: CodeTask): Promise<CodeChangeResult>;
 }
 ```
 
@@ -1552,17 +1564,11 @@ export interface CodeAgent {
 - `rawOutputPath` 可以由 agent runtime 直接产出
 - `changedFiles`、`diffPath`、`patchPath` 必须以 Harness 基于工作区/`git diff` 计算后的结果为准，而不是 agent 自报
 
-### 11.9 CodeTaskPolicy
+### 11.9 CodeTask Review / Verify Policy
 
 ```ts
-export interface CodeTaskPolicy {
-  check(task: CodeTask): {
-    allowed: boolean;
-    reason?: string;
-    normalizedScope?: string[];
-    requiresApproval?: boolean;
-    reviewOnVerifyFailureAllowed?: boolean;
-  };
+export interface CodeTaskReviewPolicy {
+  reviewOnVerifyFailureAllowed: boolean;
 }
 ```
 
@@ -2267,6 +2273,7 @@ CREATE TABLE execution_reports (
       context-summary.json
       steps.jsonl
       tool-calls.jsonl
+      prompt-samples.jsonl
   /code-tasks
     /<taskId>
       input.json
@@ -2274,6 +2281,7 @@ CREATE TABLE execution_reports (
       changes.diff
       changes.patch
       verify.txt
+      runtime-summary.json
   /commits
     /<taskId>.json
   /runs
@@ -2734,7 +2742,7 @@ FailureAnalysis 完成
   ->
 AIEngine 生成 CodeTask Draft
   ->
-CodeTaskPolicy 审核
+任务执行策略审核
   ->
 落为 PENDING_APPROVAL
   ->
@@ -2782,10 +2790,10 @@ approved candidate / rejected
 - `ExplorationAgent`
   负责自主探测问题与提出下一步探针
 
-- `CodeAgent`
-  负责受控改代码与 verify
+- `CodeRepairAgent`
+  负责受控改代码上下文、memory、prompt 组装与 transport 执行
 
-### 18.5 Code Agent 接入策略
+### 18.5 Code Repair 接入策略
 
 第一阶段优先接入：
 
@@ -2809,7 +2817,7 @@ approved candidate / rejected
 - [OpenAI Codex CLI 官方文档](https://developers.openai.com/codex/cli)
 - [Kiro CLI 官方文档](https://kiro.dev/docs/cli/)
 
-Code Agent 结果要求：
+Code Repair 结果要求：
 
 - 不依赖 agent 自报的 changed files 作为唯一事实来源
 - 以工作区 diff / patch / verify 结果为准
@@ -2851,7 +2859,7 @@ Code Agent 结果要求：
 ### 18.7 verify 失败处理
 
 - 默认 `VERIFYING -> FAILED`
-- 若 `CodeTaskPolicy.reviewOnVerifyFailureAllowed=true` 且 diff/patch 已落盘，允许人工进入 `override review`
+- 若 review 策略允许且 diff/patch 已落盘，允许人工进入 `override review`
 - `override review` 必须明确展示：
   - verify 失败命令
   - 失败输出
@@ -3067,7 +3075,7 @@ zarb ui
 - AI Engine
 - Agent Harness
 - Exploration Agent
-- Code Agent Adapter
+- Code Repair Runtime / Transport
 
 职责：
 
@@ -3099,7 +3107,7 @@ zarb ui
 15. Agent Harness 初版（tool registry / policy / checkpoint / replay）
 16. bounded exploration 初版
 17. CodeTask 模型与表结构
-18. CodeTaskPolicy 初版
+18. CodeTask review/verify policy 初版
 19. CodexCliAgent / KiroCliAgent 基础接入
 20. code task approve / execute / verify 流程
 21. review 与 commit 控制动作
@@ -3151,7 +3159,7 @@ zarb ui
 交付物：
 
 - CodeTask 模型
-- CodeTaskPolicy
+- CodeTask review/verify policy
 - Candidate test 沉淀规则
 - CodexCliAgent / KiroCliAgent
 - diff / patch / verify 落盘
@@ -3212,7 +3220,7 @@ zarb ui
 1. 实现 AIEngine 占位版
 2. 实现 Agent Harness 骨架
 3. 定义 CodeTask draft 流程
-4. 定义 CodeTaskPolicy
+4. 定义 CodeTask review/verify policy
 5. 接入 ExplorationAgent
 6. 接入 CodexCliAgent
 7. 接入 KiroCliAgent
@@ -3396,7 +3404,7 @@ zarb ui
 6. 落地 artifacts 与 diagnostics 存储规范
 7. 添加可配置 correlation keys、Trace Bridge、Log Bridge
 8. 添加 AIEngine 接口与本地占位实现
-9. 定义 CodeTask / CodeTaskPolicy / CodeAgent
+9. 定义 CodeTask / review policy / CodeRepair runtime
 10. 接入 CodexCliAgent 与 KiroCliAgent
 11. 开发 Local UI 基础页面
 12. 补 review 与 commit 控制面

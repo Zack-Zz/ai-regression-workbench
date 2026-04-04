@@ -52,15 +52,15 @@
 | FlowStepRecord | Test Runner / Orchestrator | `flow_step_records`（`run_id`,`testcase_id`,`flow_id`,`step_name`,`api_call_count`） | `diagnostics/<runId>/<testcaseId>/flow-steps.json` | 每个流程步骤完成后 | Execution profile / execution report |
 | TestcaseExecutionProfile | DiagnosticsService / ExecutionReportBuilder | 可由 `api_call_records`、`ui_action_records`、`flow_step_records` 聚合，不强制单独建表 | `diagnostics/<runId>/<testcaseId>/execution-profile.json` | testcase 执行完成后预计算 | `GET /runs/:runId/testcases/:testcaseId/execution-profile` |
 | FailureAnalysis | AI Engine | `failure_analysis`（`run_id`,`testcase_id`,`category`,`summary`,`suggestions_json`） | `analysis/<runId>/<testcaseId>.json`（可选完整版） | AI 分析完成后 | Failure report / code-task draft |
-| CodeTask | Orchestrator / CodeTaskService | `code_tasks`（`task_id`,`run_id`,`testcase_id`,`status`,`workspace_path`,`diff_path`,`patch_path`） | `code-tasks/<taskId>/input.json`、`raw-output.txt`、`changes.diff`、`changes.patch`、`verify.txt` | 任务创建、执行、verify 更新 | `GET /code-tasks/:taskId` |
+| CodeTask | Orchestrator / CodeTaskService | `code_tasks`（`task_id`,`run_id`,`testcase_id`,`status`,`workspace_path`,`diff_path`,`patch_path`） | `code-tasks/<taskId>/input.json`、`raw-output.txt`、`changes.diff`、`changes.patch`、`verify.txt`、`runtime-summary.json` | 任务创建、执行、verify 更新 | `GET /code-tasks/:taskId` |
 | Review | ReviewService | `reviews`（`task_id`,`decision`,`comment`,`diff_hash`,`code_task_version`） | 可选附加到 `code-tasks/<taskId>/` | review 提交时 | `GET /code-tasks/:taskId/review` |
 | CommitRecord | CommitService | `commit_records`（`task_id`,`branch_name`,`commit_sha`,`commit_message`,`status`） | `commits/<taskId>.json` | commit 创建或完成后 | `GET /code-tasks/:taskId/commit` |
 | RunEvent | Orchestrator / Services | `run_events`（`run_id`,`entity_type`,`entity_id`,`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 所有关键动作和状态迁移 | `GET /runs/:runId/events` |
 | SystemEvent | SettingsService / BootstrapService / Harness | `system_events`（`event_type`,`payload_schema_version`,`payload_json`） | 无（仅 DB） | 设置保存、生效、初始化、迁移、harness 全局事件 | 第一阶段不提供 API；后续可增补 `GET /system/events` |
 | SettingsSnapshot | SettingsService / ConfigManager | `system_events`（`event_type=SETTINGS_UPDATED/SETTINGS_APPLIED`） | `<tool-workspace>/config.local.yaml` | 设置保存与生效时 | `GET /settings`、`PUT /settings` |
 | ExecutionReport | Orchestrator / RunService | `execution_reports`（`run_id`,`status`,`report_path`,`totals_json`,`generated_at`） | `runs/<runId>-execution-report.json` | Run 进入 `COMPLETED/FAILED/CANCELLED` | `GET /runs/:runId/execution-report` |
-| Generated Tests | AI Engine / CodeAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时，初始视为 `draft` candidate | Test assets 管理 / 后续执行选择 |
-| Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`context_refs_json`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl` | harness session 创建、推进、结束时 | 后续 harness detail / replay |
+| Generated Tests | AI Engine / CodeRepairAgent | 可选索引到 `code_tasks` 或后续 `generated_tests` 表 | `generated-tests/<taskId>/candidate.spec.ts` | 生成候选测试时，初始视为 `draft` candidate | Test assets 管理 / 后续执行选择 |
+| Harness Session | AgentHarness | `agent_sessions`（`session_id`,`run_id`,`task_id`,`kind`,`status`,`context_refs_json`,`trace_path`） | `agent-traces/<sessionId>/` 下 `context-summary.json`、`steps.jsonl`、`tool-calls.jsonl`、`prompt-samples.jsonl` | harness session 创建、推进、结束时 | `GET /runs/:runId/sessions`、`GET /runs/:runId/sessions/:sessionId/replay` |
 
 ## 5. 写入顺序与一致性规则
 

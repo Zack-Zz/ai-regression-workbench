@@ -115,6 +115,11 @@ export function codeTaskVerifyPath(taskId: string): string {
   return join('code-tasks', taskId, 'verify.txt');
 }
 
+export function codeTaskRuntimeSummaryPath(taskId: string): string {
+  assertSafeSegment(taskId, 'taskId');
+  return join('code-tasks', taskId, 'runtime-summary.json');
+}
+
 export function commitFilePath(taskId: string): string {
   assertSafeSegment(taskId, 'taskId');
   return join('commits', `${taskId}.json`);

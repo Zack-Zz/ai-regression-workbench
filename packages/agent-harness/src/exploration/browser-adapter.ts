@@ -1,6 +1,6 @@
 import type { ToolRegistry } from '../runtime/tool-registry.js';
 import type { DomSnapshot, PlaywrightToolProvider, PlaywrightToolProviderOptions, VerificationChallenge } from '../playwright-tool-provider.js';
-import type { PageProbe } from '../exploration-agent.js';
+import type { PageProbe } from './types.js';
 import type { SiteCredentialRow } from '@zarb/storage';
 
 export interface ExplorationBrowserAdapter {
